@@ -1,0 +1,457 @@
+<?php
+
+namespace App\Services;
+
+use App\Models\Setting;
+use Illuminate\Support\Facades\Log;
+
+class OpenAiService
+{
+    /**
+     * Plan copy-writer system prompt — verbatim from plan-generation-prompt.md §1.
+     * Used when no editable override is stored in settings.
+     */
+    public const PLAN_SYSTEM_PROMPT = <<<'PROMPT'
+You are a microbiome plan writer for Biome4Pets, a canine and feline gut microbiome
+testing service. Your job is to take a fixed plan scaffold and a pet's test findings,
+and write the pet-specific copy that personalises the plan for that animal's owner.
+
+You write ONLY the following fields:
+  - intro                        (the "where to focus first" paragraph)
+  - each product's how_it_helps  (why this product suits THIS pet)
+  - each prose step's body and tip
+
+Everything else in the scaffold (plan_name, step_title, stage_label, every product's
+name, price, dose, duration, quantity, product_url, inclusion, and the subscription
+block) is FIXED. Copy it through unchanged. Never add, remove, rename, reprice or
+re-order products or steps. Never invent a product that is not in the scaffold.
+
+Rules for the copy you write:
+  - British English spelling (e.g. "fibre", "colonise", "faecal").
+  - Warm, clear, plain language for a pet owner. Not clinical, not salesy.
+  - Use the pet's name naturally; refer to the owner as "you".
+  - Ground how_it_helps in the pet's actual findings passed in input. Reference the
+    specific elevated/low taxa or scores this product addresses. If a product's role
+    doesn't map to any finding, describe its general benefit for this pet instead.
+  - Do NOT invent findings. Only use what is in the input.
+  - If the input includes owner_reported_health_notes, treat them as owner-reported
+    context only, NOT a clinical record. Use them to make the copy relevant and to set
+    tone; never diagnose from them, never present them as fact, and never promise to
+    treat or cure a described symptom.
+  - 1 to 3 sentences per how_it_helps. 2 to 4 sentences per prose body.
+  - This is gut-health support, NOT a diagnosis. Never state or imply a diagnosis,
+    cure, or veterinary treatment. No guarantees of outcome.
+  - tip is optional, include only when there is a genuinely useful, evidence-based
+    note (e.g. diet steps). Otherwise return null.
+
+Style: Write in warm, natural, plain British English as if a knowledgeable person were
+explaining to a pet owner. Vary sentence length and structure. Avoid AI-cliché phrasing
+(e.g. 'it's important to note', 'plays a crucial role', 'in conclusion', 'delve',
+'tapestry', 'navigating'). Do NOT use em dashes (—) or en dashes (–) anywhere; use
+commas, full stops, or the word 'to' for ranges. Keep it concrete and specific to this
+pet's findings, not generic. Do not overuse lists.
+
+Output: a single valid JSON object matching the scaffold's shape, with the copy fields
+filled. No markdown, no code fences, no commentary before or after the JSON.
+PROMPT;
+
+    public function generateReportInterpretations(array $phylumTotals, float $diversityScore, array $petContext = []): array
+    {
+        $emptyResponse = [
+            'summary' => '',
+            'goal' => '',
+            'bacteroidetes_interpretation' => '',
+            'firmicutes_interpretation' => '',
+            'fusobacteria_interpretation' => '',
+            'proteobacteria_interpretation' => '',
+            'diversity_interpretation' => '',
+            'vet_summary' => '',
+            'recommended_actions' => '',
+            'score_gut_wall' => '',
+            'score_skin_allergy' => '',
+            'score_behaviour_mood' => '',
+            'score_gut_barrier' => '',
+            'score_gas_digestive' => '',
+            'score_stress_resilience' => '',
+        ];
+
+        // Prefer the encrypted setting; fall back to config/env so nothing
+        // breaks if the DB value isn't set.
+        $apiKey = Setting::getDecrypted(Setting::OPENAI_API_KEY);
+        if (empty($apiKey)) {
+            $apiKey = config('services.openai.api_key', env('OPENAI_API_KEY'));
+        }
+
+        $model = config('services.openai.model', env('OPENAI_MODEL', 'gpt-4'));
+
+        if (empty($apiKey)) {
+            Log::error('OpenAI API key is not configured.');
+            return $emptyResponse;
+        }
+
+        $prompt = $this->buildInterpretationsPrompt($phylumTotals, $diversityScore, $petContext);
+
+        $payload = json_encode([
+            'model' => $model,
+            'messages' => [
+                ['role' => 'system', 'content' => 'You are a helpful veterinary microbiome specialist.'],
+                ['role' => 'user', 'content' => $prompt],
+            ],
+            'temperature' => 0.7,
+        ]);
+
+        $context = stream_context_create([
+            'http' => [
+                'method' => 'POST',
+                'header' => implode("\r\n", [
+                    'Content-Type: application/json',
+                    'Authorization: Bearer ' . $apiKey,
+                ]),
+                'content' => $payload,
+                'timeout' => 60,
+                'ignore_errors' => true,
+            ],
+        ]);
+
+        try {
+            $response = file_get_contents('https://api.openai.com/v1/chat/completions', false, $context);
+
+            if ($response === false) {
+                Log::error('OpenAI API request failed.');
+                return $emptyResponse;
+            }
+
+            $decoded = json_decode($response, true);
+
+            Log::info('OpenAI raw API response', [
+                'http_status' => $http_response_header[0] ?? 'unknown',
+                'has_choices' => isset($decoded['choices']),
+                'error' => $decoded['error'] ?? null,
+            ]);
+
+            if (isset($decoded['error'])) {
+                Log::error('OpenAI API returned error.', ['error' => $decoded['error']]);
+                return $emptyResponse;
+            }
+
+            if (!isset($decoded['choices'][0]['message']['content'])) {
+                Log::error('Unexpected OpenAI response structure.', ['response' => $response]);
+                return $emptyResponse;
+            }
+
+            $content = $decoded['choices'][0]['message']['content'];
+
+            // Strip markdown code fences if present
+            $content = trim($content);
+            if (str_starts_with($content, '```')) {
+                $content = preg_replace('/^```(?:json)?\s*/', '', $content);
+                $content = preg_replace('/\s*```$/', '', $content);
+            }
+
+            Log::info('OpenAI parsed content', ['content' => $content]);
+
+            $parsed = json_decode($content, true);
+
+            if (!is_array($parsed)) {
+                Log::error('Failed to parse OpenAI response as JSON.', ['content' => $content]);
+                return $emptyResponse;
+            }
+
+            return [
+                'summary' => $parsed['summary'] ?? '',
+                'goal' => $parsed['goal'] ?? '',
+                'bacteroidetes_interpretation' => $parsed['bacteroidetes_interpretation'] ?? '',
+                'firmicutes_interpretation' => $parsed['firmicutes_interpretation'] ?? '',
+                'fusobacteria_interpretation' => $parsed['fusobacteria_interpretation'] ?? '',
+                'proteobacteria_interpretation' => $parsed['proteobacteria_interpretation'] ?? '',
+                'diversity_interpretation' => $parsed['diversity_interpretation'] ?? '',
+                'vet_summary' => $parsed['vet_summary'] ?? '',
+                'recommended_actions' => $parsed['recommended_actions'] ?? '',
+                'score_gut_wall' => $parsed['score_gut_wall'] ?? '',
+                'score_skin_allergy' => $parsed['score_skin_allergy'] ?? '',
+                'score_behaviour_mood' => $parsed['score_behaviour_mood'] ?? '',
+                'score_gut_barrier' => $parsed['score_gut_barrier'] ?? '',
+                'score_gas_digestive' => $parsed['score_gas_digestive'] ?? '',
+                'score_stress_resilience' => $parsed['score_stress_resilience'] ?? '',
+            ];
+        } catch (\Throwable $e) {
+            Log::error('OpenAI API error: ' . $e->getMessage());
+            return $emptyResponse;
+        }
+    }
+
+    /**
+     * Build the single interpretations prompt (one prompt, one API call).
+     *
+     * Admin steering is layered ADDITIVELY and APPEND-only — it never removes or
+     * rewrites the base field instructions or the safety rules (British English,
+     * not-a-diagnosis, the human-tone / no-em-dash block, JSON-only output):
+     *   base field instruction → its per-section group directive (if any)
+     *   → ... → the global directive at the very end (if any).
+     * Every directive is optional; all blank ⇒ byte-for-byte the same prompt as
+     * before this feature existed.
+     *
+     * Public so the prompt can be asserted in tests without an HTTP call.
+     */
+    public function buildInterpretationsPrompt(array $phylumTotals, float $diversityScore, array $petContext = []): string
+    {
+        $phylumList = '';
+        foreach ($phylumTotals as $name => $pct) {
+            $phylumList .= "- {$name}: {$pct}%\n";
+        }
+
+        // Build a pet-context block from whatever fields are present. Any
+        // missing/blank field is omitted gracefully so the prompt stays clean.
+        $petName = trim((string) ($petContext['name'] ?? ''));
+        $petParts = [];
+        if (filled($petName)) {
+            $petParts[] = "Name: {$petName}";
+        }
+        if (filled($petContext['breed'] ?? null)) {
+            $petParts[] = "Breed: {$petContext['breed']}";
+        }
+        if (filled($petContext['sex'] ?? null)) {
+            $petParts[] = "Sex: {$petContext['sex']}";
+        }
+        if (filled($petContext['diet'] ?? null)) {
+            $petParts[] = "Diet: {$petContext['diet']}";
+        }
+
+        if (!empty($petParts)) {
+            $petBlock = "Pet details: " . implode('. ', $petParts) . ".\n";
+        } else {
+            $petBlock = "Pet details: not provided.\n";
+        }
+
+        // Owner-reported health notes (Phase 2). Additional grounding context, not
+        // a clinical record: the AI may use it to make the copy relevant and set
+        // tone, but must NOT diagnose from it or treat it as clinical fact. Blank
+        // notes ⇒ no line at all, so the prompt is unchanged for pets without notes.
+        $healthNotes = trim((string) ($petContext['health_notes'] ?? ''));
+        $notesBlock = filled($healthNotes)
+            ? "Owner-reported health notes for this pet (owner-reported context only, not a clinical record — use to make the copy relevant and to inform tone; do NOT diagnose from these or present them as clinical fact): {$healthNotes}\n"
+            : '';
+
+        // How the model should refer to the pet throughout the copy.
+        $nameInstruction = filled($petName)
+            ? "Refer to the pet by name (\"{$petName}\") where natural."
+            : "No name was provided, so refer to the pet as \"your pet\".";
+
+        // Per-section directive suffixes. Each is blank (empty string) unless an
+        // admin has set the matching Setting, in which case it becomes a short
+        // " Admin guidance for this field: ..." clause appended INLINE to the
+        // relevant bullet(s). Blank suffix ⇒ no change to that line at all.
+        $summarySuffix = $this->directiveSuffix(Setting::OPENAI_DIRECTIVE_SUMMARY);
+        $vetSummarySuffix = $this->directiveSuffix(Setting::OPENAI_DIRECTIVE_VET_SUMMARY);
+        $phylaSuffix = $this->directiveSuffix(Setting::OPENAI_DIRECTIVE_PHYLA);
+        $scoresSuffix = $this->directiveSuffix(Setting::OPENAI_DIRECTIVE_SCORES);
+
+        $prompt = <<<PROMPT
+You are a veterinary microbiome expert writing for pet owners. Given the following gut microbiome results, provide plain-English interpretations in a friendly, accessible tone.
+
+{$petBlock}{$notesBlock}{$nameInstruction}
+
+Phylum percentages:
+{$phylumList}
+Shannon Diversity Index: {$diversityScore}
+
+Respond in valid JSON with exactly these keys:
+- "summary": A 4-5 sentence overall summary of the pet's microbiome health, written warmly for the owner, referencing the pet by name when provided and touching on the overall balance and what it means for this pet.{$summarySuffix}
+- "goal": A warm, encouraging goal statement of 2 to 3 sentences (no em dashes) that sets out one clear, concrete goal for this pet based on the diagnostics, such as bringing an out-of-range phylum back toward its healthy range and/or improving diversity over a sensible timeframe like "the coming weeks" or "8 to 12 weeks". Give a little context on what we are aiming for and why it matters for this pet, keeping it focused and not padded. It MUST reference the pet by name when a name is provided.
+- "bacteroidetes_interpretation": A 4-5 sentence plain-English explanation of the Bacteroidetes level for this pet: state the level, whether it's within/above/below the healthy range, what Bacteroidetes does, what this particular level means for the pet by name, and a brief reassuring or forward-looking note.{$phylaSuffix}
+- "firmicutes_interpretation": A 4-5 sentence plain-English explanation of the Firmicutes level for this pet: state the level, whether it's within/above/below the healthy range, what Firmicutes does, what this particular level means for the pet by name, and a brief reassuring or forward-looking note.{$phylaSuffix}
+- "fusobacteria_interpretation": A 4-5 sentence plain-English explanation of the Fusobacteria level for this pet: state the level, whether it's within/above/below the healthy range, what Fusobacteria does, what this particular level means for the pet by name, and a brief reassuring or forward-looking note.{$phylaSuffix}
+- "proteobacteria_interpretation": A 4-5 sentence plain-English explanation of the Proteobacteria level for this pet: state the level, whether it's within/above/below the healthy range, what Proteobacteria does, what this particular level means for the pet by name, and a brief reassuring or forward-looking note.{$phylaSuffix}
+- "diversity_interpretation": A 4-5 sentence plain-English explanation of the Shannon diversity score for this pet: state the score, what diversity means for gut health, whether this score is low/moderate/healthy, what it means for the pet by name, and a forward-looking note.{$phylaSuffix}
+- "vet_summary": A detailed 4-5 sentence personal summary about this pet's specific microbiome findings. Reference the dominant phyla, the key imbalance(s) versus healthy ranges, what this means specifically for THIS pet (addressing the pet by name when a name is provided), and end with a forward-looking note. Keep it warm and readable for a pet owner — avoid clinical jargon. It MUST address the pet by name when a name is provided.{$vetSummarySuffix}
+- "recommended_actions": 4 to 5 distinct, practical recommendations grounded in this pet's specific findings, separated by newlines. Each recommendation must be a full sentence stating the action together with a brief reason explaining why it helps this pet (the action plus why it helps). Make them substantial and genuinely useful, not padded or repetitive, and avoid em dashes.
+For the following 6 health insight scores, use exactly one of these values: "Very High", "High", "Medium", or "Low".
+Scale meaning:
+- "Very High" = significant concern, strong microbial evidence of risk
+- "High" = notable concern, clear microbial patterns present
+- "Medium" = moderate, some indicators present
+- "Low" = minimal concern, microbiome patterns generally healthy in this area
+
+- "score_gut_wall": Assess gut wall integrity based on the microbiome composition.
+- "score_skin_allergy": Assess skin and allergy risk based on the microbiome composition.
+- "score_behaviour_mood": Assess behaviour and mood impact based on the microbiome composition.
+- "score_gut_barrier": Assess gut barrier and metabolic function based on the microbiome composition.
+- "score_gas_digestive": Assess gas and digestive comfort based on the microbiome composition.
+- "score_stress_resilience": Assess environmental stress resilience based on the microbiome composition.{$scoresSuffix}
+
+Style: Write in warm, natural, plain British English as if a knowledgeable person were explaining to a pet owner. Vary sentence length and structure. Avoid AI-cliché phrasing (e.g. 'it's important to note', 'plays a crucial role', 'in conclusion', 'delve', 'tapestry', 'navigating'). Do NOT use em dashes (—) or en dashes (–) anywhere; use commas, full stops, or the word 'to' for ranges. Keep it concrete and specific to this pet's findings, not generic. Do not overuse lists.
+
+Return ONLY the JSON object, no markdown or extra text.
+PROMPT;
+
+        // Append admin-configured GLOBAL directives (if any) as additional
+        // instructions, without removing or rewriting the base prompt above.
+        // This stays at the very end, exactly as it did before per-section
+        // directives existed.
+        $directives = Setting::get(Setting::OPENAI_PROMPT_DIRECTIVES);
+        if (filled($directives)) {
+            $prompt .= "\n\nAdditional instructions from the administrator (follow these as well, while still returning only the JSON object):\n{$directives}";
+        }
+
+        return $prompt;
+    }
+
+    /**
+     * Read a per-section directive setting and render it as an inline suffix to
+     * append to a prompt bullet. Returns '' when the setting is blank, so the
+     * bullet is left byte-for-byte unchanged.
+     */
+    protected function directiveSuffix(string $settingKey): string
+    {
+        $value = Setting::get($settingKey);
+
+        if (blank($value)) {
+            return '';
+        }
+
+        return ' Admin guidance for this field: ' . trim((string) $value);
+    }
+
+    /**
+     * Generate the pet-specific copy for a plan. Takes the pet findings and the
+     * fixed plan scaffold; returns the same scaffold shape with the model's copy
+     * fields filled. The CALLER validates factual fields against the scaffold —
+     * this method only performs the request/parse. On ANY failure it returns the
+     * scaffold with empty copy fields and never throws.
+     *
+     * Reuses the same auth/HTTP/error-handling style as
+     * generateReportInterpretations().
+     */
+    public function generatePlanCopy(array $petFindings, array $planScaffold): array
+    {
+        $apiKey = Setting::getDecrypted(Setting::OPENAI_API_KEY);
+        if (empty($apiKey)) {
+            $apiKey = config('services.openai.api_key', env('OPENAI_API_KEY'));
+        }
+
+        if (empty($apiKey)) {
+            Log::error('Plan copy generation: OpenAI API key is not configured.');
+            return $this->emptyPlanCopy($planScaffold);
+        }
+
+        // Model/temperature: dedicated settings first, then the shared default.
+        $model = Setting::get(Setting::PLAN_GENERATION_MODEL)
+            ?: config('services.openai.model', env('OPENAI_MODEL', 'gpt-4o'));
+
+        $temperature = Setting::get(Setting::PLAN_GENERATION_TEMPERATURE);
+        $temperature = is_numeric($temperature) ? (float) $temperature : 0.4;
+
+        // System prompt: editable override if present, else the §1 default.
+        $system = Setting::get(Setting::PLAN_GENERATION_SYSTEM_PROMPT);
+        if (blank($system)) {
+            $system = self::PLAN_SYSTEM_PROMPT;
+        }
+
+        $jsonFlags = JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE;
+        $userMessage = "PET FINDINGS:\n"
+            . json_encode($petFindings, $jsonFlags)
+            . "\n\nPLAN SCAFFOLD (fill the copy fields, return the whole object as JSON):\n"
+            . json_encode($planScaffold, $jsonFlags);
+
+        $payload = json_encode([
+            'model' => $model,
+            'messages' => [
+                ['role' => 'system', 'content' => $system],
+                ['role' => 'user', 'content' => $userMessage],
+            ],
+            'temperature' => $temperature,
+        ]);
+
+        try {
+            $response = $this->requestChatCompletion($apiKey, $payload);
+
+            if ($response === false) {
+                Log::error('Plan copy generation: OpenAI API request failed.');
+                return $this->emptyPlanCopy($planScaffold);
+            }
+
+            $decoded = json_decode($response, true);
+
+            Log::info('Plan copy generation: raw API response', [
+                'has_choices' => isset($decoded['choices']),
+                'error' => $decoded['error'] ?? null,
+            ]);
+
+            if (isset($decoded['error'])) {
+                Log::error('Plan copy generation: OpenAI API returned error.', ['error' => $decoded['error']]);
+                return $this->emptyPlanCopy($planScaffold);
+            }
+
+            if (!isset($decoded['choices'][0]['message']['content'])) {
+                Log::error('Plan copy generation: unexpected OpenAI response structure.', ['response' => $response]);
+                return $this->emptyPlanCopy($planScaffold);
+            }
+
+            $content = trim($decoded['choices'][0]['message']['content']);
+
+            // Strip markdown code fences if present.
+            if (str_starts_with($content, '```')) {
+                $content = preg_replace('/^```(?:json)?\s*/', '', $content);
+                $content = preg_replace('/\s*```$/', '', $content);
+            }
+
+            $parsed = json_decode($content, true);
+
+            if (!is_array($parsed)) {
+                Log::error('Plan copy generation: failed to parse response as JSON.', ['content' => $content]);
+                return $this->emptyPlanCopy($planScaffold);
+            }
+
+            return $parsed;
+        } catch (\Throwable $e) {
+            Log::error('Plan copy generation error: ' . $e->getMessage());
+            return $this->emptyPlanCopy($planScaffold);
+        }
+    }
+
+    /**
+     * Perform the chat-completion HTTP request and return the raw response body
+     * (or false on transport failure). Isolated so tests can stub the HTTP layer
+     * by overriding this single method, without changing the plumbing style.
+     */
+    protected function requestChatCompletion(string $apiKey, string $payload): string|false
+    {
+        $context = stream_context_create([
+            'http' => [
+                'method' => 'POST',
+                'header' => implode("\r\n", [
+                    'Content-Type: application/json',
+                    'Authorization: Bearer ' . $apiKey,
+                ]),
+                'content' => $payload,
+                'timeout' => 60,
+                'ignore_errors' => true,
+            ],
+        ]);
+
+        return file_get_contents('https://api.openai.com/v1/chat/completions', false, $context);
+    }
+
+    /**
+     * Return the scaffold with all copy fields blanked — the safe "nothing
+     * generated" result the caller falls back to (keeps placeholders + warns).
+     */
+    protected function emptyPlanCopy(array $scaffold): array
+    {
+        $scaffold['intro'] = '';
+
+        foreach ($scaffold['steps'] ?? [] as $i => $step) {
+            if (($step['type'] ?? 'product') === 'prose') {
+                $scaffold['steps'][$i]['body'] = '';
+                $scaffold['steps'][$i]['tip'] = null;
+                continue;
+            }
+
+            foreach ($step['products'] ?? [] as $j => $product) {
+                $scaffold['steps'][$i]['products'][$j]['how_it_helps'] = '';
+            }
+        }
+
+        return $scaffold;
+    }
+}

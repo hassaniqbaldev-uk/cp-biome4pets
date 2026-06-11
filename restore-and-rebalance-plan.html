@@ -1,0 +1,374 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Restore &amp; Rebalance Plan — Zenia | Biome4Pets</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Poppins:wght@500;600;700&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --navy:#0e2a52;
+    --navy-2:#16447e;
+    --teal:#2e9d9d;
+    --teal-dark:#247d7d;
+    --ink:#1f2a37;
+    --muted:#5b6b7b;
+    --line:#e3e9ef;
+    --surface:#f4f7fa;
+    --radius:14px;
+    --shadow:0 1px 2px rgba(14,42,82,.06), 0 8px 24px rgba(14,42,82,.06);
+  }
+  *{box-sizing:border-box;}
+  body{
+    margin:0;
+    font-family:'Inter',system-ui,-apple-system,sans-serif;
+    color:var(--ink);
+    background:#eef2f6;
+    line-height:1.6;
+    -webkit-font-smoothing:antialiased;
+  }
+  .page{max-width:860px;margin:0 auto;background:#fff;}
+  h1,h2,h3,.brandname{font-family:'Poppins',sans-serif;}
+
+  /* Hero */
+  .hero{
+    background:linear-gradient(135deg,var(--navy) 0%,var(--navy-2) 100%);
+    color:#fff;padding:38px 40px 34px;
+  }
+  .hero-top{display:flex;align-items:center;justify-content:space-between;gap:16px;margin-bottom:30px;}
+  .hero-top img{height:42px;}
+  .badge{
+    background:rgba(255,255,255,.14);border:1px solid rgba(255,255,255,.25);
+    color:#fff;font-size:13px;font-weight:600;letter-spacing:.02em;
+    padding:7px 14px;border-radius:999px;white-space:nowrap;
+  }
+  .hero h1{font-size:34px;line-height:1.15;margin:0 0 10px;font-weight:700;letter-spacing:-.01em;}
+  .hero .lead{font-size:16px;color:rgba(255,255,255,.82);margin:0;max-width:60ch;}
+  .hero .meta{margin-top:18px;font-size:14px;color:rgba(255,255,255,.7);}
+  .hero .meta b{color:#fff;font-weight:600;}
+
+  /* Plan at a glance */
+  .glance{padding:26px 40px;border-bottom:1px solid var(--line);}
+  .glance h3{font-size:13px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);margin:0 0 16px;font-weight:600;}
+  .phases{display:flex;align-items:stretch;gap:8px;flex-wrap:wrap;}
+  .phase{flex:1;min-width:120px;border-radius:10px;padding:12px 14px;border:1px solid var(--line);background:var(--surface);}
+  .phase .ph-tag{font-size:11px;font-weight:600;letter-spacing:.04em;text-transform:uppercase;color:var(--muted);}
+  .phase .ph-name{font-family:'Poppins',sans-serif;font-weight:600;font-size:15px;margin-top:3px;color:var(--navy);}
+  .phase .ph-when{font-size:12px;color:var(--muted);margin-top:2px;}
+  .phase.amr{border-top:3px solid #16447e;}
+  .phase.pre{border-top:3px solid var(--teal);}
+  .phase.maint{border-top:3px solid #4a9e3b;}
+  .phase.test{border-top:3px solid #c98a1f;background:#fdf8ef;}
+
+  /* Subscribe panel */
+  .subscribe{padding:28px 40px 4px;}
+  .sub-card{
+    display:flex;gap:28px;border:1px solid #cfe3df;border-radius:18px;overflow:hidden;
+    background:#f2faf8;box-shadow:var(--shadow);
+  }
+  .sub-left{flex:1;padding:26px 28px;}
+  .sub-eyebrow{display:inline-block;background:var(--teal);color:#fff;font-size:11px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;padding:4px 11px;border-radius:999px;}
+  .sub-left h2{font-size:23px;margin:13px 0 8px;color:var(--navy);font-weight:600;line-height:1.2;}
+  .sub-left>p{font-size:15px;color:#33526f;margin:0 0 16px;}
+  .sub-list{list-style:none;margin:0;padding:0;}
+  .sub-list li{font-size:14.5px;color:var(--ink);padding:5px 0 5px 26px;position:relative;}
+  .sub-list li::before{content:"";position:absolute;left:0;top:11px;width:13px;height:13px;border-radius:50%;background:var(--teal);}
+  .sub-list li b{color:var(--navy);font-weight:600;}
+  .sub-note{font-size:13px;color:var(--muted);margin:14px 0 0;}
+  .sub-right{
+    flex:0 0 230px;background:var(--navy);color:#fff;padding:28px 26px;
+    display:flex;flex-direction:column;justify-content:center;align-items:flex-start;
+  }
+  .price{display:flex;align-items:baseline;gap:6px;}
+  .price .amt{font-family:'Poppins',sans-serif;font-size:40px;font-weight:700;line-height:1;}
+  .price .per{font-size:15px;color:rgba(255,255,255,.7);}
+  .price-sub{font-size:13px;color:rgba(255,255,255,.65);margin:6px 0 18px;}
+  .btn-lg{
+    display:block;width:100%;text-align:center;background:var(--teal);color:#fff;
+    font-family:'Poppins',sans-serif;font-weight:600;font-size:15px;text-decoration:none;
+    padding:13px 18px;border-radius:9px;transition:background .15s ease;
+  }
+  .btn-lg:hover{background:var(--teal-dark);}
+  .alt{font-size:12.5px;color:rgba(255,255,255,.6);margin:12px 0 0;text-align:center;width:100%;}
+
+  /* Intro / priority */
+  .intro{padding:24px 40px 6px;}
+  .priority{
+    background:#eef5fb;border:1px solid #d4e6f5;border-radius:var(--radius);
+    padding:18px 20px;margin-top:4px;
+  }
+  .priority h3{margin:0 0 6px;font-size:16px;color:var(--navy);font-weight:600;}
+  .priority p{margin:0;font-size:15px;color:#33526f;}
+
+  /* Steps */
+  .steps{padding:14px 40px 8px;}
+  .steps-head{display:flex;align-items:baseline;justify-content:space-between;gap:12px;margin-top:30px;flex-wrap:wrap;}
+  .steps-head h2{font-size:21px;color:var(--navy);margin:0;font-weight:600;}
+  .steps-head span{font-size:14px;color:var(--muted);}
+  .step{margin-top:22px;}
+  .step-head{
+    background:var(--surface);border:1px solid var(--line);border-left:4px solid var(--teal);
+    border-radius:10px;padding:13px 18px;
+  }
+  .step-head .s-title{font-family:'Poppins',sans-serif;font-weight:600;font-size:18px;color:var(--navy);}
+  .step-head .s-stage{font-size:12px;color:var(--muted);margin-top:2px;letter-spacing:.03em;}
+
+  /* Product card */
+  .product{
+    display:flex;gap:20px;margin-top:16px;padding:20px;
+    border:1px solid var(--line);border-radius:var(--radius);background:#fff;
+    box-shadow:var(--shadow);transition:transform .15s ease, box-shadow .15s ease;
+  }
+  .product:hover{transform:translateY(-2px);box-shadow:0 2px 4px rgba(14,42,82,.08),0 14px 32px rgba(14,42,82,.10);}
+  .product .thumb{
+    flex:0 0 140px;width:140px;height:140px;border-radius:10px;
+    background:#f0f4f8 center/cover no-repeat;border:1px solid var(--line);
+  }
+  .product .body{flex:1;min-width:0;}
+  .product .p-name{font-family:'Poppins',sans-serif;font-weight:600;font-size:19px;color:var(--navy);margin:0;}
+  .product .p-price{font-size:15px;color:var(--muted);margin:2px 0 12px;font-weight:500;}
+  .product .p-price b{color:var(--ink);font-weight:600;}
+  .spec{font-size:14.5px;margin:5px 0;color:var(--ink);}
+  .spec b{color:var(--navy);font-weight:600;}
+  .help{font-size:14.5px;margin:12px 0 0;color:var(--ink);}
+  .help b{color:var(--navy);font-weight:600;}
+  .buyrow{display:flex;align-items:center;gap:14px;margin-top:16px;flex-wrap:wrap;}
+  .btn{
+    display:inline-block;background:#fff;color:var(--teal-dark);border:1.5px solid var(--teal);
+    font-family:'Poppins',sans-serif;font-weight:500;font-size:14px;text-decoration:none;
+    padding:9px 20px;border-radius:8px;transition:background .15s ease,color .15s ease;
+  }
+  .btn:hover{background:var(--teal);color:#fff;}
+  .tag{font-size:12.5px;font-weight:500;display:inline-flex;align-items:center;gap:6px;}
+  .tag.incl{color:var(--teal-dark);}
+  .tag.opt{color:#a06a14;}
+  .tag::before{content:"";width:8px;height:8px;border-radius:50%;display:inline-block;}
+  .tag.incl::before{background:var(--teal);}
+  .tag.opt::before{background:#d49a2a;}
+
+  /* Prose step */
+  .prose{margin-top:16px;padding:4px 4px 0;}
+  .prose p{font-size:15px;color:var(--ink);margin:0 0 12px;}
+  .prose .tip{
+    background:#f0faf7;border:1px solid #cfeee4;border-radius:10px;padding:14px 16px;
+    font-size:14.5px;color:#1d5a4c;margin-top:6px;
+  }
+  .prose .tip b{color:#13433a;}
+
+  /* Footer */
+  .foot{margin-top:36px;background:var(--navy);color:rgba(255,255,255,.8);padding:30px 40px;font-size:13.5px;}
+  .foot .f-row{display:flex;gap:26px;flex-wrap:wrap;align-items:center;margin-bottom:14px;}
+  .foot a{color:#7fd3d3;text-decoration:none;}
+  .foot .disclaimer{font-size:12.5px;color:rgba(255,255,255,.55);line-height:1.55;margin:0;}
+
+  @media (max-width:600px){
+    .hero,.glance,.subscribe,.intro,.steps,.foot{padding-left:22px;padding-right:22px;}
+    .hero h1{font-size:27px;}
+    .product{flex-direction:column;}
+    .product .thumb{width:100%;height:180px;flex-basis:auto;}
+    .hero-top{flex-direction:column;align-items:flex-start;}
+    .sub-card{flex-direction:column;}
+    .sub-right{flex-basis:auto;}
+  }
+</style>
+</head>
+<body>
+<div class="page">
+
+  <!-- HERO -->
+  <header class="hero">
+    <div class="hero-top">
+      <img src="https://biome4pets.com/cdn/shop/files/Biome4Pets-logo-white.png?v=1747063472&width=215" alt="Biome4Pets">
+      <span class="badge">Plan: Restore &amp; Rebalance</span>
+    </div>
+    <h1>Microbiome Restoration Plan</h1>
+    <p class="lead">A phased, four-step protocol to reduce dysbiosis and rebuild a stable, diverse gut microbiome.</p>
+    <div class="meta">Prepared for <b>Penny Leedal &amp; Zenia</b> &nbsp;·&nbsp; 28 April 2026 &nbsp;·&nbsp; Based on Zenia's PetBiome Microbiome Profile</div>
+  </header>
+
+  <!-- PLAN AT A GLANCE -->
+  <section class="glance">
+    <h3>Your plan at a glance</h3>
+    <div class="phases">
+      <div class="phase amr">
+        <div class="ph-tag">Phase 1</div>
+        <div class="ph-name">AMR</div>
+        <div class="ph-when">Months 1–3</div>
+      </div>
+      <div class="phase pre">
+        <div class="ph-tag">Phase 2</div>
+        <div class="ph-name">Prebiotic</div>
+        <div class="ph-when">Months 4–7</div>
+      </div>
+      <div class="phase test">
+        <div class="ph-tag">Checkpoint</div>
+        <div class="ph-name">Retest</div>
+        <div class="ph-when">Around month 6</div>
+      </div>
+      <div class="phase maint">
+        <div class="ph-tag">Phase 3</div>
+        <div class="ph-name">Maintenance</div>
+        <div class="ph-when">Ongoing</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- SUBSCRIBE PANEL -->
+  <section class="subscribe">
+    <div class="sub-card">
+      <div class="sub-left">
+        <span class="sub-eyebrow">Recommended</span>
+        <h2>Subscribe to the Restore &amp; Rebalance plan</h2>
+        <p>One subscription runs the whole protocol. The powders change automatically as Zenia moves through each phase — no need to remember to reorder.</p>
+        <ul class="sub-list">
+          <li><b>Phase 1</b> — PetBiome AMR, months 1–3</li>
+          <li><b>Phase 2</b> — PetBiome Prebiotic, months 4–7</li>
+          <li><b>Phase 3</b> — PetBiome Maintenance, ongoing</li>
+        </ul>
+        <p class="sub-note">Retest at month 6 can be added on. Pause or cancel anytime.</p>
+      </div>
+      <div class="sub-right">
+        <div class="price"><span class="amt">£35</span><span class="per">/ month</span></div>
+        <div class="price-sub">Billed monthly · powders rotate by phase</div>
+        <a class="btn-lg" href="#subscribe">Subscribe to plan</a>
+        <p class="alt">or buy each product individually below</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- INTRO -->
+  <section class="intro">
+    <div class="priority">
+      <h3>Where to focus first</h3>
+      <p>Zenia's results show elevated Clostridia (52%) alongside raised Erysipelotrichaceae and Collinsella. This plan addresses those imbalances in order — reset first, then rebuild — before moving to long-term maintenance. Work through the steps in sequence for the best result.</p>
+    </div>
+  </section>
+
+  <!-- STEPS -->
+  <section class="steps">
+    <div class="steps-head">
+      <h2>The full protocol</h2>
+      <span>Subscribe above, or buy any product on its own</span>
+    </div>
+
+    <!-- STEP 1 -->
+    <div class="step">
+      <div class="step-head">
+        <div class="s-title">Step 1: Microbiome Reset</div>
+        <div class="s-stage">Phase 1 · Months 1–3</div>
+      </div>
+      <article class="product">
+        <div class="thumb" style="background-image:url('https://biome4pets.com/cdn/shop/files/Copy_of_www.Biome4pets.com_amr_1024_x_1024_px_1.png?v=1757444685&width=400')"></div>
+        <div class="body">
+          <h3 class="p-name">PetBiome AMR</h3>
+          <div class="p-price"><b>£35.00</b> / month</div>
+          <p class="spec"><b>Dose:</b> Follow recommended dose on label.</p>
+          <p class="spec"><b>Duration:</b> 3 months (12 weeks)</p>
+          <p class="spec"><b>Quantity:</b> 3 (one tub per month)</p>
+          <p class="help"><b>How it will help Zenia:</b> Disrupts biofilms and reduces resistant organisms, helping bring elevated Clostridia back toward a healthy range and creating room for beneficial bacteria to re-establish.</p>
+          <div class="buyrow">
+            <a class="btn" href="https://biome4pets.com/products/petbiome-amr-1">Buy individually · £35</a>
+            <span class="tag incl">Included in plan</span>
+          </div>
+        </div>
+      </article>
+    </div>
+
+    <!-- STEP 2 -->
+    <div class="step">
+      <div class="step-head">
+        <div class="s-title">Step 2: Implement Dietary Changes</div>
+        <div class="s-stage">Alongside Phase 1</div>
+      </div>
+      <div class="prose">
+        <p>To create a gut environment less favourable to Clostridium, reduce or eliminate highly processed foods. If suitable for Zenia, add small amounts of raw or lightly cooked meat. Allow at least four weeks for dietary changes to show in the microbiome, and avoid further changes during this window.</p>
+        <div class="tip"><b>Tip:</b> A recent study found daily bone broth reduced Clostridium species in 95% of dogs over four weeks. Home-cooked bone broth offers the same benefit as shop-bought.</div>
+      </div>
+    </div>
+
+    <!-- STEP 3 -->
+    <div class="step">
+      <div class="step-head">
+        <div class="s-title">Step 3: Rebuild &amp; Restore</div>
+        <div class="s-stage">Phase 2 · Months 4–7</div>
+      </div>
+      <article class="product">
+        <div class="thumb" style="background-image:url('https://biome4pets.com/cdn/shop/files/Copy_of_www.Biome4pets.com_amr_1024_x_1024_px_3.png?v=1757445187&width=400')"></div>
+        <div class="body">
+          <h3 class="p-name">PetBiome Prebiotic</h3>
+          <div class="p-price"><b>£35.00</b> / month</div>
+          <p class="spec"><b>Dose:</b> Follow recommended dose on label.</p>
+          <p class="spec"><b>Duration:</b> 4 months</p>
+          <p class="spec"><b>Quantity:</b> 4 (one tub per month)</p>
+          <p class="help"><b>How it will help Zenia:</b> Feeds beneficial bacteria and supports gut barrier integrity, helping reduce the inflammation linked to raised Erysipelotrichaceae and Collinsella and improving overall diversity.</p>
+          <div class="buyrow">
+            <a class="btn" href="https://biome4pets.com/products/petbiome-amr">Buy individually · £35</a>
+            <span class="tag incl">Included in plan</span>
+          </div>
+        </div>
+      </article>
+    </div>
+
+    <!-- STEP 4 -->
+    <div class="step">
+      <div class="step-head">
+        <div class="s-title">Step 4: Retest the Gut Microbiome</div>
+        <div class="s-stage">Checkpoint · Around month 6</div>
+      </div>
+      <article class="product">
+        <div class="thumb" style="background-image:url('https://biome4pets.com/cdn/shop/files/Advanced_Gut_Microbiome_Test.png?v=1779191848&width=400')"></div>
+        <div class="body">
+          <h3 class="p-name">PetBiome Gut Microbiome Test Kit</h3>
+          <div class="p-price"><b>£180.00</b></div>
+          <p class="spec"><b>Dose:</b> Single sample collection at home.</p>
+          <p class="spec"><b>Duration:</b> One-off retest</p>
+          <p class="spec"><b>Quantity:</b> 1</p>
+          <p class="help"><b>How it will help Zenia:</b> Retesting confirms how the microbiome has responded so far and lets us fine-tune the powders before moving to maintenance — making sure the plan is working as intended.</p>
+          <div class="buyrow">
+            <a class="btn" href="https://biome4pets.com/products/petbiome-microbiome-test-kit">Buy individually · £180</a>
+            <span class="tag opt">Optional add-on</span>
+          </div>
+        </div>
+      </article>
+    </div>
+
+    <!-- STEP 5 -->
+    <div class="step">
+      <div class="step-head">
+        <div class="s-title">Step 5: Maintain Gut Microbiome Health</div>
+        <div class="s-stage">Phase 3 · Ongoing</div>
+      </div>
+      <article class="product">
+        <div class="thumb" style="background-image:url('https://biome4pets.com/cdn/shop/files/www.Biome4pets.com_mainten_1024_x_1024_px_1.png?v=1757537137&width=400')"></div>
+        <div class="body">
+          <h3 class="p-name">PetBiome Maintenance</h3>
+          <div class="p-price"><b>£35.00</b> / month</div>
+          <p class="spec"><b>Dose:</b> Follow recommended dose on label.</p>
+          <p class="spec"><b>Duration:</b> Ongoing</p>
+          <p class="spec"><b>Quantity:</b> 1 per month (subscription)</p>
+          <p class="help"><b>How it will help Zenia:</b> A daily blend of prebiotics and beneficial bacteria to keep the microbiome stable, support diversity and protect the gains made in Phases 1 and 2.</p>
+          <div class="buyrow">
+            <a class="btn" href="https://biome4pets.com/products/petbiome-maintenance-1">Buy individually · £35</a>
+            <span class="tag incl">Included in plan</span>
+          </div>
+        </div>
+      </article>
+    </div>
+
+  </section>
+
+  <!-- FOOTER -->
+  <footer class="foot">
+    <div class="f-row">
+      <span><b style="color:#fff;font-weight:600;">Questions about Zenia's plan?</b></span>
+      <span>info@biome4pets.com</span>
+      <span><a href="https://www.biome4pets.com">www.biome4pets.com</a></span>
+    </div>
+    <p class="disclaimer">This plan is based on advanced 16S rRNA analysis of your dog's gut microbiome and is intended to support gut health. It is not a diagnosis. If Zenia is unwell, please consult your veterinarian.</p>
+  </footer>
+
+</div>
+</body>
+</html>

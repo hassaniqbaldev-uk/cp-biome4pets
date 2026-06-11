@@ -1,0 +1,83 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+    body {
+        -webkit-font-smoothing: antialiased;
+        -moz-osx-font-smoothing: grayscale;
+        text-rendering: optimizeLegibility;
+    }
+}
+
+@layer components {
+    /* Premium section card — soft diffuse shadow, hairline ring, teal accent spine */
+    .report-card {
+        @apply relative overflow-hidden rounded-2xl bg-white border-l-4 border-teal ring-1 ring-navy/5;
+        box-shadow:
+            0 18px 48px -24px rgba(48, 28, 71, 0.28),
+            0 4px 14px -8px rgba(48, 28, 71, 0.08);
+        transition: box-shadow 0.4s ease, transform 0.4s ease;
+    }
+
+    .report-card:hover {
+        box-shadow:
+            0 30px 64px -24px rgba(48, 28, 71, 0.34),
+            0 8px 18px -8px rgba(48, 28, 71, 0.10);
+    }
+
+    /* Section header bar — accent blue with a small white marker */
+    .report-head {
+        @apply flex items-center gap-3 bg-teal text-white px-6 sm:px-8 py-4;
+    }
+
+    .report-head::before {
+        content: "";
+        @apply h-2 w-2 rounded-full bg-white shrink-0;
+        box-shadow: 0 0 0 4px rgba(78, 123, 164, 0.18);
+    }
+
+    .report-head h2 {
+        letter-spacing: -0.01em;
+    }
+
+    /* Generous, breathing body padding */
+    .report-body {
+        @apply px-6 sm:px-8 py-6 sm:py-8;
+    }
+
+    /* Gentle hover lift for inner panels and product cards */
+    .lift {
+        transition: transform 0.3s ease, box-shadow 0.3s ease;
+    }
+
+    .lift:hover {
+        transform: translateY(-3px);
+    }
+
+    /* Clean, embedded frame for chart areas */
+    .chart-frame {
+        @apply rounded-xl bg-light-grey/70 ring-1 ring-navy/5 p-4 sm:p-5;
+    }
+}
+
+/* ------------------------------------------------------------------ */
+/* Minimal scroll-reveal motion.                                       */
+/* Only applies when JS is active AND the user allows motion;          */
+/* otherwise every section stays fully visible (graceful degradation). */
+/* ------------------------------------------------------------------ */
+@media (prefers-reduced-motion: no-preference) {
+    .js [data-reveal] {
+        opacity: 0;
+        transform: translateY(18px);
+        transition:
+            opacity 0.7s cubic-bezier(0.16, 0.84, 0.44, 1),
+            transform 0.7s cubic-bezier(0.16, 0.84, 0.44, 1);
+        will-change: opacity, transform;
+    }
+
+    .js [data-reveal].is-visible {
+        opacity: 1;
+        transform: none;
+    }
+}
