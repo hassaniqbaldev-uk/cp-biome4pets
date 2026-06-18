@@ -4,6 +4,7 @@ namespace App\Filament\Widgets;
 
 use App\Filament\Resources\ReportResource;
 use App\Models\Report;
+use App\Support\AdminFormatting;
 use Filament\Tables;
 use Filament\Tables\Table;
 use Filament\Widgets\TableWidget as BaseWidget;
@@ -20,7 +21,7 @@ class LatestReportsTable extends BaseWidget
             ->heading('Recent Reports')
             ->query(
                 Report::query()
-                    ->with(['pet', 'pet.client', 'client'])
+                    ->with(['pet', 'pet.client', 'client', 'test'])
                     ->latest()
                     ->limit(10)
             )
@@ -37,23 +38,19 @@ class LatestReportsTable extends BaseWidget
                     ->getStateUsing(fn (Report $record): ?string => $record->petClient?->name)
                     ->placeholder('—'),
 
-                Tables\Columns\TextColumn::make('sample_id')
+                Tables\Columns\TextColumn::make('test.sample_id')
                     ->label('Sample ID')
                     ->toggleable(),
 
                 Tables\Columns\TextColumn::make('status')
                     ->label('Status')
                     ->badge()
-                    ->formatStateUsing(fn (string $state): string => ucfirst($state))
-                    ->color(fn (string $state): string => match ($state) {
-                        'published' => 'success',
-                        'draft' => 'gray',
-                        default => 'gray',
-                    }),
+                    ->formatStateUsing(fn (?string $state): string => AdminFormatting::reportLabel($state))
+                    ->color(fn (?string $state): string => AdminFormatting::reportColor($state)),
 
                 Tables\Columns\TextColumn::make('created_at')
                     ->label('Created')
-                    ->date('M j, Y')
+                    ->date(AdminFormatting::DATE)
                     ->sortable(),
             ])
             ->recordUrl(

@@ -5,6 +5,7 @@ namespace App\Filament\Resources;
 use App\Filament\Resources\ClientResource\Pages;
 use App\Filament\Resources\ClientResource\RelationManagers;
 use App\Models\Client;
+use App\Support\AdminFormatting;
 use Filament\Forms;
 use Filament\Forms\Form;
 use Filament\Resources\Resource;
@@ -17,7 +18,14 @@ class ClientResource extends Resource
 
     protected static ?string $navigationIcon = 'heroicon-o-users';
 
-    protected static ?string $navigationGroup = 'Reports Management';
+    protected static ?string $navigationGroup = 'Operations';
+
+    protected static ?int $navigationSort = 1;
+
+    public static function getGloballySearchableAttributes(): array
+    {
+        return ['name', 'email', 'phone', 'order_number'];
+    }
 
     public static function form(Form $form): Form
     {
@@ -59,9 +67,13 @@ class ClientResource extends Resource
                     ->searchable()
                     ->toggleable(isToggledHiddenByDefault: true),
                 Tables\Columns\TextColumn::make('created_at')
-                    ->dateTime()
+                    ->label('Created')
+                    ->date(AdminFormatting::DATE)
                     ->sortable(),
             ])
+            ->emptyStateIcon('heroicon-o-users')
+            ->emptyStateHeading('No clients yet')
+            ->emptyStateDescription('Add your first client to start managing their pets and reports.')
             ->filters([
                 //
             ])
@@ -83,6 +95,7 @@ class ClientResource extends Resource
     {
         return [
             RelationManagers\PetsRelationManager::class,
+            RelationManagers\ReportsRelationManager::class,
         ];
     }
 

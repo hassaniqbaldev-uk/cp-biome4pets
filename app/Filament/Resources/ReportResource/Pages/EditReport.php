@@ -150,14 +150,17 @@ class EditReport extends EditRecord
                     // Build pet context so the AI copy can address the pet by
                     // name and tailor advice to this specific pet.
                     $pet = $record->pet;
+                    // Part 2: notes history AS OF this report's date (report_date is
+                    // proxied from the linked test; collected_at backs it up).
+                    $asOf = $record->report_date ?? $record->test?->collected_at;
                     $petContext = $pet ? [
                         'name' => $pet->name,
                         'breed' => $pet->breed,
                         'sex' => $pet->sex,
                         'diet' => $pet->diet,
-                        // Phase 2: owner-reported notes ground the copy. Live pet,
-                        // same source Phase 1 re-freezes into pet_snapshot here.
-                        'health_notes' => $pet->health_notes,
+                        // Owner-reported notes ground the copy (dated history up to
+                        // the report date). Framing in OpenAiService is unchanged.
+                        'health_notes' => $pet->healthNotesForContext($asOf),
                     ] : [];
 
                     // Generate AI interpretations
@@ -180,15 +183,12 @@ class EditReport extends EditRecord
                     }
 
                     $record->update([
-                        'phylum_data' => $results['phylum_totals'],
-                        'diversity_score' => $results['diversity_score'],
-                        'csv_data' => $results,
-                        'species_richness' => $results['species_richness'],
-                        'dysbiosis_score' => $results['dysbiosis_score'],
-                        'microbiome_classification' => $results['microbiome_classification'],
+                        // Raw lab data is written to the Test below; the report
+                        // stores only the AI copy, scores and the pet snapshot.
                         // Re-freeze the pet snapshot in lockstep with the AI/CSV
-                        // snapshot so the frozen pet matches the regenerated copy.
-                        'pet_snapshot' => \App\Models\Report::buildPetSnapshot($pet),
+                        // snapshot so the frozen pet matches the regenerated copy
+                        // (notes history as of the report date).
+                        'pet_snapshot' => \App\Models\Report::buildPetSnapshot($pet, $asOf),
                         'ai_summary' => $interpretations['summary'],
                         'ai_bacteroidetes_interpretation' => $interpretations['bacteroidetes_interpretation'],
                         'ai_firmicutes_interpretation' => $interpretations['firmicutes_interpretation'],
@@ -206,9 +206,10 @@ class EditReport extends EditRecord
                         'score_stress_resilience' => $interpretations['score_stress_resilience'],
                     ]);
 
-                    // Phase 3a: refresh the raw lab data on the Test too (the
-                    // report columns above are dual-written for now). Find-or-create
-                    // by (pet_id + order_id == sample_id) and link if not yet linked.
+                    // Refresh the raw lab data on the Test (its sole home).
+                    // Find-or-create by (pet_id + order_id == sample_id) and link
+                    // if not yet linked. sample_id/report_date/csv_path resolve
+                    // through the Report→Test proxy off the already-linked test.
                     $test = Test::syncRawForReport([
                         'pet_id' => $record->pet_id,
                         'client_id' => $record->client_id,
@@ -329,19 +330,6 @@ class EditReport extends EditRecord
 
     protected array $planSteps = [];
 
-    /**
-     * CSV-derived fields populated by the "Process CSV" action. They are NOT
-     * form components, so a normal edit-save does not carry them — they must
-     * never be overwritten with null/empty when the form data omits them.
-     */
-    private const CSV_DERIVED_FIELDS = [
-        'phylum_data',
-        'diversity_score',
-        'species_richness',
-        'dysbiosis_score',
-        'microbiome_classification',
-    ];
-
     protected function mutateFormDataBeforeFill(array $data): array
     {
         $data['catalog_product_ids'] = $this->record->catalogProducts->pluck('id')->all();
@@ -373,8 +361,12 @@ class EditReport extends EditRecord
 
     protected function mutateFormDataBeforeSave(array $data): array
     {
+        // sample_id lives on the Test now; resolve it through the Report→Test
+        // proxy so the slug stays stable regardless of the (informational) form
+        // field. The raw lab columns no longer exist, so there is nothing to
+        // guard against an edit-save nulling — the proxy is their sole source.
         $petName = \App\Models\Pet::find($data['pet_id'] ?? null)?->name;
-        $data['slug'] = Str::slug($petName . '-' . $data['sample_id']);
+        $data['slug'] = Str::slug($petName . '-' . $this->record->sample_id);
 
         $this->catalogProductIds = $data['catalog_product_ids'] ?? [];
         unset($data['catalog_product_ids']);
@@ -383,17 +375,6 @@ class EditReport extends EditRecord
         // (kept out of the core Report mass-assignment).
         $this->planSteps = $data['steps'] ?? [];
         unset($data['steps']);
-
-        // Guarantee: an edit-save NEVER nulls the CSV-derived fields. They are
-        // not form components (only the Process CSV action sets them), so the
-        // form data does not carry them. Restore any missing/empty value from
-        // the stored record so an existing non-null value can't be wiped —
-        // independent of how the plan/products part of the form is saved.
-        foreach (self::CSV_DERIVED_FIELDS as $field) {
-            if (blank($data[$field] ?? null) && filled($this->record->{$field})) {
-                $data[$field] = $this->record->{$field};
-            }
-        }
 
         return $data;
     }

@@ -23,15 +23,19 @@ use Illuminate\Support\Facades\DB;
  */
 class ReportGeneration
 {
-    /** Pet context for the AI prompt (incl. Phase 2 health notes). */
-    public static function petContext(?Pet $pet): array
+    /**
+     * Pet context for the AI prompt (incl. health notes). Part 2: the notes are
+     * the date-filtered history AS OF $asOf (the report/test date) so the copy is
+     * grounded in what was known at that point in time.
+     */
+    public static function petContext(?Pet $pet, Carbon|string|null $asOf = null): array
     {
         return $pet ? [
             'name' => $pet->name,
             'breed' => $pet->breed,
             'sex' => $pet->sex,
             'diet' => $pet->diet,
-            'health_notes' => $pet->health_notes,
+            'health_notes' => $pet->healthNotesForContext($asOf),
         ] : [];
     }
 
@@ -40,12 +44,12 @@ class ReportGeneration
      * mapped to Report columns (ai_*, vet_summary, goal, recommended_actions,
      * score_*). On any AI failure every value is '' (the caller can detect this).
      */
-    public static function interpretationColumns(array $phylumData, ?float $diversity, ?Pet $pet): array
+    public static function interpretationColumns(array $phylumData, ?float $diversity, ?Pet $pet, Carbon|string|null $asOf = null): array
     {
         $interp = (new OpenAiService())->generateReportInterpretations(
             $phylumData,
             (float) ($diversity ?? 0),
-            self::petContext($pet),
+            self::petContext($pet, $asOf),
         );
 
         return [
@@ -95,8 +99,8 @@ class ReportGeneration
     /**
      * Entry A: build a draft Report FROM a Test (the "Generate report" action).
      * pet/client come from the test; AI + product/plan are generated from the
-     * test's raw data; the pet snapshot is frozen now. Raw is mirrored onto the
-     * report (dual-write) while the report columns still exist. Atomic; also
+     * test's raw data; the pet snapshot is frozen now. The raw lab data stays on
+     * the Test (the report reads it via the Report→Test proxy). Atomic; also
      * advances the test's status to report_generated. The plan is applied later
      * in the report editor (its subscription_snapshot is captured there).
      */
@@ -104,26 +108,19 @@ class ReportGeneration
     {
         return DB::transaction(function () use ($test) {
             $pet = $test->pet;
-            $interp = self::interpretationColumns($test->phylum_data ?? [], $test->diversity_score, $pet);
+            // The report freezes/grounds notes AS OF the test's report date
+            // (falling back to the collection date when no report date is set).
+            $asOf = $test->report_date ?? $test->collected_at;
+            $interp = self::interpretationColumns($test->phylum_data ?? [], $test->diversity_score, $pet, $asOf);
             $selection = self::productSelection($test->phylum_data ?? [], $test->diversity_score);
 
             $report = Report::create(array_merge($interp, [
                 'client_id' => $test->client_id ?? $pet?->client_id,
                 'pet_id' => $test->pet_id,
                 'test_id' => $test->id,
-                'sample_id' => $test->sample_id,
-                'report_date' => $test->report_date ?? Carbon::today(),
                 'status' => 'draft',
                 'plan_id' => $selection['plan_id'],
-                'pet_snapshot' => Report::buildPetSnapshot($pet),
-                // Dual-write raw mirror from the test (source of truth = test).
-                'csv_path' => $test->csv_path,
-                'csv_data' => $test->csv_data,
-                'phylum_data' => $test->phylum_data,
-                'diversity_score' => $test->diversity_score,
-                'species_richness' => $test->species_richness,
-                'dysbiosis_score' => $test->dysbiosis_score,
-                'microbiome_classification' => $test->microbiome_classification,
+                'pet_snapshot' => Report::buildPetSnapshot($pet, $asOf),
             ]));
 
             if (! empty($selection['catalog_product_ids'])) {

@@ -16,7 +16,7 @@ use Tests\TestCase;
 /**
  * Phase 3c: every report is generated FROM a Test, via either entry point.
  * (AI HTTP is not called in tests — no API key — so ai_* come back as '';
- * the structural wiring, raw mirror, plan selection, snapshot, slug and the
+ * the structural wiring, raw-on-test, plan selection, snapshot, slug and the
  * "always linked to a test" invariant are what's asserted here.)
  */
 class ReportFromTestTest extends TestCase
@@ -76,7 +76,10 @@ class ReportFromTestTest extends TestCase
         $plan = Plan::create(['key' => 'restore-rebalance', 'name' => 'Restore & Rebalance', 'enabled' => true]);
 
         $client = Client::create(['name' => 'Owner', 'email' => 'o@e.com']);
-        $pet = Pet::create(['client_id' => $client->id, 'name' => 'Biscuit', 'health_notes' => 'Itchy skin']);
+        $pet = Pet::create(['client_id' => $client->id, 'name' => 'Biscuit']);
+        // Health notes are a dated log; Part 2 freezes the history as of the test
+        // date into the snapshot, formatted "date · note".
+        $pet->healthNotes()->create(['date' => '2026-06-17', 'note' => 'Itchy skin']);
         $test = $this->makeTest($pet, $client, 'ORD-A');
 
         $report = ReportGeneration::createReportFromTest($test);
@@ -87,7 +90,7 @@ class ReportFromTestTest extends TestCase
         $this->assertSame($client->id, $report->client_id);
         $this->assertSame('ORD-A', $report->sample_id);
 
-        // Raw read from the test (mirrored onto the report's own columns too).
+        // Raw read from the test through the Report→Test proxy (no report columns).
         $this->assertSame(['Bacteroidetes' => 5, 'Firmicutes' => 10], $report->phylum_data);
         $this->assertSame(3.0, (float) $report->diversity_score);
 
@@ -98,7 +101,7 @@ class ReportFromTestTest extends TestCase
 
         // Snapshot frozen, slug built, report_date present (Klaviyo reads it).
         $this->assertSame('Biscuit', $report->pet_snapshot['name']);
-        $this->assertSame('Itchy skin', $report->pet_snapshot['health_notes']);
+        $this->assertSame('2026-06-17 · Itchy skin', $report->pet_snapshot['health_notes']);
         $this->assertNotEmpty($report->slug);
         $this->assertNotNull($report->report_date);
 
@@ -114,7 +117,7 @@ class ReportFromTestTest extends TestCase
         $test = $this->makeTest($pet, $client, 'ORD-B');
 
         // Wizard "existing test" path: $data carries existing_test_id, NO raw, no
-        // sample_id (the form filled it, but prove it's mirrored from the test).
+        // sample_id (prove the report reads it from the test via the proxy).
         $report = $this->handleCreate([
             'client_id' => $client->id,
             'pet_id' => $pet->id,
@@ -125,7 +128,7 @@ class ReportFromTestTest extends TestCase
         ]);
 
         $this->assertSame($test->id, $report->test_id);
-        $this->assertSame('ORD-B', $report->sample_id);                    // mirrored
+        $this->assertSame('ORD-B', $report->sample_id);                    // via proxy
         $this->assertSame(['Bacteroidetes' => 5, 'Firmicutes' => 10], $report->phylum_data);
         $this->assertSame(1, Test::count(), 'no new test should be created');
         $this->assertSame('report_generated', $test->fresh()->status);

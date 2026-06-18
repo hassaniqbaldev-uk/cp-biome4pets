@@ -17,13 +17,13 @@ class CatalogProductResource extends Resource
 
     protected static ?string $navigationIcon = 'heroicon-o-shopping-bag';
 
-    protected static ?string $navigationGroup = 'Reports Management';
+    protected static ?string $navigationGroup = 'Catalog & Plans';
 
     protected static ?string $navigationLabel = 'Product Catalog';
 
     protected static ?string $modelLabel = 'Catalog Product';
 
-    protected static ?int $navigationSort = 3;
+    protected static ?int $navigationSort = 1;
 
     public static function form(Form $form): Form
     {
@@ -82,7 +82,8 @@ class CatalogProductResource extends Resource
                     ->boolean()
                     ->sortable(),
                 Tables\Columns\TextColumn::make('updated_at')
-                    ->dateTime()
+                    ->label('Updated')
+                    ->date(\App\Support\AdminFormatting::DATE)
                     ->sortable(),
             ])
             ->filters([

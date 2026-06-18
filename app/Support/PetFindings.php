@@ -21,7 +21,11 @@ class PetFindings
         return self::build([
             'pet_name' => $report->pet?->name,
             'owner_name' => $report->petClient?->name,
-            'health_notes' => $report->pet?->health_notes,
+            // Part 2: the notes history AS OF this report's date (report_date is
+            // proxied from the linked test; collected_at backs it up).
+            'health_notes' => $report->pet?->healthNotesForContext(
+                $report->report_date ?? $report->test?->collected_at
+            ),
             'report_date' => $report->report_date,
             'diversity_score' => $report->diversity_score,
             'species_richness' => $report->species_richness,

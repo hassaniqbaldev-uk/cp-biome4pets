@@ -2,6 +2,8 @@
 
 namespace App\Filament\Resources\ClientResource\RelationManagers;
 
+use App\Filament\Resources\PetResource;
+use App\Models\Pet;
 use Filament\Forms;
 use Filament\Forms\Form;
 use Filament\Resources\RelationManagers\RelationManager;
@@ -40,10 +42,21 @@ class PetsRelationManager extends RelationManager
                         'Mixed' => 'Mixed',
                         'Other' => 'Other',
                     ]),
-                Forms\Components\Textarea::make('health_notes')
-                    ->label('Health Notes & Symptoms')
+                // Health notes are a dated log on the Pet hub. On CREATE only,
+                // capture an optional first entry (note and/or weight); both blank
+                // ⇒ no entry. Transient fields handled in the CreateAction below.
+                Forms\Components\Textarea::make('initial_note')
+                    ->label('Initial note')
+                    ->helperText('Optional. Recorded as the first health-log entry, dated today.')
                     ->rows(3)
-                    ->columnSpanFull(),
+                    ->columnSpanFull()
+                    ->visibleOn('create'),
+                Forms\Components\TextInput::make('initial_weight_kg')
+                    ->label('Initial weight (kg)')
+                    ->numeric()
+                    ->step(0.01)
+                    ->minValue(0)
+                    ->visibleOn('create'),
                 Forms\Components\TextInput::make('shopify_pet_id')
                     ->label('Shopify Pet ID')
                     ->maxLength(255)
@@ -55,6 +68,10 @@ class PetsRelationManager extends RelationManager
     {
         return $table
             ->recordTitleAttribute('name')
+            // Drill DOWN into the pet hub: clicking a pet row opens the Pet edit
+            // page (its hub), where that pet's Tests live. Inline create/edit/
+            // delete actions below still work for quick management in place.
+            ->recordUrl(fn (Pet $record): string => PetResource::getUrl('edit', ['record' => $record]))
             ->columns([
                 Tables\Columns\TextColumn::make('name')
                     ->searchable(),
@@ -62,19 +79,48 @@ class PetsRelationManager extends RelationManager
                     ->searchable(),
                 Tables\Columns\TextColumn::make('date_of_birth')
                     ->label('Date of Birth')
-                    ->date()
+                    ->date(\App\Support\AdminFormatting::DATE)
                     ->sortable(),
                 Tables\Columns\TextColumn::make('sex'),
                 Tables\Columns\TextColumn::make('shopify_pet_id')
                     ->label('Shopify Pet ID')
                     ->searchable()
                     ->toggleable(isToggledHiddenByDefault: true),
+                Tables\Columns\TextColumn::make('tests_count')
+                    ->label('Tests')
+                    ->counts('tests')
+                    ->badge(),
                 Tables\Columns\TextColumn::make('reports_count')
                     ->label('Reports')
-                    ->counts('reports'),
+                    ->counts('reports')
+                    ->badge(),
             ])
+            ->emptyStateIcon('heroicon-o-heart')
+            ->emptyStateHeading('No pets yet')
+            ->emptyStateDescription('Add this client\'s first pet to get started.')
             ->headerActions([
-                Tables\Actions\CreateAction::make(),
+                // Create the pet, then write the optional first health-log entry.
+                // initial_note/initial_weight_kg are transient (not Pet columns),
+                // so they're lifted out before creating the pet.
+                Tables\Actions\CreateAction::make()
+                    ->using(function (array $data): \App\Models\Pet {
+                        $note = $data['initial_note'] ?? null;
+                        $weight = $data['initial_weight_kg'] ?? null;
+                        unset($data['initial_note'], $data['initial_weight_kg']);
+
+                        /** @var \App\Models\Pet $pet */
+                        $pet = $this->getOwnerRecord()->pets()->create($data);
+
+                        if (filled($note) || filled($weight)) {
+                            $pet->healthNotes()->create([
+                                'date' => today(),
+                                'note' => filled($note) ? $note : null,
+                                'weight_kg' => filled($weight) ? $weight : null,
+                            ]);
+                        }
+
+                        return $pet;
+                    }),
             ])
             ->actions([
                 Tables\Actions\EditAction::make(),

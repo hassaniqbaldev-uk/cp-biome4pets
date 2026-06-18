@@ -9,6 +9,7 @@ use App\Models\Report;
 use App\Models\Test;
 use App\Services\CsvParserService;
 use App\Services\OpenAiService;
+use App\Support\AdminFormatting;
 use App\Support\PetFindings;
 use App\Support\ReportGeneration;
 use Filament\Forms;
@@ -26,13 +27,17 @@ class ReportResource extends Resource
 
     protected static ?string $navigationIcon = 'heroicon-o-document-chart-bar';
 
-    protected static ?string $navigationGroup = 'Reports Management';
+    protected static ?string $navigationGroup = 'Operations';
+
+    protected static ?int $navigationSort = 2;
 
     protected static ?string $recordTitleAttribute = 'sample_id';
 
     public static function getGloballySearchableAttributes(): array
     {
-        return ['pet.name', 'sample_id', 'client.email'];
+        // sample_id now lives on the linked Test (the record title resolves it
+        // through the Report→Test proxy via getRecordTitleAttribute).
+        return ['pet.name', 'test.sample_id', 'client.email'];
     }
 
     public static function form(Form $form): Form
@@ -98,10 +103,6 @@ class ReportResource extends Resource
                                             'Mixed' => 'Mixed',
                                             'Other' => 'Other',
                                         ]),
-                                    Forms\Components\Textarea::make('health_notes')
-                                        ->label('Health Notes & Symptoms')
-                                        ->rows(3)
-                                        ->columnSpanFull(),
                                 ])
                                 ->createOptionUsing(function (array $data, Forms\Get $get): int {
                                     $data['client_id'] = $get('client_id');
@@ -163,6 +164,8 @@ class ReportResource extends Resource
                                             $test->phylum_data ?? [],
                                             $test->diversity_score,
                                             $test->pet,
+                                            // Notes history as of the test's date.
+                                            $test->report_date ?? $test->collected_at,
                                         );
                                         foreach ($interp as $key => $value) {
                                             $set($key, $value);
@@ -304,6 +307,8 @@ class ReportResource extends Resource
                                             $results['phylum_totals'],
                                             $results['diversity_score'],
                                             $pet,
+                                            // Notes history as of the report date being entered.
+                                            $get('report_date'),
                                         );
                                         foreach ($interpretations as $key => $value) {
                                             $set($key, $value);
@@ -476,8 +481,8 @@ class ReportResource extends Resource
                                         $findings = PetFindings::build([
                                             'pet_name' => $pet?->name,
                                             'owner_name' => $owner?->name,
-                                            // Phase 2: live pet's notes, same source Phase 1 freezes.
-                                            'health_notes' => $pet?->health_notes,
+                                            // Part 2: notes history as of the report date.
+                                            'health_notes' => $pet?->healthNotesForContext($get('report_date')),
                                             'report_date' => $get('report_date'),
                                             'diversity_score' => $get('diversity_score'),
                                             'species_richness' => $get('species_richness'),
@@ -804,28 +809,40 @@ class ReportResource extends Resource
             ->columns([
                 Tables\Columns\TextColumn::make('pet.name')
                     ->label('Pet')
-                    ->searchable(),
+                    ->searchable()
+                    // Back-link to the Pet hub (null-guarded for orphaned reports).
+                    ->url(fn (Report $record): ?string => $record->pet
+                        ? PetResource::getUrl('edit', ['record' => $record->pet])
+                        : null),
                 Tables\Columns\TextColumn::make('pet.breed')
                     ->label('Breed')
                     ->searchable(),
-                Tables\Columns\TextColumn::make('sample_id')
+                Tables\Columns\TextColumn::make('test.sample_id')
+                    ->label('Sample ID')
                     ->searchable(),
                 Tables\Columns\TextColumn::make('client.name')
                     ->label('Client')
-                    ->searchable(),
-                Tables\Columns\TextColumn::make('report_date')
-                    ->date()
+                    ->searchable()
+                    // Back-link to the Client hub (null-guarded).
+                    ->url(fn (Report $record): ?string => $record->client
+                        ? ClientResource::getUrl('edit', ['record' => $record->client])
+                        : null),
+                Tables\Columns\TextColumn::make('test.report_date')
+                    ->label('Report Date')
+                    ->date(AdminFormatting::DATE)
                     ->sortable(),
                 Tables\Columns\TextColumn::make('status')
                     ->badge()
-                    ->color(fn (string $state): string => match ($state) {
-                        'published' => 'success',
-                        default => 'gray',
-                    }),
+                    ->formatStateUsing(fn (?string $state): string => AdminFormatting::reportLabel($state))
+                    ->color(fn (?string $state): string => AdminFormatting::reportColor($state)),
                 Tables\Columns\TextColumn::make('created_at')
-                    ->dateTime()
+                    ->label('Created')
+                    ->date(AdminFormatting::DATE)
                     ->sortable(),
             ])
+            ->emptyStateIcon('heroicon-o-document-chart-bar')
+            ->emptyStateHeading('No reports yet')
+            ->emptyStateDescription('Reports appear here once generated from a pet\'s test.')
             ->filters([
                 Tables\Filters\SelectFilter::make('client_id')
                     ->relationship('client', 'name')
@@ -835,7 +852,7 @@ class ReportResource extends Resource
             ])
             ->actions([
                 Tables\Actions\Action::make('view_public')
-                    ->label('View')
+                    ->label('View public')
                     ->icon('heroicon-o-eye')
                     ->color('info')
                     ->url(fn (Report $record) => route('report.show', $record->slug))

@@ -2,11 +2,14 @@
 
 namespace App\Filament\Pages;
 
+use App\Mail\TestSmtpEmail;
 use App\Models\Setting;
 use App\Services\KlaviyoService;
+use App\Support\SmtpConfig;
 use Filament\Forms\Components\Actions;
 use Filament\Forms\Components\Actions\Action;
 use Filament\Forms\Components\Placeholder;
+use Filament\Forms\Components\Select;
 use Filament\Forms\Components\Tabs;
 use Filament\Forms\Components\TextInput;
 use Filament\Forms\Components\Toggle;
@@ -15,6 +18,7 @@ use Filament\Forms\Contracts\HasForms;
 use Filament\Forms\Form;
 use Filament\Notifications\Notification;
 use Filament\Pages\Page;
+use Illuminate\Support\Facades\Mail;
 use Illuminate\Support\HtmlString;
 
 /**
@@ -55,8 +59,8 @@ class EmailIntegrations extends Page implements HasForms
 
     public function mount(): void
     {
-        // Never prefill the secret key into the form — it stays masked/blank.
-        $this->form->fill($this->loadKlaviyo());
+        // Never prefill secrets (Klaviyo key, SMTP password) — they stay blank.
+        $this->form->fill(array_merge($this->loadKlaviyo(), $this->loadSmtp()));
     }
 
     /**
@@ -73,6 +77,23 @@ class EmailIntegrations extends Page implements HasForms
             Setting::KLAVIYO_ENABLED => blank($enabledRaw) ? false : filter_var($enabledRaw, FILTER_VALIDATE_BOOLEAN),
             Setting::KLAVIYO_REVISION => Setting::get(Setting::KLAVIYO_REVISION) ?: Setting::KLAVIYO_REVISION_DEFAULT,
             Setting::KLAVIYO_BASE_URL => Setting::get(Setting::KLAVIYO_BASE_URL) ?: Setting::KLAVIYO_BASE_URL_DEFAULT,
+        ];
+    }
+
+    /**
+     * The SMTP tab values, loaded from settings with the verified SES defaults
+     * pre-filled. The password is deliberately omitted (kept masked/blank).
+     */
+    protected function loadSmtp(): array
+    {
+        return [
+            Setting::SMTP_ENABLED => filter_var(Setting::get(Setting::SMTP_ENABLED), FILTER_VALIDATE_BOOLEAN),
+            Setting::SMTP_HOST => Setting::get(Setting::SMTP_HOST) ?: Setting::SMTP_HOST_DEFAULT,
+            Setting::SMTP_PORT => Setting::get(Setting::SMTP_PORT) ?: Setting::SMTP_PORT_DEFAULT,
+            Setting::SMTP_ENCRYPTION => Setting::get(Setting::SMTP_ENCRYPTION) ?: Setting::SMTP_ENCRYPTION_DEFAULT,
+            Setting::SMTP_USERNAME => Setting::get(Setting::SMTP_USERNAME),
+            Setting::SMTP_FROM_ADDRESS => Setting::get(Setting::SMTP_FROM_ADDRESS) ?: Setting::SMTP_FROM_ADDRESS_DEFAULT,
+            Setting::SMTP_FROM_NAME => Setting::get(Setting::SMTP_FROM_NAME) ?: Setting::SMTP_FROM_NAME_DEFAULT,
         ];
     }
 
@@ -337,28 +358,181 @@ class EmailIntegrations extends Page implements HasForms
     }
 
     /**
-     * SMTP tab — placeholder only (Phase 1). Disabled fields show the intended
-     * structure so it can be wired up later without reworking this screen.
+     * SMTP tab — outbound email via Amazon SES SMTP (587 + STARTTLS). The
+     * password reuses the Klaviyo key pattern: masked field, never prefilled,
+     * encrypted at rest, only overwritten when a new value is entered.
      */
     protected function smtpTab(): Tabs\Tab
     {
+        $hasPassword = filled(Setting::get(Setting::SMTP_PASSWORD));
+
         return Tabs\Tab::make('SMTP')
             ->icon('heroicon-o-server-stack')
             ->schema([
-                Placeholder::make('smtp_coming_soon')
-                    ->label('')
-                    ->content('Coming soon — outbound SMTP configuration is not available yet.'),
-                TextInput::make('smtp_host_preview')
+                Toggle::make(Setting::SMTP_ENABLED)
+                    ->label('Enabled')
+                    ->default(false)
+                    ->helperText('Master switch for outbound SMTP. When OFF, the app uses its default mailer (default OFF).'),
+                TextInput::make(Setting::SMTP_HOST)
                     ->label('SMTP Host')
-                    ->placeholder('Coming soon')
-                    ->disabled()
-                    ->dehydrated(false),
-                TextInput::make('smtp_port_preview')
+                    ->maxLength(255)
+                    ->default(Setting::SMTP_HOST_DEFAULT)
+                    ->helperText('Amazon SES SMTP endpoint, e.g. '.Setting::SMTP_HOST_DEFAULT.'.'),
+                TextInput::make(Setting::SMTP_PORT)
                     ->label('SMTP Port')
-                    ->placeholder('Coming soon')
-                    ->disabled()
-                    ->dehydrated(false),
+                    ->numeric()
+                    ->default(Setting::SMTP_PORT_DEFAULT)
+                    ->helperText('587 for STARTTLS (recommended), 465 for implicit TLS.'),
+                Select::make(Setting::SMTP_ENCRYPTION)
+                    ->label('Encryption')
+                    ->options(['tls' => 'STARTTLS (TLS)', 'ssl' => 'SSL (implicit)'])
+                    ->default(Setting::SMTP_ENCRYPTION_DEFAULT)
+                    ->native(false)
+                    ->helperText('Use STARTTLS with port 587.'),
+                TextInput::make(Setting::SMTP_USERNAME)
+                    ->label('SMTP Username')
+                    ->maxLength(255)
+                    ->autocomplete(false)
+                    ->helperText('Your SES SMTP username (an IAM SMTP credential, not your AWS access key).'),
+                TextInput::make(Setting::SMTP_PASSWORD)
+                    ->label('SMTP Password')
+                    ->password()
+                    ->revealable()
+                    ->autocomplete(false)
+                    ->placeholder($hasPassword ? '•••••••••••• (leave blank to keep current password)' : 'Not set')
+                    ->helperText('Stored encrypted at rest. Leave blank when saving to keep the existing password.'),
+                TextInput::make(Setting::SMTP_FROM_ADDRESS)
+                    ->label('From Address')
+                    ->email()
+                    ->default(Setting::SMTP_FROM_ADDRESS_DEFAULT)
+                    ->helperText('Must be a verified SES identity (address or domain).'),
+                TextInput::make(Setting::SMTP_FROM_NAME)
+                    ->label('From Name')
+                    ->maxLength(255)
+                    ->default(Setting::SMTP_FROM_NAME_DEFAULT),
+
+                // ── Diagnostics ────────────────────────────────────────────
+                Actions::make([
+                    Action::make('send_test_email')
+                        ->label('Send test email')
+                        ->icon('heroicon-o-paper-airplane')
+                        ->color('primary')
+                        ->disabled(fn (): bool => ! $this->smtpReady())
+                        ->tooltip(fn (): ?string => $this->smtpNotReadyReason())
+                        ->modalHeading('Send a test email')
+                        ->modalDescription('Sends a simple test email using the SAVED SMTP settings. If you just changed them, Save first.')
+                        ->modalSubmitActionLabel('Send test email')
+                        ->form([
+                            TextInput::make('test_email')
+                                ->label('Send to email')
+                                ->email()
+                                ->required()
+                                ->default(auth()->user()?->email)
+                                ->helperText('In the SES sandbox this must be a verified address.'),
+                        ])
+                        ->action(fn (array $data) => $this->runSendTestEmail($data['test_email'] ?? null)),
+                ]),
+
+                Placeholder::make('smtp_actions_hint')
+                    ->label('')
+                    ->content(fn (): HtmlString => new HtmlString('<span style="color:#b45309;">'.e((string) $this->smtpNotReadyReason()).'</span>'))
+                    ->visible(fn (): bool => ! $this->smtpReady()),
+
+                Placeholder::make('smtp_last_result')
+                    ->label('Last SMTP result')
+                    ->content(fn (): HtmlString => $this->smtpLastResultContent()),
             ]);
+    }
+
+    /**
+     * True when SMTP is enabled AND the minimum settings (host/username/password/
+     * from) are SAVED — i.e. the test send can actually run. Reads SAVED settings.
+     */
+    protected function smtpReady(): bool
+    {
+        return SmtpConfig::isConfigured();
+    }
+
+    /** Why "Send test email" is disabled, or null when ready. */
+    protected function smtpNotReadyReason(): ?string
+    {
+        if (! SmtpConfig::isEnabled()) {
+            return 'Enable SMTP (toggle on) and Save first.';
+        }
+
+        if (! SmtpConfig::isConfigured()) {
+            return 'Add host, username, password and a from-address, then Save first.';
+        }
+
+        return null;
+    }
+
+    /**
+     * Apply the saved SMTP settings and send a test email, reporting success or
+     * the transport error clearly. Never 500s — transport exceptions are caught.
+     */
+    public function runSendTestEmail(?string $email): void
+    {
+        $email = trim((string) $email);
+
+        if (blank($email)) {
+            Notification::make()->title('Enter a test email address')->warning()->send();
+
+            return;
+        }
+
+        SmtpConfig::apply();
+
+        try {
+            Mail::to($email)->send(new TestSmtpEmail());
+
+            $this->recordSmtpResult('Send test email', true, 'Test email sent to '.$email);
+
+            Notification::make()
+                ->title('Test email sent')
+                ->body('Sent to '.$email.'. Check the inbox (and spam). In the SES sandbox only verified addresses receive mail.')
+                ->success()
+                ->send();
+        } catch (\Throwable $e) {
+            $this->recordSmtpResult('Send test email', false, $e->getMessage());
+
+            Notification::make()
+                ->title('Test email failed')
+                ->body($e->getMessage())
+                ->danger()
+                ->send();
+        }
+    }
+
+    /** Persist the latest SMTP diagnostic outcome as JSON (survives reloads). */
+    protected function recordSmtpResult(string $action, bool $ok, string $message): void
+    {
+        Setting::set(Setting::SMTP_LAST_RESULT, json_encode([
+            'at' => now()->toDateTimeString(),
+            'action' => $action,
+            'ok' => $ok,
+            'message' => $message,
+        ]));
+    }
+
+    /** The persisted SMTP "last result" line (timestamp + ok/fail + message). */
+    protected function smtpLastResultContent(): HtmlString
+    {
+        $raw = Setting::get(Setting::SMTP_LAST_RESULT);
+
+        if (blank($raw)) {
+            return new HtmlString('<span style="color:#6b7280;">No test emails sent yet.</span>');
+        }
+
+        $r = json_decode((string) $raw, true) ?: [];
+        $ok = ! empty($r['ok']);
+
+        return new HtmlString(
+            $this->statusBadge($ok ? 'OK' : 'FAIL', $ok ? 'green' : 'red')->toHtml()
+            .' <strong>'.e($r['action'] ?? '').'</strong>'
+            .' <span style="color:#6b7280;">· '.e($r['at'] ?? '').'</span>'
+            .'<br><span style="color:#374151;">'.e($r['message'] ?? '').'</span>',
+        );
     }
 
     /**
@@ -402,12 +576,27 @@ class EmailIntegrations extends Page implements HasForms
         Setting::set(Setting::KLAVIYO_REVISION, $data[Setting::KLAVIYO_REVISION] ?? '');
         Setting::set(Setting::KLAVIYO_BASE_URL, $data[Setting::KLAVIYO_BASE_URL] ?? '');
 
+        // ── SMTP ───────────────────────────────────────────────────────────
+        // Same guard as the Klaviyo key: only overwrite the password when a new
+        // value was actually entered, so saving never wipes the stored secret.
+        if (filled($data[Setting::SMTP_PASSWORD] ?? null)) {
+            Setting::setEncrypted(Setting::SMTP_PASSWORD, $data[Setting::SMTP_PASSWORD]);
+        }
+
+        Setting::set(Setting::SMTP_ENABLED, ! empty($data[Setting::SMTP_ENABLED]) ? '1' : '0');
+        Setting::set(Setting::SMTP_HOST, $data[Setting::SMTP_HOST] ?? '');
+        Setting::set(Setting::SMTP_PORT, $data[Setting::SMTP_PORT] ?? '');
+        Setting::set(Setting::SMTP_ENCRYPTION, $data[Setting::SMTP_ENCRYPTION] ?? '');
+        Setting::set(Setting::SMTP_USERNAME, $data[Setting::SMTP_USERNAME] ?? '');
+        Setting::set(Setting::SMTP_FROM_ADDRESS, $data[Setting::SMTP_FROM_ADDRESS] ?? '');
+        Setting::set(Setting::SMTP_FROM_NAME, $data[Setting::SMTP_FROM_NAME] ?? '');
+
         Notification::make()
             ->title('Settings saved')
             ->success()
             ->send();
 
-        // Reset the form: clear the secret field, reload persisted values.
-        $this->form->fill($this->loadKlaviyo());
+        // Reset the form: clear the secret fields, reload persisted values.
+        $this->form->fill(array_merge($this->loadKlaviyo(), $this->loadSmtp()));
     }
 }

@@ -55,7 +55,12 @@ class ReportPetSnapshotTest extends TestCase
             'diet' => 'Raw',
             'sex' => 'Female',
             'date_of_birth' => '2019-04-01',
-            'health_notes' => 'Occasional loose stools; itchy skin in summer.',
+        ]);
+        // Health notes now live in the log; the stopgap health_notes accessor
+        // Part 2 freezes the notes history as of the report date, dated/formatted.
+        $pet->healthNotes()->create([
+            'date' => '2026-06-17',
+            'note' => 'Occasional loose stools; itchy skin in summer.',
         ]);
 
         // Drive the REAL create page's pre-create mutation (where the other
@@ -80,13 +85,13 @@ class ReportPetSnapshotTest extends TestCase
             'diet' => 'Raw',
             'sex' => 'Female',
             'date_of_birth' => '2019-04-01',
-            'health_notes' => 'Occasional loose stools; itchy skin in summer.',
+            'health_notes' => '2026-06-17 · Occasional loose stools; itchy skin in summer.',
         ], $data['pet_snapshot']);
 
         // Persist and confirm it round-trips through the JSON cast.
         $report = Report::create($data);
         $this->assertSame('Biscuit', $report->fresh()->pet_snapshot['name']);
-        $this->assertSame('Occasional loose stools; itchy skin in summer.', $report->fresh()->pet_snapshot['health_notes']);
+        $this->assertSame('2026-06-17 · Occasional loose stools; itchy skin in summer.', $report->fresh()->pet_snapshot['health_notes']);
     }
 
     public function test_editing_the_pet_after_creation_does_not_change_the_report_snapshot(): void
@@ -96,7 +101,10 @@ class ReportPetSnapshotTest extends TestCase
             'client_id' => $client->id,
             'name' => 'Biscuit',
             'breed' => 'Labrador',
-            'health_notes' => 'Original notes at test time.',
+        ]);
+        $pet->healthNotes()->create([
+            'date' => '2026-06-17',
+            'note' => 'Original notes at test time.',
         ]);
 
         $report = Report::create([
@@ -105,14 +113,17 @@ class ReportPetSnapshotTest extends TestCase
             'sample_id' => 'SNAP-2',
             'report_date' => '2026-06-17',
             'status' => 'draft',
-            'pet_snapshot' => Report::buildPetSnapshot($pet),
+            'pet_snapshot' => Report::buildPetSnapshot($pet->fresh()),
         ]);
 
-        // The pet keeps living — owner updates its name and notes later.
+        // The pet keeps living — owner renames it and logs a newer note later.
         $pet->update([
             'name' => 'Biscuit Renamed',
             'breed' => 'Golden Retriever',
-            'health_notes' => 'Completely different, current notes.',
+        ]);
+        $pet->healthNotes()->create([
+            'date' => '2026-06-18',
+            'note' => 'Completely different, current notes.',
         ]);
 
         $fresh = $report->fresh();
@@ -120,7 +131,7 @@ class ReportPetSnapshotTest extends TestCase
         // The frozen snapshot is unchanged — the whole point.
         $this->assertSame('Biscuit', $fresh->pet_snapshot['name']);
         $this->assertSame('Labrador', $fresh->pet_snapshot['breed']);
-        $this->assertSame('Original notes at test time.', $fresh->pet_snapshot['health_notes']);
+        $this->assertSame('2026-06-17 · Original notes at test time.', $fresh->pet_snapshot['health_notes']);
 
         // And the display accessor returns the FROZEN value, not the live pet's.
         $this->assertSame('Biscuit', $fresh->petField('name'));

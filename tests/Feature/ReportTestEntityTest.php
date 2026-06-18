@@ -115,15 +115,16 @@ class ReportTestEntityTest extends TestCase
             'dysbiosis_score' => 0.3, 'microbiome_classification' => 'Stable',
         ]);
 
-        // The nullable raw lab columns are NULL on the report (the future
-        // post-column-drop state). Proxies must resolve them from the test.
-        // (sample_id + report_date are NOT NULL on reports, so they're always
-        // provided here; their proxy stays dormant until a later phase relaxes
-        // those columns.)
+        // The report has no raw lab columns of its own (dropped in Phase 3d), so
+        // every proxied field — including sample_id/report_date — resolves from
+        // the linked test.
         $report = Report::create([
             'client_id' => $client->id, 'pet_id' => $pet->id, 'test_id' => $test->id,
-            'sample_id' => 'ORD-9', 'report_date' => '2026-06-17', 'status' => 'draft',
+            'status' => 'draft',
         ])->fresh();
+
+        $this->assertSame('ORD-9', $report->sample_id);
+        $this->assertSame('2026-01-01', $report->report_date?->toDateString());
 
         $this->assertSame(['Firmicutes' => 33], $report->phylum_data);
         $this->assertSame(3.3, (float) $report->diversity_score);
@@ -132,27 +133,6 @@ class ReportTestEntityTest extends TestCase
         $this->assertSame('Stable', $report->microbiome_classification);
         $this->assertSame('csv/z.csv', $report->csv_path);
         $this->assertSame(['k' => 'v'], $report->csv_data);
-    }
-
-    public function test_report_proxy_prefers_its_own_column_when_present(): void
-    {
-        $client = $this->client();
-        $pet = Pet::create(['client_id' => $client->id, 'name' => 'Biscuit']);
-
-        $test = Test::create([
-            'pet_id' => $pet->id, 'order_id' => 'ORD-3', 'sample_id' => 'ORD-3',
-            'phylum_data' => ['FromTest' => 1], 'diversity_score' => 1.1,
-        ]);
-
-        // Dual-write state: report has its OWN raw columns; they must win.
-        $report = Report::create([
-            'client_id' => $client->id, 'pet_id' => $pet->id, 'test_id' => $test->id,
-            'sample_id' => 'ORD-3', 'report_date' => '2026-06-17', 'status' => 'draft',
-            'phylum_data' => ['FromReport' => 2], 'diversity_score' => 9.9,
-        ])->fresh();
-
-        $this->assertSame(['FromReport' => 2], $report->phylum_data);
-        $this->assertSame(9.9, (float) $report->diversity_score);
     }
 
     public function test_petfindings_reads_generation_inputs_through_the_proxy(): void

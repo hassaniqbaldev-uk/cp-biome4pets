@@ -7,6 +7,7 @@ use App\Models\Client;
 use App\Models\Pet;
 use App\Models\Report;
 use App\Models\Setting;
+use App\Models\Test;
 use App\Models\User;
 use Filament\Facades\Filament;
 use Illuminate\Support\Facades\Artisan;
@@ -53,11 +54,21 @@ class SendReportActionTest extends TestCase
         $client = Client::create(['name' => 'Jane Owner', 'email' => $email]);
         $pet = Pet::create(['client_id' => $client->id, 'name' => 'Biscuit']);
 
+        // sample_id / report_date live on the Test now; the report reads them
+        // (and builds its slug) through the Report→Test proxy.
+        $test = Test::create([
+            'client_id' => $client->id,
+            'pet_id' => $pet->id,
+            'order_id' => 'SEND-1',
+            'sample_id' => 'SEND-1',
+            'report_date' => '2026-06-15',
+            'status' => 'report_generated',
+        ]);
+
         return Report::create([
             'client_id' => $client->id,
             'pet_id' => $pet->id,
-            'sample_id' => 'SEND-1',
-            'report_date' => '2026-06-15',
+            'test_id' => $test->id,
             'status' => 'published',
         ]);
     }

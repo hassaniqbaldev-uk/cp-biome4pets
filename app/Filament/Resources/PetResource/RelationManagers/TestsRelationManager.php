@@ -5,6 +5,7 @@ namespace App\Filament\Resources\PetResource\RelationManagers;
 use App\Filament\Resources\ReportResource;
 use App\Models\Test;
 use App\Services\LabResultParser;
+use App\Support\AdminFormatting;
 use App\Support\ReportGeneration;
 use Filament\Forms;
 use Filament\Forms\Form;
@@ -132,7 +133,7 @@ class TestsRelationManager extends RelationManager
                     ->searchable()
                     ->toggleable(isToggledHiddenByDefault: true),
                 Tables\Columns\TextColumn::make('report_date')
-                    ->date()
+                    ->date(AdminFormatting::DATE)
                     ->sortable(),
                 Tables\Columns\TextColumn::make('microbiome_classification')
                     ->label('Classification')
@@ -145,11 +146,8 @@ class TestsRelationManager extends RelationManager
                     ->placeholder('—'),
                 Tables\Columns\TextColumn::make('status')
                     ->badge()
-                    ->formatStateUsing(fn (?string $state): string => Test::STATUSES[$state] ?? (string) $state)
-                    ->color(fn (?string $state): string => match ($state) {
-                        'report_generated' => 'success',
-                        default => 'warning',
-                    }),
+                    ->formatStateUsing(fn (?string $state): string => AdminFormatting::testLabel($state))
+                    ->color(fn (?string $state): string => AdminFormatting::testColor($state)),
                 Tables\Columns\TextColumn::make('reports_count')
                     ->label('Report')
                     ->counts('reports')
@@ -158,6 +156,9 @@ class TestsRelationManager extends RelationManager
                     ->color(fn (int $state): string => $state > 0 ? 'success' : 'gray'),
             ])
             ->defaultSort('report_date', 'desc')
+            ->emptyStateIcon('heroicon-o-beaker')
+            ->emptyStateHeading('No tests yet')
+            ->emptyStateDescription('Add a test and upload its lab CSV to get started.')
             ->headerActions([
                 Tables\Actions\CreateAction::make()
                     ->mutateFormDataUsing(fn (array $data): array => $this->prepareTestData($data)),
@@ -189,6 +190,24 @@ class TestsRelationManager extends RelationManager
 
                         return redirect(ReportResource::getUrl('edit', ['record' => $report->getKey()]));
                     }),
+                // Inverse of generate_report: when a report already exists, give
+                // direct access to it. One-per-test is enforced by the generate
+                // guard; if several somehow exist we target the latest.
+                Tables\Actions\Action::make('edit_report')
+                    ->label('Edit report')
+                    ->icon('heroicon-o-pencil-square')
+                    ->color('primary')
+                    ->visible(fn (Test $record): bool => $record->reports()->exists())
+                    ->url(fn (Test $record): ?string => ($report = $record->reports()->latest()->first())
+                        ? ReportResource::getUrl('edit', ['record' => $report->getKey()])
+                        : null),
+                Tables\Actions\Action::make('view_report')
+                    ->label('View report')
+                    ->icon('heroicon-o-eye')
+                    ->color('info')
+                    ->visible(fn (Test $record): bool => $record->reports()->exists())
+                    ->url(fn (Test $record): ?string => optional($record->reports()->latest()->first())->report_url)
+                    ->openUrlInNewTab(),
                 Tables\Actions\DeleteAction::make(),
             ])
             ->bulkActions([
@@ -235,9 +254,10 @@ class TestsRelationManager extends RelationManager
                     Infolists\Components\TextEntry::make('sample_id'),
                     Infolists\Components\TextEntry::make('status')
                         ->badge()
-                        ->formatStateUsing(fn (?string $state): string => Test::STATUSES[$state] ?? (string) $state),
-                    Infolists\Components\TextEntry::make('report_date')->date()->placeholder('—'),
-                    Infolists\Components\TextEntry::make('collected_at')->date()->placeholder('—'),
+                        ->formatStateUsing(fn (?string $state): string => AdminFormatting::testLabel($state))
+                        ->color(fn (?string $state): string => AdminFormatting::testColor($state)),
+                    Infolists\Components\TextEntry::make('report_date')->date(AdminFormatting::DATE)->placeholder('—'),
+                    Infolists\Components\TextEntry::make('collected_at')->date(AdminFormatting::DATE)->placeholder('—'),
                     Infolists\Components\TextEntry::make('csv_path')->label('CSV')->placeholder('—'),
                 ]),
             Infolists\Components\Section::make('Parsed metrics')
@@ -260,8 +280,11 @@ class TestsRelationManager extends RelationManager
                                 ->label('Report')
                                 ->url(fn ($record) => ReportResource::getUrl('edit', ['record' => $record]))
                                 ->openUrlInNewTab(),
-                            Infolists\Components\TextEntry::make('status')->badge(),
-                            Infolists\Components\TextEntry::make('created_at')->dateTime(),
+                            Infolists\Components\TextEntry::make('status')
+                                ->badge()
+                                ->formatStateUsing(fn (?string $state): string => AdminFormatting::reportLabel($state))
+                                ->color(fn (?string $state): string => AdminFormatting::reportColor($state)),
+                            Infolists\Components\TextEntry::make('created_at')->dateTime(AdminFormatting::DATE_TIME),
                         ])
                         ->columns(3),
                     Infolists\Components\TextEntry::make('no_reports')

@@ -90,6 +90,44 @@ class Setting extends Model
     public const KLAVIYO_LAST_RESULT = 'klaviyo_last_result';
 
     /**
+     * Outbound SMTP (Amazon SES SMTP, 587 + STARTTLS). The password is stored
+     * encrypted (same setEncrypted/getDecrypted mechanism as the Klaviyo key);
+     * everything else is plaintext. Each value falls back to its *_DEFAULT when
+     * blank. Read at runtime by App\Support\SmtpConfig to drive Laravel's mailer.
+     */
+    public const SMTP_ENABLED = 'smtp_enabled';
+
+    public const SMTP_HOST = 'smtp_host';
+
+    public const SMTP_HOST_DEFAULT = 'email-smtp.eu-west-2.amazonaws.com';
+
+    public const SMTP_PORT = 'smtp_port';
+
+    public const SMTP_PORT_DEFAULT = '587';
+
+    public const SMTP_ENCRYPTION = 'smtp_encryption';
+
+    public const SMTP_ENCRYPTION_DEFAULT = 'tls';
+
+    public const SMTP_USERNAME = 'smtp_username';
+
+    public const SMTP_PASSWORD = 'smtp_password';
+
+    public const SMTP_FROM_ADDRESS = 'smtp_from_address';
+
+    public const SMTP_FROM_ADDRESS_DEFAULT = 'portal@biome4pets.com';
+
+    public const SMTP_FROM_NAME = 'smtp_from_name';
+
+    public const SMTP_FROM_NAME_DEFAULT = 'Biome4Pets';
+
+    /**
+     * Last SMTP diagnostic result (Send test email), stored as JSON like the
+     * Klaviyo one: {at, action, ok, message}.
+     */
+    public const SMTP_LAST_RESULT = 'smtp_last_result';
+
+    /**
      * Read a raw setting value. Resilient: if the table does not yet exist
      * (e.g. before migration) it returns the default instead of throwing,
      * so callers like OpenAiService never break.

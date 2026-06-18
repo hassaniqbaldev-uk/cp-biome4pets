@@ -5,6 +5,7 @@ namespace App\Models;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Support\Carbon;
 use Illuminate\Support\Str;
 
 class Report extends Model
@@ -13,12 +14,6 @@ class Report extends Model
         'client_id',
         'pet_id',
         'test_id',
-        'sample_id',
-        'report_date',
-        'csv_path',
-        'csv_data',
-        'phylum_data',
-        'diversity_score',
         'ai_summary',
         'ai_bacteroidetes_interpretation',
         'ai_firmicutes_interpretation',
@@ -28,9 +23,6 @@ class Report extends Model
         'vet_notes',
         'status',
         'slug',
-        'species_richness',
-        'dysbiosis_score',
-        'microbiome_classification',
         'score_gut_wall',
         'score_skin_allergy',
         'score_behaviour_mood',
@@ -49,11 +41,9 @@ class Report extends Model
     ];
 
     protected $casts = [
-        'csv_data' => 'array',
-        'phylum_data' => 'array',
-        'diversity_score' => 'float',
-        'dysbiosis_score' => 'float',
-        'species_richness' => 'integer',
+        // Raw lab fields (csv_data/phylum_data/diversity_score/dysbiosis_score/
+        // species_richness) now live on the Test and are cast there; the
+        // Report→Test proxy returns the already-cast Test value.
         'subscription_snapshot' => 'array',
         'pet_snapshot' => 'array',
         'klaviyo_last_sent_at' => 'datetime',
@@ -72,7 +62,7 @@ class Report extends Model
      * Called at report creation and whenever the AI/CSV snapshot is regenerated,
      * so the frozen pet always matches the copy that was generated from it.
      */
-    public static function buildPetSnapshot(?Pet $pet): ?array
+    public static function buildPetSnapshot(?Pet $pet, Carbon|string|null $asOf = null): ?array
     {
         if (! $pet) {
             return null;
@@ -85,7 +75,10 @@ class Report extends Model
             'sex' => $pet->sex,
             // Cast Carbon -> 'Y-m-d' string so the JSON is stable and portable.
             'date_of_birth' => $pet->date_of_birth?->toDateString(),
-            'health_notes' => $pet->health_notes,
+            // Part 2: freeze the pet's health-notes history AS OF the report date
+            // (all entries up to and including it). Same snapshot key as before;
+            // only the value's source (the log) and format (dated history) changed.
+            'health_notes' => $pet->healthNotesForContext($asOf),
         ];
     }
 
@@ -175,10 +168,10 @@ class Report extends Model
     }
 
     /**
-     * Raw lab fields that a report transparently reads from its Test when the
-     * report's own column is null. Phase 3a keeps the report columns (dual-write),
-     * so this is a no-op for freshly generated reports; once the columns are
-     * dropped, every read resolves to the Test instead — with no caller changes.
+     * Raw lab fields a report transparently reads from its Test. The report's own
+     * columns were dropped in Phase 3d, so parent::getAttribute() always returns
+     * null for these and every read resolves to the linked Test — no caller
+     * changes. (A report with no test resolves to null, as before.)
      */
     public const TEST_PROXY_FIELDS = [
         'phylum_data', 'diversity_score', 'species_richness', 'dysbiosis_score',

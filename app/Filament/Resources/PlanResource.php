@@ -16,16 +16,16 @@ class PlanResource extends Resource
 {
     protected static ?string $model = Plan::class;
 
-    protected static ?string $navigationIcon = 'heroicon-o-clipboard-document-list';
+    protected static ?string $navigationIcon = 'heroicon-o-rectangle-stack';
 
-    protected static ?string $navigationGroup = 'Reports Management';
+    protected static ?string $navigationGroup = 'Catalog & Plans';
 
     protected static ?string $navigationLabel = 'Plans';
 
     protected static ?string $modelLabel = 'Plan';
 
-    // Just after Product Catalog (navigationSort 3).
-    protected static ?int $navigationSort = 4;
+    // After Product Catalog within the Catalog & Plans group.
+    protected static ?int $navigationSort = 2;
 
     public static function form(Form $form): Form
     {
@@ -204,9 +204,12 @@ class PlanResource extends Resource
                     ->boolean()
                     ->sortable(),
                 Tables\Columns\TextColumn::make('subscription_price')
-                    ->label('Subscription'),
+                    ->label('Subscription')
+                    ->money('GBP')
+                    ->placeholder('—'),
                 Tables\Columns\TextColumn::make('updated_at')
-                    ->dateTime()
+                    ->label('Updated')
+                    ->date(\App\Support\AdminFormatting::DATE)
                     ->sortable(),
             ])
             ->filters([

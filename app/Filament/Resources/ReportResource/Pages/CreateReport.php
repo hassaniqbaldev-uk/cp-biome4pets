@@ -51,8 +51,11 @@ class CreateReport extends CreateRecord
         // Freeze the pet's identity + health notes as-now, alongside the lab/AI
         // and subscription snapshots. The Pet stays the living source; this is a
         // copy so later edits to the pet don't change an already-generated report.
+        // Part 2: freeze the notes history as of the report's date (all entries up
+        // to and including it), so the report reflects what was known at that point.
         $data['pet_snapshot'] = \App\Models\Report::buildPetSnapshot(
-            \App\Models\Pet::find($data['pet_id'] ?? null)
+            \App\Models\Pet::find($data['pet_id'] ?? null),
+            $data['report_date'] ?? null,
         );
 
         // If phylum_data or diversity_score are missing, re-parse the CSV
@@ -95,13 +98,14 @@ class CreateReport extends CreateRecord
     }
 
     /**
-     * Phase 3c: every report attaches to a Test, created+linked atomically.
+     * Phase 3c/3d: every report attaches to a Test, created+linked atomically.
      *   - existing-test path: reuse the chosen report-less test.
      *   - new-CSV path: find-or-create the test by (pet_id + order_id==sample_id)
      *     and store the freshly parsed raw data on it.
-     * Either way the raw lab data is mirrored onto the report's own columns
-     * (dual-write) for now; the test is the source of truth. There is no path
-     * that writes raw data only to the report.
+     * The raw lab data lives ONLY on the test (source of truth); it is stripped
+     * from the report payload below. The report reads it via the Report→Test
+     * proxy, and its slug "creating" hook resolves sample_id through that proxy
+     * (test_id is set before create).
      */
     protected function handleRecordCreation(array $data): Model
     {
@@ -115,25 +119,25 @@ class CreateReport extends CreateRecord
             if (filled($existingTestId)) {
                 $test = Test::find($existingTestId);
             } elseif (filled($data['pet_id'] ?? null) && filled($data['sample_id'] ?? null)) {
+                // syncRawForReport reads the raw + sample_id/report_date keys
+                // straight off $data, so this must run before they're stripped.
                 $test = Test::syncRawForReport($data);
             }
 
             if ($test) {
                 $data['test_id'] = $test->id;
 
-                // Mirror the test's raw data + sample/date onto the report so the
-                // report's own (still-present) columns match the source of truth.
-                $data['sample_id'] = $test->sample_id ?? $data['sample_id'] ?? null;
-                $data['report_date'] = $data['report_date'] ?? optional($test->report_date)->toDateString();
-                foreach (['csv_path', 'csv_data', 'phylum_data', 'diversity_score',
-                    'species_richness', 'dysbiosis_score', 'microbiome_classification'] as $field) {
-                    $data[$field] = $test->{$field};
-                }
-
                 if ($test->status !== 'report_generated') {
                     $test->update(['status' => 'report_generated']);
                 }
             }
+
+            // Raw lab data is owned by the Test now — never write it on the report.
+            unset(
+                $data['sample_id'], $data['report_date'], $data['csv_path'], $data['csv_data'],
+                $data['phylum_data'], $data['diversity_score'], $data['species_richness'],
+                $data['dysbiosis_score'], $data['microbiome_classification'],
+            );
 
             return static::getModel()::create($data);
         });
