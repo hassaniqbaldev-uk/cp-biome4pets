@@ -24,7 +24,7 @@ class ClientResource extends Resource
 
     public static function getGloballySearchableAttributes(): array
     {
-        return ['name', 'email', 'phone', 'order_number'];
+        return ['name', 'email', 'phone'];
     }
 
     public static function form(Form $form): Form
@@ -40,8 +40,6 @@ class ClientResource extends Resource
                     ->maxLength(255),
                 Forms\Components\TextInput::make('phone')
                     ->tel()
-                    ->maxLength(255),
-                Forms\Components\TextInput::make('order_number')
                     ->maxLength(255),
                 Forms\Components\TextInput::make('shopify_client_id')
                     ->label('Shopify Client ID')
@@ -59,8 +57,6 @@ class ClientResource extends Resource
                 Tables\Columns\TextColumn::make('email')
                     ->searchable(),
                 Tables\Columns\TextColumn::make('phone')
-                    ->searchable(),
-                Tables\Columns\TextColumn::make('order_number')
                     ->searchable(),
                 Tables\Columns\TextColumn::make('shopify_client_id')
                     ->label('Shopify Client ID')

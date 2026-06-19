@@ -13,11 +13,14 @@ class Plan extends Model
         'name',
         'trigger_description',
         'enabled',
+        'is_fallback',
+        'match_priority',
         'species_availability',
         'intro_guidance',
         'position',
         'subscription_available',
         'subscription_price',
+        'subscription_full_price',
         'subscription_billing_note',
         'subscription_includes',
         'subscription_url',
@@ -26,6 +29,8 @@ class Plan extends Model
 
     protected $casts = [
         'enabled' => 'boolean',
+        'is_fallback' => 'boolean',
+        'match_priority' => 'integer',
         'subscription_available' => 'boolean',
         'subscription_includes' => 'array',
         'position' => 'integer',
@@ -34,6 +39,15 @@ class Plan extends Model
     public function steps(): HasMany
     {
         return $this->hasMany(PlanStep::class)->orderBy('position');
+    }
+
+    /**
+     * The trigger-set conditions that auto-recommend this plan. Each row is an
+     * AND-set; rows are OR-ed. Ordered by position for tidy display/editing.
+     */
+    public function triggerConditions(): HasMany
+    {
+        return $this->hasMany(PlanTriggerCondition::class)->orderBy('position');
     }
 
     public function scopeEnabled(Builder $query): Builder

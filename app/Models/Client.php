@@ -10,7 +10,6 @@ class Client extends Model
         'name',
         'email',
         'phone',
-        'order_number',
         'shopify_client_id',
     ];
 

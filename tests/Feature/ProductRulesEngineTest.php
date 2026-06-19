@@ -63,7 +63,14 @@ class ProductRulesEngineTest extends TestCase
     }
 
     /**
-     * The exact original hardcoded logic, used as the oracle for equivalence.
+     * The canonical rule set, used as the oracle for equivalence. Mirrors
+     * ProductRuleSeeder and CsvParserService's hardcoded fallback exactly:
+     *   AMR          = Bacteroidetes outside [10, 30]
+     *   Prebiotic    = Firmicutes < 18
+     *   Antimicrobic = Bacteroidetes > 30
+     *   FMT          = diversity < 1.6
+     * (The retired "Biotic Boost" trigger and the old Fusobacteria/2.5 thresholds
+     * are gone.)
      */
     private function hardcoded(array $phylum, float $diversity): array
     {
@@ -75,13 +82,10 @@ class ProductRulesEngineTest extends TestCase
         if (($phylum['Firmicutes'] ?? 0) < 18) {
             $t[] = 'Prebiotic';
         }
-        if (($phylum['Proteobacteria'] ?? 0) > 10) {
-            $t[] = 'Biotic Boost';
-        }
-        if (($phylum['Fusobacteria'] ?? 0) > 25) {
+        if ($b > 30) {
             $t[] = 'Antimicrobic';
         }
-        if ($diversity < 2.5) {
+        if ($diversity < 1.6) {
             $t[] = 'FMT';
         }
 
@@ -90,15 +94,15 @@ class ProductRulesEngineTest extends TestCase
 
     public static function knownInputs(): array
     {
+        // Canonical rules: AMR = Bacteroidetes outside [10,30], Prebiotic =
+        // Firmicutes < 18, Antimicrobic = Bacteroidetes > 30, FMT = diversity < 1.6.
         return [
-            // bhaoo / maarji style: high Fusobacteria + low diversity -> Antimicrobic + FMT
-            'antimicrobic + fmt' => [['Bacteroidetes' => 20, 'Firmicutes' => 25, 'Proteobacteria' => 5, 'Fusobacteria' => 30], 2.0],
+            'fmt only (low diversity, balanced phyla)' => [['Bacteroidetes' => 20, 'Firmicutes' => 25, 'Proteobacteria' => 5, 'Fusobacteria' => 30], 1.5],
             'all clear' => [['Bacteroidetes' => 20, 'Firmicutes' => 25, 'Proteobacteria' => 5, 'Fusobacteria' => 10], 3.5],
-            'amr high' => [['Bacteroidetes' => 45, 'Firmicutes' => 25, 'Proteobacteria' => 5, 'Fusobacteria' => 10], 3.5],
+            'amr + antimicrobic (high bacteroidetes)' => [['Bacteroidetes' => 45, 'Firmicutes' => 25, 'Proteobacteria' => 5, 'Fusobacteria' => 10], 3.5],
             'amr low + prebiotic' => [['Bacteroidetes' => 5, 'Firmicutes' => 10, 'Proteobacteria' => 5, 'Fusobacteria' => 10], 3.5],
-            'biotic boost' => [['Bacteroidetes' => 20, 'Firmicutes' => 25, 'Proteobacteria' => 15, 'Fusobacteria' => 10], 3.5],
-            'boundary exactly 30/10/18/25/2.5 (none fire)' => [['Bacteroidetes' => 30, 'Firmicutes' => 18, 'Proteobacteria' => 10, 'Fusobacteria' => 25], 2.5],
-            'all fire' => [['Bacteroidetes' => 50, 'Firmicutes' => 5, 'Proteobacteria' => 20, 'Fusobacteria' => 40], 1.0],
+            'boundary exactly 30/18/1.6 (none fire)' => [['Bacteroidetes' => 30, 'Firmicutes' => 18, 'Proteobacteria' => 10, 'Fusobacteria' => 25], 1.6],
+            'all fire (amr+antimicrobic+prebiotic+fmt)' => [['Bacteroidetes' => 50, 'Firmicutes' => 5, 'Proteobacteria' => 20, 'Fusobacteria' => 40], 1.0],
         ];
     }
 
@@ -115,17 +119,19 @@ class ProductRulesEngineTest extends TestCase
         $this->assertSame($expected, $actual);
     }
 
-    public function test_bhaoo_maarji_data_fires_antimicrobic_and_fmt(): void
+    public function test_high_bacteroidetes_low_diversity_fires_amr_antimicrobic_and_fmt(): void
     {
         (new ProductRuleSeeder())->run();
 
         $fired = $this->service->evaluateProductRules(
-            ['Bacteroidetes' => 20, 'Firmicutes' => 25, 'Proteobacteria' => 5, 'Fusobacteria' => 30],
-            2.0,
+            ['Bacteroidetes' => 35, 'Firmicutes' => 25, 'Proteobacteria' => 5, 'Fusobacteria' => 30],
+            1.5,
         );
 
         sort($fired);
-        $this->assertSame(['Antimicrobic', 'FMT'], $fired);
+        // Bacteroidetes 35 is > 30 (Antimicrobic) and outside [10,30] (AMR);
+        // diversity 1.5 < 1.6 (FMT). Antimicrobic always co-fires AMR.
+        $this->assertSame(['AMR', 'Antimicrobic', 'FMT'], $fired);
     }
 
     public function test_empty_table_falls_back_to_hardcoded(): void
@@ -134,13 +140,13 @@ class ProductRulesEngineTest extends TestCase
         $this->assertSame(0, ProductRule::count());
 
         $phylum = ['Bacteroidetes' => 45, 'Firmicutes' => 10, 'Proteobacteria' => 15, 'Fusobacteria' => 30];
-        $fired = $this->service->evaluateProductRules($phylum, 2.0);
+        $fired = $this->service->evaluateProductRules($phylum, 1.5);
 
-        $expected = $this->hardcoded($phylum, 2.0);
+        $expected = $this->hardcoded($phylum, 1.5);
         sort($expected);
         sort($fired);
         $this->assertSame($expected, $fired);
-        $this->assertSame(['AMR', 'Antimicrobic', 'Biotic Boost', 'FMT', 'Prebiotic'], $fired);
+        $this->assertSame(['AMR', 'Antimicrobic', 'FMT', 'Prebiotic'], $fired);
     }
 
     public function test_new_rule_fires_and_becomes_selectable_on_products(): void
@@ -191,13 +197,36 @@ class ProductRulesEngineTest extends TestCase
         (new ProductRuleSeeder())->run();
         ProductRule::where('trigger_name', 'FMT')->update(['is_active' => false]);
 
+        // Bacteroidetes 35 fires Antimicrobic (and AMR); diversity 1.5 would fire
+        // FMT, but FMT is disabled — so it must not appear.
         $fired = $this->service->evaluateProductRules(
-            ['Bacteroidetes' => 20, 'Firmicutes' => 25, 'Proteobacteria' => 5, 'Fusobacteria' => 30],
-            2.0,
+            ['Bacteroidetes' => 35, 'Firmicutes' => 25, 'Proteobacteria' => 5, 'Fusobacteria' => 30],
+            1.5,
         );
 
         $this->assertContains('Antimicrobic', $fired);
         $this->assertNotContains('FMT', $fired);
+    }
+
+    /**
+     * FMT boundary precision: the rule is strict `<` 1.6, so 1.59 fires and an
+     * exact 1.60 does NOT. Phyla are balanced so FMT (diversity) is the only
+     * trigger in play.
+     */
+    public function test_fmt_threshold_is_strict_below_1_point_6(): void
+    {
+        (new ProductRuleSeeder())->run();
+
+        $phylum = ['Bacteroidetes' => 20, 'Firmicutes' => 25, 'Proteobacteria' => 5, 'Fusobacteria' => 10];
+
+        // 1.59 is below 1.6 → FMT recommended.
+        $this->assertContains('FMT', $this->service->evaluateProductRules($phylum, 1.59));
+
+        // Exactly 1.60 is not below 1.6 (strict <) → FMT NOT recommended.
+        $this->assertNotContains('FMT', $this->service->evaluateProductRules($phylum, 1.60));
+
+        // Just above stays off too.
+        $this->assertNotContains('FMT', $this->service->evaluateProductRules($phylum, 1.61));
     }
 
     public function test_unknown_metric_is_skipped_not_crashed(): void

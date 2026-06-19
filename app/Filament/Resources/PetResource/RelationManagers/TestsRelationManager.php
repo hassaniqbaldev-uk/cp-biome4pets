@@ -16,7 +16,6 @@ use Filament\Resources\RelationManagers\RelationManager;
 use Filament\Tables;
 use Filament\Tables\Table;
 use Illuminate\Support\Facades\Storage;
-use Livewire\Features\SupportFileUploads\TemporaryUploadedFile;
 
 /**
  * The pet's Tests (sample history). Mirrors the Client → PetsRelationManager
@@ -41,67 +40,27 @@ class TestsRelationManager extends RelationManager
                     ->required()
                     ->maxLength(255)
                     ->helperText('Entered manually for now. Used as the test\'s sample reference too.'),
+                // A test's single date is when the results came in (its sample /
+                // results date) — NOT a "report date" (a report may not exist yet).
+                // Stored in report_date, which report generation reads as its as-of.
                 Forms\Components\DatePicker::make('report_date')
-                    ->label('Report date'),
-                Forms\Components\DatePicker::make('collected_at')
-                    ->label('Sample collected'),
-                Forms\Components\Select::make('status')
-                    ->options(Test::STATUSES)
-                    ->default('results_received')
-                    ->required()
-                    ->native(false),
+                    ->label('Test date')
+                    ->helperText('The date the lab results are dated / came in.')
+                    ->default(now()),
 
+                // The CSV *is* the test's lab data — uploading it is how a test's
+                // metrics are captured. Parsed automatically on upload (no button
+                // to remember); re-parsed on save so the stored data always matches.
                 Forms\Components\FileUpload::make('csv_path')
-                    ->label('Lab CSV')
+                    ->label('Lab data (CSV)')
                     ->acceptedFileTypes(['text/csv', '.csv'])
                     ->directory('csv')
                     ->disk('public')
                     ->maxSize(10240)
+                    ->live()
+                    ->afterStateUpdated(fn ($state, Forms\Set $set) => ReportResource::parseCsvIntoForm($state, $set))
                     ->columnSpanFull()
-                    ->helperText('Upload the lab CSV, then click "Process CSV" to preview the parsed metrics. The data is (re)parsed onto the test when you save.'),
-
-                Forms\Components\Actions::make([
-                    Forms\Components\Actions\Action::make('process_csv')
-                        ->label('Process CSV')
-                        ->icon('heroicon-o-sparkles')
-                        ->color('primary')
-                        ->action(function (Forms\Get $get, Forms\Set $set) {
-                            $csv = $get('csv_path');
-                            if (is_array($csv)) {
-                                $csv = array_values($csv)[0] ?? null;
-                            }
-                            if (empty($csv)) {
-                                Notification::make()->title('Please upload a CSV file first')->danger()->send();
-                                return;
-                            }
-
-                            $path = $csv instanceof TemporaryUploadedFile
-                                ? $csv->getRealPath()
-                                : (is_string($csv) ? Storage::disk('public')->path($csv) : null);
-
-                            if (! $path || ! is_file($path)) {
-                                Notification::make()->title('CSV file not found on disk')->danger()->send();
-                                return;
-                            }
-
-                            $lab = (new LabResultParser())->fromPath($path);
-
-                            // Live preview only; persistence is guaranteed by the
-                            // re-parse in mutateFormDataUsing on save.
-                            $set('phylum_data', $lab['phylum_data']);
-                            $set('diversity_score', $lab['diversity_score']);
-                            $set('species_richness', $lab['species_richness']);
-                            $set('dysbiosis_score', $lab['dysbiosis_score']);
-                            $set('microbiome_classification', $lab['microbiome_classification']);
-                            $set('csv_data', $lab['csv_data']);
-
-                            Notification::make()
-                                ->title('CSV parsed')
-                                ->body($lab['microbiome_classification'] . ' · diversity ' . $lab['diversity_score'])
-                                ->success()
-                                ->send();
-                        }),
-                ])->columnSpanFull(),
+                    ->helperText('Upload the lab CSV — it is parsed automatically and the metrics appear below.'),
 
                 Forms\Components\Placeholder::make('parsed_preview')
                     ->label('Parsed metrics')
@@ -109,10 +68,10 @@ class TestsRelationManager extends RelationManager
                     ->content(function (Forms\Get $get): string {
                         $class = $get('microbiome_classification');
                         if (blank($class)) {
-                            return 'No metrics yet — upload a CSV and click "Process CSV", or just save to parse it.';
+                            return 'No metrics yet — upload the lab CSV above and it will be parsed automatically.';
                         }
 
-                        return 'Classification: ' . $class
+                        return '✓ Processed — Classification: ' . $class
                             . '  ·  Diversity: ' . $get('diversity_score')
                             . '  ·  Richness: ' . $get('species_richness')
                             . '  ·  Dysbiosis: ' . $get('dysbiosis_score');
@@ -133,6 +92,7 @@ class TestsRelationManager extends RelationManager
                     ->searchable()
                     ->toggleable(isToggledHiddenByDefault: true),
                 Tables\Columns\TextColumn::make('report_date')
+                    ->label('Test date')
                     ->date(AdminFormatting::DATE)
                     ->sortable(),
                 Tables\Columns\TextColumn::make('microbiome_classification')
@@ -144,16 +104,14 @@ class TestsRelationManager extends RelationManager
                     ->label('Diversity')
                     ->numeric(decimalPlaces: 2)
                     ->placeholder('—'),
-                Tables\Columns\TextColumn::make('status')
-                    ->badge()
-                    ->formatStateUsing(fn (?string $state): string => AdminFormatting::testLabel($state))
-                    ->color(fn (?string $state): string => AdminFormatting::testColor($state)),
+                // Derived state (the stored status column was dropped): a test is
+                // "Reported" once a report links it, else "Awaiting report".
                 Tables\Columns\TextColumn::make('reports_count')
-                    ->label('Report')
+                    ->label('State')
                     ->counts('reports')
                     ->badge()
-                    ->formatStateUsing(fn (int $state): string => $state > 0 ? "{$state} generated" : 'Not yet')
-                    ->color(fn (int $state): string => $state > 0 ? 'success' : 'gray'),
+                    ->formatStateUsing(fn (int $state): string => AdminFormatting::testStateLabel($state > 0))
+                    ->color(fn (int $state): string => AdminFormatting::testStateColor($state > 0)),
             ])
             ->defaultSort('report_date', 'desc')
             ->emptyStateIcon('heroicon-o-beaker')
@@ -239,7 +197,6 @@ class TestsRelationManager extends RelationManager
 
         $data['sample_id'] = $data['order_id'] ?? ($data['sample_id'] ?? null);
         $data['client_id'] = $this->getOwnerRecord()->client_id;
-        $data['status'] = $data['status'] ?? 'results_received';
 
         return $data;
     }
@@ -252,13 +209,13 @@ class TestsRelationManager extends RelationManager
                 ->schema([
                     Infolists\Components\TextEntry::make('order_id')->label('Order / Test ID'),
                     Infolists\Components\TextEntry::make('sample_id'),
-                    Infolists\Components\TextEntry::make('status')
+                    Infolists\Components\TextEntry::make('state')
+                        ->label('State')
                         ->badge()
-                        ->formatStateUsing(fn (?string $state): string => AdminFormatting::testLabel($state))
-                        ->color(fn (?string $state): string => AdminFormatting::testColor($state)),
-                    Infolists\Components\TextEntry::make('report_date')->date(AdminFormatting::DATE)->placeholder('—'),
-                    Infolists\Components\TextEntry::make('collected_at')->date(AdminFormatting::DATE)->placeholder('—'),
-                    Infolists\Components\TextEntry::make('csv_path')->label('CSV')->placeholder('—'),
+                        ->getStateUsing(fn (Test $record): string => AdminFormatting::testStateLabel($record->hasReport()))
+                        ->color(fn (Test $record): string => AdminFormatting::testStateColor($record->hasReport())),
+                    Infolists\Components\TextEntry::make('report_date')->label('Test date')->date(AdminFormatting::DATE)->placeholder('—'),
+                    Infolists\Components\TextEntry::make('csv_path')->label('Lab data (CSV)')->placeholder('—'),
                 ]),
             Infolists\Components\Section::make('Parsed metrics')
                 ->columns(4)

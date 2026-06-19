@@ -3,6 +3,7 @@
 namespace App\Filament\Resources\PlanResource\Pages;
 
 use App\Filament\Resources\PlanResource;
+use App\Models\Plan;
 use App\Models\PlanStep;
 use Filament\Actions;
 use Filament\Resources\Pages\EditRecord;
@@ -12,6 +13,8 @@ class EditPlan extends EditRecord
     protected static string $resource = PlanResource::class;
 
     protected array $planSteps = [];
+
+    protected array $planTriggerConditions = [];
 
     protected function getHeaderActions(): array
     {
@@ -40,15 +43,23 @@ class EditPlan extends EditRecord
                 ])->all(),
             ])->all();
 
+        // Hydrate the editable trigger conditions (ordered by position).
+        $data['trigger_conditions'] = $this->record->triggerConditions
+            ->map(fn ($condition) => ['required_triggers' => $condition->required_triggers ?? []])
+            ->all();
+
         return $data;
     }
 
     protected function mutateFormDataBeforeSave(array $data): array
     {
-        // Hold the raw plan steps aside; persisted via relations in afterSave
-        // (kept out of the core Plan mass-assignment).
+        // Hold the raw plan steps + trigger conditions aside; persisted via
+        // relations in afterSave (kept out of the core Plan mass-assignment).
         $this->planSteps = $data['steps'] ?? [];
         unset($data['steps']);
+
+        $this->planTriggerConditions = $data['trigger_conditions'] ?? [];
+        unset($data['trigger_conditions']);
 
         return $data;
     }
@@ -56,7 +67,48 @@ class EditPlan extends EditRecord
     protected function afterSave(): void
     {
         $this->persistPlanSteps($this->planSteps);
+        $this->persistTriggerConditions($this->planTriggerConditions);
+        $this->enforceSingleFallback();
         $this->syncSubscriptionIncludes();
+    }
+
+    /**
+     * Rebuild plan_trigger_conditions from the `trigger_conditions` form state
+     * (delete + recreate in order). Empty rows are dropped — an empty required
+     * set would trivially match everything in the matcher.
+     */
+    protected function persistTriggerConditions(array $rows): void
+    {
+        $this->record->triggerConditions()->delete();
+
+        foreach (array_values($rows) as $position => $row) {
+            $triggers = array_values(array_filter((array) ($row['required_triggers'] ?? [])));
+
+            if ($triggers === []) {
+                continue;
+            }
+
+            $this->record->triggerConditions()->create([
+                'position' => $position,
+                'required_triggers' => $triggers,
+            ]);
+        }
+    }
+
+    /**
+     * Guard rail: at most one fallback plan. When this plan was saved as the
+     * fallback, clear the flag on every other plan so the matcher has a single,
+     * unambiguous "no triggers fired" target.
+     */
+    protected function enforceSingleFallback(): void
+    {
+        if (! $this->record->is_fallback) {
+            return;
+        }
+
+        Plan::where('id', '!=', $this->record->getKey())
+            ->where('is_fallback', true)
+            ->update(['is_fallback' => false]);
     }
 
     /**

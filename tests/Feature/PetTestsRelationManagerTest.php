@@ -58,7 +58,6 @@ class PetTestsRelationManagerTest extends TestCase
             'order_id' => 'ORD-100',
             'csv_path' => 'csv/lab.csv',
             'report_date' => '2026-06-17',
-            'status' => 'results_received',
         ]);
 
         // Persist via the relationship exactly as the CreateAction would.
@@ -69,7 +68,7 @@ class PetTestsRelationManagerTest extends TestCase
         $this->assertSame('ORD-100', $test->sample_id);   // mirrors order_id
         $this->assertSame($pet->id, $test->pet_id);
         $this->assertSame($client->id, $test->client_id);
-        $this->assertSame('results_received', $test->status);
+        $this->assertFalse($test->hasReport());   // derived: no report yet
 
         // Raw lab data parsed ONTO the test.
         $this->assertIsArray($test->phylum_data);

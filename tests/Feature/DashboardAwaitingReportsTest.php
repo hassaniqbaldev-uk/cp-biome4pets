@@ -59,7 +59,6 @@ class DashboardAwaitingReportsTest extends TestCase
             'order_id' => 'ORD-AWAIT',
             'sample_id' => 'ORD-AWAIT',
             'report_date' => '2026-03-01',
-            'status' => 'results_received',
         ]);
 
         $reported = Test::create([
@@ -68,7 +67,6 @@ class DashboardAwaitingReportsTest extends TestCase
             'order_id' => 'ORD-DONE',
             'sample_id' => 'ORD-DONE',
             'report_date' => '2026-03-02',
-            'status' => 'report_generated',
         ]);
         Report::create([
             'client_id' => $client->id,

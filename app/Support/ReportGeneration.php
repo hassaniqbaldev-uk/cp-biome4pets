@@ -100,9 +100,10 @@ class ReportGeneration
      * Entry A: build a draft Report FROM a Test (the "Generate report" action).
      * pet/client come from the test; AI + product/plan are generated from the
      * test's raw data; the pet snapshot is frozen now. The raw lab data stays on
-     * the Test (the report reads it via the Report→Test proxy). Atomic; also
-     * advances the test's status to report_generated. The plan is applied later
-     * in the report editor (its subscription_snapshot is captured there).
+     * the Test (the report reads it via the Report→Test proxy). Atomic. The test's
+     * "reported" state is now derived from this report's existence (no status to
+     * advance). The plan is applied later in the report editor (its
+     * subscription_snapshot is captured there).
      */
     public static function createReportFromTest(Test $test): Report
     {
@@ -130,8 +131,6 @@ class ReportGeneration
                 }
                 $report->catalogProducts()->sync($sync);
             }
-
-            $test->update(['status' => 'report_generated']);
 
             return $report;
         });

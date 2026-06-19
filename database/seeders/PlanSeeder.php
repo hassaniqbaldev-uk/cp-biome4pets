@@ -21,6 +21,21 @@ class PlanSeeder extends Seeder
     private const DEFAULT_SUBSCRIPTION_URL = 'https://biome4pets.com';
 
     /**
+     * The trigger-set → plan mapping, seeded into plan_trigger_conditions +
+     * plans.is_fallback / match_priority. Reproduces EXACTLY the (former
+     * hardcoded) recommendPlanId() precedence so the data-driven matcher behaves
+     * identically out of the box. priority: lower = checked first. conditions:
+     * each inner array is an AND-set; the outer array OR-s them.
+     */
+    private const TRIGGER_CONFIG = [
+        'rebuild-renew' => ['priority' => 1, 'fallback' => false, 'conditions' => [['FMT']]],
+        'reset-recover' => ['priority' => 2, 'fallback' => false, 'conditions' => [['AMR', 'Antimicrobic']]],
+        'restore-rebalance' => ['priority' => 3, 'fallback' => false, 'conditions' => [['AMR', 'Prebiotic']]],
+        // The fallback: chosen only when NO triggers fire. No condition rows.
+        'maintain-protect' => ['priority' => 1000, 'fallback' => true, 'conditions' => []],
+    ];
+
+    /**
      * The four plans, matching their reference HTML files exactly. Factual
      * product fields (name/price/url/image) come from the catalogue. Prose
      * steps carry body/tip as editable DEFAULTS (the report generator rewrites
@@ -57,28 +72,37 @@ class PlanSeeder extends Seeder
         // subscription_url is intentionally NOT in the payload so an admin's
         // Shopify link set via the Plans resource survives a reseed.
         foreach ($plans as $position => $def) {
+            $cfg = self::TRIGGER_CONFIG[$def['key']] ?? ['priority' => 1000, 'fallback' => false, 'conditions' => []];
+
             $plan = Plan::updateOrCreate(
                 ['key' => $def['key']],
                 [
                     'name' => $def['name'],
                     'trigger_description' => $def['trigger_description'],
                     'enabled' => true,
+                    'is_fallback' => $cfg['fallback'],
+                    'match_priority' => $cfg['priority'],
                     'species_availability' => 'both',
                     'position' => $position,
                     'subscription_available' => $def['subscription']['available'],
                     'subscription_price' => $def['subscription']['price'],
+                    'subscription_full_price' => $def['subscription']['full_price'] ?? null,
                     'subscription_billing_note' => $def['subscription']['billing_note'],
                     'subscription_includes' => $def['subscription']['includes'],
-                    // Saving message now lives in the billing note, so this stays empty.
-                    'subscription_saving_label' => null,
+                    // "15% off" badge on the £29.75 plans (15% off the £35 full price);
+                    // null elsewhere (e.g. rebuild-renew's £132 intro).
+                    'subscription_saving_label' => $def['subscription']['saving_label'] ?? null,
                 ],
             );
 
-            // Backfill the default subscribe link only where one isn't set, so a
-            // reseed makes new/blank plans live without clobbering an admin's
-            // changed URL (the upsert payload above still omits subscription_url).
-            if (blank($plan->subscription_url)) {
-                $plan->subscription_url = self::DEFAULT_SUBSCRIPTION_URL;
+            // Seed the real per-plan Loop checkout URL, but never clobber a URL an
+            // admin set in the Plans panel. We (re)write only when the field is
+            // blank OR still holds the old generic biome4pets.com placeholder — so
+            // a fresh seed gets the real Loop URLs and existing placeholders are
+            // upgraded, while genuinely custom admin URLs survive.
+            $seedUrl = $def['subscription']['url'] ?? self::DEFAULT_SUBSCRIPTION_URL;
+            if (blank($plan->subscription_url) || $plan->subscription_url === self::DEFAULT_SUBSCRIPTION_URL) {
+                $plan->subscription_url = $seedUrl;
                 $plan->save();
             }
 
@@ -107,6 +131,16 @@ class PlanSeeder extends Seeder
                         'position' => $productIndex,
                     ]);
                 }
+            }
+
+            // Rebuild this plan's trigger conditions in place from TRIGGER_CONFIG,
+            // reproducing the former hardcoded recommendPlanId() mapping exactly.
+            $plan->triggerConditions()->delete();
+            foreach ($cfg['conditions'] as $conditionIndex => $requiredTriggers) {
+                $plan->triggerConditions()->create([
+                    'position' => $conditionIndex,
+                    'required_triggers' => $requiredTriggers,
+                ]);
             }
         }
 
@@ -157,7 +191,10 @@ class PlanSeeder extends Seeder
                 'subscription' => [
                     'available' => true,
                     'price' => '£29.75 / month',
-                    'billing_note' => 'Save 20% vs buying separately · billed monthly',
+                    'full_price' => '£35 / month',
+                    'saving_label' => '15% off',
+                    'billing_note' => 'Save 15% vs buying separately · billed monthly',
+                    'url' => 'https://biome4pets.myshopify.com/a/loop_subscriptions/checkout/01KVFN3419VW0QBD38EWPY1BWH',
                     'includes' => ['PetBiome AMR', 'PetBiome Prebiotic', 'PetBiome Maintenance'],
                 ],
                 'steps' => [
@@ -203,7 +240,10 @@ class PlanSeeder extends Seeder
                 'subscription' => [
                     'available' => true,
                     'price' => '£29.75 / month',
-                    'billing_note' => 'Save 20% vs buying separately · billed monthly',
+                    'full_price' => '£35 / month',
+                    'saving_label' => '15% off',
+                    'billing_note' => 'Save 15% vs buying separately · billed monthly',
+                    'url' => 'https://biome4pets.myshopify.com/a/loop_subscriptions/checkout/01KVFXHBGETW1GQ20HSN4F45C5',
                     'includes' => ['PetBiome AMR', 'Antimicrobic', 'PetBiome Maintenance'],
                 ],
                 'steps' => [
@@ -249,7 +289,10 @@ class PlanSeeder extends Seeder
                 'subscription' => [
                     'available' => true,
                     'price' => '£29.75 / month',
-                    'billing_note' => 'Save 20% vs buying separately · billed monthly',
+                    'full_price' => '£35 / month',
+                    'saving_label' => '15% off',
+                    'billing_note' => 'Save 15% vs buying separately · billed monthly',
+                    'url' => 'https://biome4pets.myshopify.com/a/loop_subscriptions/checkout/01KVFYG4BH3SYHTXTMR26Z8PM1',
                     'includes' => ['PetBiome Maintenance'],
                 ],
                 'steps' => [
@@ -272,7 +315,8 @@ class PlanSeeder extends Seeder
                 'subscription' => [
                     'available' => true,
                     'price' => '£132 / month',
-                    'billing_note' => 'First 3 months, then £29.75/mo · save 20%',
+                    'billing_note' => 'First 3 months, then £29.75/mo · save 15%',
+                    'url' => 'https://biome4pets.myshopify.com/a/loop_subscriptions/checkout/01KVFYJ4KGZ71REZYHS03KQF4Z',
                     'includes' => ['PetBiome AMR', 'Gut Renew', 'PetBiome Maintenance'],
                 ],
                 'steps' => [

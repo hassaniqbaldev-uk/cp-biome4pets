@@ -373,7 +373,7 @@
                             'desc' => 'Core bacteria present but at levels that may impact gut health',
                         ],
                         [
-                            'name' => 'Imbalanced & Missing',
+                            'name' => 'Imbalanced & Depleted',
                             'color' => 'red',
                             'border' => 'border-red-400',
                             'bg' => 'bg-red-50',
@@ -559,10 +559,19 @@
             $snapshot = $report->subscription_snapshot ?? [];
             $subAvailable = $subsGloballyEnabled && (bool) data_get($snapshot, 'available', false);
             $subPrice = data_get($snapshot, 'price');
+            // Full (pre-subscription) price, shown struck through to convey the saving.
+            $subFullPrice = data_get($snapshot, 'full_price');
             $subBilling = data_get($snapshot, 'billing_note');
             $subUrl = data_get($snapshot, 'url');
             $subIncludes = data_get($snapshot, 'includes', []);
             $planName = $report->plan?->name;
+
+            // Subscribe now goes through the interstitial, which redirects to the
+            // LIVE plan's checkout URL (not the frozen snapshot) — so old reports
+            // use the current Loop link. CTA shows only when the live plan is
+            // enabled and has a URL; otherwise "coming soon".
+            $subscribeReady = $report->plan && $report->plan->enabled && filled($report->plan->subscription_url);
+            $subscribeHref = $subscribeReady ? route('report.subscribe', ['slug' => $report->slug]) : null;
 
             // Saving message now lives in the billing note. Show a badge ONLY
             // when an explicit saving_label was snapshotted — no computed "Save £X".
@@ -594,17 +603,20 @@
                         <p style="font-size:13px; color:#55505A; margin:14px 0 0;">Pause or cancel anytime.</p>
                     </div>
                     <div class="bg-navy text-white" style="flex:0 1 35%; min-width:240px; padding:28px 26px; display:flex; flex-direction:column; justify-content:center; align-items:center; text-align:center;">
+                        @if(filled($subFullPrice))
+                            <div style="font-size:15px; font-weight:600; color:rgba(255,255,255,.5); text-decoration:line-through; line-height:1;">{{ $subFullPrice }}</div>
+                        @endif
                         @if(filled($subPrice))
-                            <div style="font-size:28px; font-weight:700; line-height:1;">{{ $subPrice }}</div>
+                            <div style="font-size:28px; font-weight:700; line-height:1; margin-top:{{ filled($subFullPrice) ? '4px' : '0' }};">{{ $subPrice }}</div>
                         @endif
                         @if(filled($subBilling))
                             <div style="font-size:13px; color:rgba(255,255,255,.65); margin:6px 0 14px;">{{ $subBilling }}</div>
                         @endif
                         @if($savingLine)
-                            <div style="align-self:flex-start; background:#4E7BA4; color:#fff; font-size:12px; font-weight:700; padding:3px 10px; border-radius:999px; margin-bottom:14px;">{{ $savingLine }}</div>
+                            <div style="background:#4E7BA4; color:#fff; font-size:12px; font-weight:700; padding:3px 12px; border-radius:999px; margin-bottom:14px;">{{ $savingLine }}</div>
                         @endif
-                        @if(filled($subUrl))
-                            <a href="{{ $subUrl }}" target="_blank" rel="noopener noreferrer" class="bg-teal hover:bg-teal/90 text-white" style="display:block; width:100%; text-align:center; font-weight:600; font-size:15px; text-decoration:none; padding:13px 18px; border-radius:9px;">Subscribe to plan</a>
+                        @if(filled($subscribeHref))
+                            <a href="{{ $subscribeHref }}" class="bg-teal hover:bg-teal/90 text-white" style="display:block; width:100%; text-align:center; font-weight:600; font-size:15px; text-decoration:none; padding:13px 18px; border-radius:9px;">Subscribe to plan</a>
                         @else
                             <span aria-disabled="true" style="display:block; width:100%; text-align:center; font-weight:600; font-size:15px; padding:13px 18px; border-radius:9px; background:rgba(255,255,255,.18); color:rgba(255,255,255,.7); cursor:not-allowed;">Subscribe - link coming soon</span>
                         @endif
@@ -749,12 +761,29 @@
                 <div class="bg-navy text-white" style="border-radius:18px; padding:28px 26px; text-align:center;">
                     <h3 style="font-size:18px; font-weight:700; margin:0 0 6px;">Ready to get started?</h3>
                     <p style="font-size:14px; color:rgba(255,255,255,.78); margin:0 auto 18px; max-width:48ch; line-height:1.6;">Subscribe to {{ $planName ?: 'your plan' }} and we'll handle the rest, with the right products, in the right order, delivered to your door.</p>
-                    @if(filled($subUrl))
-                        <a href="{{ $subUrl }}" target="_blank" rel="noopener noreferrer" class="bg-teal hover:bg-teal/90 text-white" style="display:inline-block; font-weight:600; font-size:15px; text-decoration:none; padding:13px 32px; border-radius:9px;">Subscribe</a>
+                    @if(filled($subscribeHref))
+                        <a href="{{ $subscribeHref }}" class="bg-teal hover:bg-teal/90 text-white" style="display:inline-block; font-weight:600; font-size:15px; text-decoration:none; padding:13px 32px; border-radius:9px;">Subscribe</a>
                     @else
                         <span aria-disabled="true" style="display:inline-block; font-weight:600; font-size:15px; padding:13px 32px; border-radius:9px; background:rgba(255,255,255,.18); color:rgba(255,255,255,.7); cursor:not-allowed;">Subscribe - link coming soon</span>
                     @endif
                     <p style="font-size:13px; color:rgba(255,255,255,.6); margin:16px 0 0;">Prefer to buy items individually? <a href="https://biome4pets.com/pages/shop" target="_blank" rel="noopener noreferrer" style="color:#816AA1; text-decoration:underline;">Visit our online store</a></p>
+                </div>
+                @endif
+
+                {{-- Kibble-diet nutritionist CTA. A gentle optimisation nudge (not a
+                     warning), shown only when the report's frozen diet is Kibble. --}}
+                @if($report->recommendsNutritionist())
+                <div style="margin-top:22px; background:#F3F8FC; border:1px solid #D9E6F2; border-left:4px solid #4E7BA4; border-radius:14px; padding:22px 24px;">
+                    <div style="display:flex; align-items:flex-start; gap:14px;">
+                        <div style="flex:0 0 auto; width:40px; height:40px; border-radius:9999px; background:#E3F0FF; display:flex; align-items:center; justify-content:center;">
+                            <svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#4E7BA4" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M11 20A7 7 0 0 1 9.8 6.1C15.5 5 17 4.48 19 2c1 2 2 4.18 2 8 0 5.5-4.78 10-10 10Z"/><path d="M2 21c0-3 1.85-5.36 5.08-6"/></svg>
+                        </div>
+                        <div>
+                            <h3 style="font-size:17px; font-weight:700; color:#301C47; margin:0 0 6px;">We recommend speaking to a nutritionist</h3>
+                            <p style="font-size:14px; color:#4b5563; line-height:1.6; margin:0 0 16px; max-width:60ch;">Pets on a kibble diet can benefit from tailored guidance on supporting gut health. Our nutritionists can help you build a plan suited to {{ $petName }}'s individual results.</p>
+                            <a href="https://biome4pets.com/nutritionists" target="_blank" rel="noopener noreferrer" style="display:inline-block; background:#4E7BA4; color:#fff; font-weight:600; font-size:14px; text-decoration:none; padding:11px 22px; border-radius:9px;">View recommendations &rarr;</a>
+                        </div>
+                    </div>
                 </div>
                 @endif
             </div>

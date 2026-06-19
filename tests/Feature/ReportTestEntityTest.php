@@ -82,7 +82,7 @@ class ReportTestEntityTest extends TestCase
         $this->assertSame('ORD-1', $test->sample_id);
         $this->assertSame($pet->id, $test->pet_id);
         $this->assertSame($client->id, $test->client_id);
-        $this->assertSame('report_generated', $test->status);
+        $this->assertTrue($test->hasReport());   // derived state: a report links it
         $this->assertSame(2.1, (float) $test->diversity_score);
         $this->assertSame(500, (int) $test->species_richness);
         $this->assertSame(['Firmicutes' => 50, 'Bacteroidetes' => 20], $test->phylum_data);

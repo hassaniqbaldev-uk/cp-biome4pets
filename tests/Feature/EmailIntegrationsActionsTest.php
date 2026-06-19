@@ -2,7 +2,7 @@
 
 namespace Tests\Feature;
 
-use App\Filament\Pages\EmailIntegrations;
+use App\Filament\Pages\Settings;
 use App\Models\Setting;
 use App\Models\User;
 use Filament\Facades\Filament;
@@ -49,7 +49,7 @@ class EmailIntegrationsActionsTest extends TestCase
 
     public function test_page_renders_with_klaviyo_diagnostics(): void
     {
-        Livewire::test(EmailIntegrations::class)
+        Livewire::test(Settings::class)
             ->assertOk()
             ->assertSee('Connection status')
             ->assertSee('Last Klaviyo result');
@@ -67,7 +67,7 @@ class EmailIntegrationsActionsTest extends TestCase
             ], 200),
         ]);
 
-        Livewire::test(EmailIntegrations::class)
+        Livewire::test(Settings::class)
             ->call('runTestConnection')
             ->assertSet('connectionState.ok', true)
             ->assertSet('connectionState.account', 'Acme Pets Ltd')
@@ -85,7 +85,7 @@ class EmailIntegrationsActionsTest extends TestCase
         $this->enableKlaviyo();
         Http::fake(['*/api/accounts/' => Http::response(['errors' => [['detail' => 'invalid key']]], 401)]);
 
-        Livewire::test(EmailIntegrations::class)
+        Livewire::test(Settings::class)
             ->call('runTestConnection')
             ->assertSet('connectionState.ok', false)
             ->assertNotified('Klaviyo connection failed');
@@ -99,7 +99,7 @@ class EmailIntegrationsActionsTest extends TestCase
         $this->enableKlaviyo();
         Http::fake(['*/api/events/' => Http::response([], 202)]);
 
-        Livewire::test(EmailIntegrations::class)
+        Livewire::test(Settings::class)
             ->call('runSendTestEvent', 'owner@example.test')
             ->assertNotified('Test event sent');
 
@@ -124,7 +124,7 @@ class EmailIntegrationsActionsTest extends TestCase
         $this->enableKlaviyo();
         Http::fake(['*/api/events/' => Http::response('boom', 500)]);
 
-        Livewire::test(EmailIntegrations::class)
+        Livewire::test(Settings::class)
             ->call('runSendTestEvent', 'owner@example.test')
             ->assertNotified('Test event failed');
 
@@ -139,7 +139,7 @@ class EmailIntegrationsActionsTest extends TestCase
         Setting::setEncrypted(Setting::KLAVIYO_API_KEY, 'pk_test_TOPSECRET');
         Http::fake();
 
-        Livewire::test(EmailIntegrations::class)
+        Livewire::test(Settings::class)
             ->call('runSendTestEvent', 'owner@example.test');
 
         Http::assertNothingSent();
@@ -150,7 +150,7 @@ class EmailIntegrationsActionsTest extends TestCase
         // Nothing configured at all.
         Http::fake();
 
-        Livewire::test(EmailIntegrations::class)
+        Livewire::test(Settings::class)
             ->assertSee('Key missing')
             ->call('runTestConnection');
 
@@ -167,7 +167,7 @@ class EmailIntegrationsActionsTest extends TestCase
             'message' => 'Connected to Acme Pets Ltd',
         ]));
 
-        Livewire::test(EmailIntegrations::class)
+        Livewire::test(Settings::class)
             ->assertSee('Connected to Acme Pets Ltd')
             ->assertSee('2026-06-15 09:00:00');
     }

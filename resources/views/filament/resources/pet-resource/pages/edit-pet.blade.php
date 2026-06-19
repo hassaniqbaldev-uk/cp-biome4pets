@@ -1,14 +1,42 @@
 <x-filament-panels::page>
-    {{-- Standard edit form. The fields sit in a collapsible "Pet details" section
-         (collapsed on edit, expanded on create) defined in PetResource::form(). --}}
-    <x-filament-panels::form id="form" wire:submit="save">
-        {{ $this->form }}
+    {{-- Pet header. The DEFAULT view is a read-only, scannable infolist so the
+         pet's key info is visible at a glance. Editing the rarely-changed details
+         is behind the explicit "Edit pet details" action, which swaps the header
+         for the (2-column) form. --}}
+    <div wire:key="pet-header-{{ $record->getKey() }}">
+        @unless ($editing)
+            <div class="flex justify-end mb-3">
+                <x-filament::button
+                    wire:click="editPetDetails"
+                    icon="heroicon-m-pencil-square"
+                    color="gray"
+                    size="sm"
+                >
+                    Edit pet details
+                </x-filament::button>
+            </div>
 
-        <x-filament-panels::form.actions
-            :actions="$this->getCachedFormActions()"
-            :full-width="$this->hasFullWidthFormActions()"
-        />
-    </x-filament-panels::form>
+            {{ $this->petHeaderInfolist }}
+        @else
+            <x-filament-panels::form id="form" wire:submit="save">
+                {{ $this->form }}
+
+                <div class="flex items-center gap-3">
+                    <x-filament::button type="submit" icon="heroicon-m-check">
+                        Save changes
+                    </x-filament::button>
+
+                    <x-filament::button
+                        type="button"
+                        color="gray"
+                        wire:click="cancelEdit"
+                    >
+                        Cancel
+                    </x-filament::button>
+                </div>
+            </x-filament-panels::form>
+        @endunless
+    </div>
 
     {{-- Tabs: Tests | Health Notes | History. Only one surface shows at a time,
          so the page is scannable and the timeline (History) no longer stacks

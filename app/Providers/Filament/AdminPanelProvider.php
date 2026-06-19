@@ -53,6 +53,10 @@ class AdminPanelProvider extends PanelProvider
                 PanelsRenderHook::HEAD_START,
                 fn (): string => view('partials.favicons')->render(),
             )
+            ->renderHook(
+                PanelsRenderHook::FOOTER,
+                fn (): View => view('filament.footer-version'),
+            )
             ->discoverResources(in: app_path('Filament/Resources'), for: 'App\\Filament\\Resources')
             ->discoverPages(in: app_path('Filament/Pages'), for: 'App\\Filament\\Pages')
             ->pages([

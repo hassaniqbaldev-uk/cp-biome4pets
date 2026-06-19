@@ -63,7 +63,6 @@ class PetTimelineTest extends TestCase
             'order_id' => 'ORD-1',
             'sample_id' => 'ORD-1',
             'report_date' => '2026-03-01',
-            'status' => 'results_received',
             'microbiome_classification' => 'Imbalanced',
             'diversity_score' => 3.0,
         ]);

@@ -2,8 +2,6 @@
 
 namespace App\Support;
 
-use App\Models\Test;
-
 /**
  * Shared presentation constants/helpers for the admin panel, so date formats and
  * status-badge colours/labels are defined once and reused everywhere (no local
@@ -34,19 +32,16 @@ class AdminFormatting
         return ucfirst((string) $status);
     }
 
-    /** Test status → badge colour (generated = done, results received = pending). */
-    public static function testColor(?string $status): string
+    /** Derived test state → badge colour (reported = done, awaiting = pending). */
+    public static function testStateColor(bool $hasReport): string
     {
-        return match ($status) {
-            'report_generated' => 'success',
-            'results_received' => 'warning',
-            default => 'gray',
-        };
+        return $hasReport ? 'success' : 'warning';
     }
 
-    /** Test status → human label (from the Test model's canonical map). */
-    public static function testLabel(?string $status): string
+    /** Derived test state → human label. The stored status column was dropped; a
+     *  test simply has a report or is awaiting one (see Test::hasReport()). */
+    public static function testStateLabel(bool $hasReport): string
     {
-        return Test::STATUSES[$status] ?? (string) $status;
+        return $hasReport ? 'Reported' : 'Awaiting report';
     }
 }

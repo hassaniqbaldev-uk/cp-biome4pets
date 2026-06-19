@@ -97,6 +97,18 @@ class Report extends Model
         return $this->pet?->{$key} ?? $default;
     }
 
+    /**
+     * Whether the report should surface the "speak to a nutritionist" CTA. Driven
+     * by the pet's diet on the FROZEN snapshot (via petField), so it reflects the
+     * report's data as generated, not a later edit to the live pet. Kibble only
+     * for now (Mixed may be added later). One shared accessor so the web and PDF
+     * templates stay in lockstep.
+     */
+    public function recommendsNutritionist(): bool
+    {
+        return $this->petField('diet') === 'Kibble';
+    }
+
     protected static function booted(): void
     {
         static::creating(function (Report $report) {

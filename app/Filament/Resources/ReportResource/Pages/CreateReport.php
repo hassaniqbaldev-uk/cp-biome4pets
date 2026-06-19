@@ -125,11 +125,9 @@ class CreateReport extends CreateRecord
             }
 
             if ($test) {
+                // Linking the report IS what makes the test "reported" — the state
+                // is derived (Test::hasReport()), so there's no status to set.
                 $data['test_id'] = $test->id;
-
-                if ($test->status !== 'report_generated') {
-                    $test->update(['status' => 'report_generated']);
-                }
             }
 
             // Raw lab data is owned by the Test now — never write it on the report.
@@ -213,6 +211,9 @@ class CreateReport extends CreateRecord
 
     protected function getRedirectUrl(): string
     {
-        return $this->getResource()::getUrl('edit', ['record' => $this->record]);
+        // Land on the edit page in a "done" state (?created=1 → EditReport's
+        // confirmation banner with View / Edit / Publish actions), rather than
+        // dropping the user back on a blank-looking wizard step 1.
+        return $this->getResource()::getUrl('edit', ['record' => $this->record, 'created' => 1]);
     }
 }

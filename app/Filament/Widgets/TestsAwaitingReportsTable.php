@@ -55,15 +55,12 @@ class TestsAwaitingReportsTable extends BaseWidget
                     ->searchable(),
 
                 Tables\Columns\TextColumn::make('report_date')
-                    ->label('Report Date')
+                    ->label('Test date')
                     ->date(AdminFormatting::DATE)
                     ->placeholder('—')
                     ->sortable(),
-
-                Tables\Columns\TextColumn::make('status')
-                    ->badge()
-                    ->formatStateUsing(fn (?string $state): string => AdminFormatting::testLabel($state))
-                    ->color(fn (?string $state): string => AdminFormatting::testColor($state)),
+                // Every row here is awaiting a report by definition (the query is
+                // whereDoesntHave('reports')), so no state column is needed.
             ])
             // Click a row to open the pet hub (where the Tests section lives).
             ->recordUrl(fn (Test $record): ?string => $record->pet

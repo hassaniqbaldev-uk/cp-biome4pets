@@ -38,7 +38,7 @@ class PetsRelationManager extends RelationManager
                     ->label('Diet Type')
                     ->options([
                         'Raw' => 'Raw',
-                        'Processed' => 'Processed',
+                        'Kibble' => 'Kibble',
                         'Mixed' => 'Mixed',
                         'Other' => 'Other',
                     ]),

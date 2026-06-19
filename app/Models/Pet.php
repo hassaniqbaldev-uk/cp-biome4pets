@@ -47,6 +47,35 @@ class Pet extends Model
     }
 
     /**
+     * Human age from the date of birth, e.g. "3 years 2 months". Null when no
+     * DOB is on file. Used by the pet-hub header.
+     */
+    public function ageLabel(): ?string
+    {
+        if (blank($this->date_of_birth)) {
+            return null;
+        }
+
+        return $this->date_of_birth->diffForHumans(Carbon::now(), [
+            'syntax' => Carbon::DIFF_ABSOLUTE,
+            'parts' => 2,
+        ]);
+    }
+
+    /**
+     * The most recent weight on record — the latest health-note entry that has a
+     * weight (notes are date-desc). Null when no weight has ever been logged.
+     */
+    public function latestWeightKg(): ?float
+    {
+        $weight = $this->healthNotes()
+            ->whereNotNull('weight_kg')
+            ->value('weight_kg');
+
+        return $weight !== null ? (float) $weight : null;
+    }
+
+    /**
      * The pet's health-notes history formatted for AI/report context (Part 2),
      * date-filtered to a point in time. Returns entries with date <= $asOf (all
      * entries when $asOf is null), CHRONOLOGICAL (oldest-first, so it reads as a

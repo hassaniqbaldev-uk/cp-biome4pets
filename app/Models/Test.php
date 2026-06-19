@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use App\Support\AdminFormatting;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
@@ -27,7 +28,6 @@ class Test extends Model
         'species_richness',
         'dysbiosis_score',
         'microbiome_classification',
-        'status',
         'external_ids',
     ];
 
@@ -40,15 +40,6 @@ class Test extends Model
         'dysbiosis_score' => 'float',
         'species_richness' => 'integer',
         'external_ids' => 'array',
-    ];
-
-    /**
-     * Lifecycle statuses. Room to grow (ordered/kit_sent/at_lab) later; for now a
-     * manually-created test sits at results_received until a report is generated.
-     */
-    public const STATUSES = [
-        'results_received' => 'Results received',
-        'report_generated' => 'Report generated',
     ];
 
     /**
@@ -74,6 +65,30 @@ class Test extends Model
     public function reports(): HasMany
     {
         return $this->hasMany(Report::class);
+    }
+
+    /**
+     * Derived state replacing the old stored status: a test either has a report
+     * or doesn't. Uses the loaded relation / withCount when available so tables
+     * don't N+1; falls back to an exists() query for a single record.
+     */
+    public function hasReport(): bool
+    {
+        if ($this->relationLoaded('reports')) {
+            return $this->reports->isNotEmpty();
+        }
+
+        if (array_key_exists('reports_count', $this->attributes)) {
+            return (int) $this->attributes['reports_count'] > 0;
+        }
+
+        return $this->reports()->exists();
+    }
+
+    /** Human label for the derived state: "Reported" vs "Awaiting report". */
+    public function stateLabel(): string
+    {
+        return AdminFormatting::testStateLabel($this->hasReport());
     }
 
     /**
@@ -109,7 +124,6 @@ class Test extends Model
             'species_richness' => $keep('species_richness', $test->species_richness),
             'dysbiosis_score' => $keep('dysbiosis_score', $test->dysbiosis_score),
             'microbiome_classification' => $keep('microbiome_classification', $test->microbiome_classification),
-            'status' => $test->status ?: 'report_generated',
         ]);
 
         $test->save();

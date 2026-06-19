@@ -62,6 +62,32 @@ class SettingsPageTest extends TestCase
             ->assertFormFieldExists('openai_prompt_directives', 'form');
     }
 
+    /**
+     * Phase E: Email & Integrations was folded into Settings — Klaviyo + SMTP now
+     * live here as tabs, and the "Platform Emails — coming soon" placeholder is
+     * gone. (The standalone EmailIntegrations page was removed entirely.)
+     */
+    public function test_settings_consolidates_integrations_and_drops_coming_soon(): void
+    {
+        Livewire::test(Settings::class)
+            ->assertOk()
+            ->assertSee('OpenAI')
+            ->assertSee('Klaviyo')
+            ->assertSee('Email (SMTP)')
+            // Diagnostics for both integrations are present.
+            ->assertSee('Connection status')
+            ->assertSee('Last SMTP result')
+            // Klaviyo + SMTP secret fields are reachable on this page.
+            ->assertFormFieldExists('klaviyo_api_key', 'form')
+            ->assertFormFieldExists('smtp_password', 'form')
+            // The removed placeholder tab/content is gone.
+            ->assertDontSee('Platform Emails')
+            ->assertDontSee('Coming soon');
+
+        // The standalone page (and its nav item) were removed entirely.
+        $this->assertFileDoesNotExist(app_path('Filament/Pages/EmailIntegrations.php'));
+    }
+
     public function test_saving_api_key_stores_it_encrypted_at_rest(): void
     {
         $plain = 'sk-test-secret-1234567890';

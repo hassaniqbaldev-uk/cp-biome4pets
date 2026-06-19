@@ -5,6 +5,7 @@ namespace App\Filament\Widgets;
 use App\Filament\Resources\ClientResource;
 use App\Filament\Resources\PetResource;
 use App\Filament\Resources\ReportResource;
+use App\Filament\Resources\TestResource;
 use App\Models\Client;
 use App\Models\Pet;
 use App\Models\Report;
@@ -25,9 +26,9 @@ class ReportsStatsOverview extends BaseWidget
             ->whereMonth('created_at', $now->month)
             ->count();
 
-        // The work queue: tests with results but no linked report yet. Authoritative
-        // condition = no related report (a report_generated test always has one, so
-        // it's excluded; equals status results_received today).
+        // The work queue: tests with no linked report yet. The state is derived —
+        // a test "has a report" or doesn't (Test::hasReport()); there is no stored
+        // status column. whereDoesntHave('reports') is that same derived condition.
         $awaitingReports = Test::query()->whereDoesntHave('reports')->count();
 
         return [
@@ -49,12 +50,13 @@ class ReportsStatsOverview extends BaseWidget
                 ->color('success')
                 ->url(ReportResource::getUrl('index')),
 
-            // The actionable number. Not linked to a list (Tests have no top-level
-            // resource) — the queue widget below is its destination.
+            // The actionable number — links to the all-tests list filtered to the
+            // awaiting queue.
             Stat::make('Tests Awaiting Reports', $awaitingReports)
                 ->description('Results received, no report yet')
                 ->descriptionIcon('heroicon-m-clock')
-                ->color($awaitingReports > 0 ? 'warning' : 'gray'),
+                ->color($awaitingReports > 0 ? 'warning' : 'gray')
+                ->url(TestResource::getUrl('index', ['tableFilters[report_state][value]' => 'awaiting'])),
         ];
     }
 }

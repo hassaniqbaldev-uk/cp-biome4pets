@@ -2,7 +2,7 @@
 
 namespace Tests\Feature;
 
-use App\Filament\Pages\EmailIntegrations;
+use App\Filament\Pages\Settings;
 use App\Mail\TestSmtpEmail;
 use App\Models\Setting;
 use App\Models\User;
@@ -47,7 +47,7 @@ class EmailIntegrationsSmtpTest extends TestCase
 
     public function test_saving_encrypts_the_password_and_blank_keeps_it(): void
     {
-        Livewire::test(EmailIntegrations::class)
+        Livewire::test(Settings::class)
             ->set('data.'.Setting::SMTP_ENABLED, true)
             ->set('data.'.Setting::SMTP_HOST, 'email-smtp.eu-west-2.amazonaws.com')
             ->set('data.'.Setting::SMTP_PORT, '587')
@@ -67,7 +67,7 @@ class EmailIntegrationsSmtpTest extends TestCase
         $this->assertSame('AKIAEXAMPLE', Setting::get(Setting::SMTP_USERNAME));
 
         // Re-save with a blank password but a changed username → password kept.
-        Livewire::test(EmailIntegrations::class)
+        Livewire::test(Settings::class)
             ->set('data.'.Setting::SMTP_USERNAME, 'AKIA-CHANGED')
             ->set('data.'.Setting::SMTP_PASSWORD, '')
             ->call('save')
@@ -91,7 +91,7 @@ class EmailIntegrationsSmtpTest extends TestCase
 
         Mail::fake();
 
-        Livewire::test(EmailIntegrations::class)
+        Livewire::test(Settings::class)
             ->call('runSendTestEmail', 'client@example.com');
 
         Mail::assertSent(TestSmtpEmail::class, fn (TestSmtpEmail $mail) => $mail->hasTo('client@example.com'));

@@ -62,7 +62,6 @@ class SendReportActionTest extends TestCase
             'order_id' => 'SEND-1',
             'sample_id' => 'SEND-1',
             'report_date' => '2026-06-15',
-            'status' => 'report_generated',
         ]);
 
         return Report::create([

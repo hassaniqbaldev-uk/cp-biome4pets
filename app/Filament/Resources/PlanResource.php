@@ -5,6 +5,7 @@ namespace App\Filament\Resources;
 use App\Filament\Resources\PlanResource\Pages;
 use App\Models\CatalogProduct;
 use App\Models\Plan;
+use App\Models\ProductRule;
 use App\Models\Setting;
 use Filament\Forms;
 use Filament\Forms\Form;
@@ -46,6 +47,7 @@ class PlanResource extends Resource
                             ->helperText('Unique slug, e.g. "restore-rebalance". Cannot be changed after creation.'),
                         Forms\Components\Textarea::make('trigger_description')
                             ->label('Trigger Description')
+                            ->helperText('Human-readable note only (shown to admins). The actual auto-recommendation logic is configured in the "Auto-recommendation" section below.')
                             ->rows(2)
                             ->columnSpanFull(),
                         Forms\Components\Toggle::make('enabled')
@@ -70,6 +72,43 @@ class PlanResource extends Resource
                     ])
                     ->columns(2),
 
+                // Phase 2: client-configurable trigger → plan mapping. Replaces the
+                // former hardcoded recommendPlanId() logic (read by the matcher and
+                // the Settings → Trigger Rules explainer).
+                Forms\Components\Section::make('Auto-recommendation')
+                    ->description('How the report builder auto-selects this plan from the fired product triggers. Plans are checked in match-priority order (lowest first); the first plan with a satisfied condition wins.')
+                    ->columns(2)
+                    ->schema([
+                        Forms\Components\TextInput::make('match_priority')
+                            ->label('Match priority')
+                            ->numeric()
+                            ->default(1000)
+                            ->required()
+                            ->helperText('Lower = checked first. The first plan whose condition is met wins; ties break by record id (lower id first).'),
+                        Forms\Components\Toggle::make('is_fallback')
+                            ->label('Default fallback plan')
+                            ->default(false)
+                            ->helperText('Recommended only when NO triggers fire at all. Just one plan should be the fallback — saving this on enforces it (any other fallback is cleared).'),
+                        Forms\Components\Repeater::make('trigger_conditions')
+                            ->label('Trigger conditions')
+                            ->helperText('Each row is an AND-set: every selected trigger must fire for the row to match. Multiple rows are OR-ed (any satisfied row selects this plan). No rows = never auto-recommended (it can still be picked manually), unless this is the fallback above.')
+                            ->schema([
+                                Forms\Components\Select::make('required_triggers')
+                                    ->label('All of these triggers fire')
+                                    ->multiple()
+                                    ->options(fn (): array => ProductRule::triggerNameOptions())
+                                    ->required()
+                                    ->native(false),
+                            ])
+                            ->itemLabel(fn (array $state): ?string => filled($state['required_triggers'] ?? null)
+                                ? implode(' + ', (array) $state['required_triggers'])
+                                : 'New condition')
+                            ->addActionLabel('Add condition')
+                            ->defaultItems(0)
+                            ->reorderable(false)
+                            ->columnSpanFull(),
+                    ]),
+
                 Forms\Components\Section::make('Subscription (display only)')
                     ->description('Subscribe-panel content for the rendered plan. Pricing is a hardcoded display string — no discount is computed here.')
                     ->schema([
@@ -79,14 +118,18 @@ class PlanResource extends Resource
                         Forms\Components\TextInput::make('subscription_price')
                             ->label('Subscription Price')
                             ->maxLength(255)
-                            ->helperText('Hardcoded display string, e.g. £35 / month'),
+                            ->helperText('Discounted display string, e.g. £29.75 / month.'),
+                        Forms\Components\TextInput::make('subscription_full_price')
+                            ->label('Full Price (struck through)')
+                            ->maxLength(255)
+                            ->helperText('Optional display string, e.g. £35 / month. Shown struck through next to the subscription price to convey the saving. Blank = no old→new shown.'),
                         Forms\Components\TextInput::make('subscription_billing_note')
                             ->label('Billing Note')
                             ->maxLength(255),
                         Forms\Components\TextInput::make('subscription_saving_label')
                             ->label('Saving Label')
                             ->maxLength(255)
-                            ->helperText('Optional; blank = auto-compute from product prices.'),
+                            ->helperText('Optional badge, e.g. "15% off". Blank = no badge.'),
                         Forms\Components\TextInput::make('subscription_url')
                             ->label('Subscribe URL')
                             ->url()
@@ -203,9 +246,25 @@ class PlanResource extends Resource
                     ->label('Enabled')
                     ->boolean()
                     ->sortable(),
+                // Read-only mirror of recommendPlanId()'s precedence (Phase 1).
+                // "#N · condition" makes the first-match-wins order explicit, since
+                // the list sorts by display position, NOT recommendation order.
+                Tables\Columns\TextColumn::make('recommended_when')
+                    ->label('Auto-recommended when')
+                    ->state(function (Plan $record): string {
+                        $rule = ReportResource::planRecommendationRuleFor($record->key);
+
+                        return $rule
+                            ? '#' . $rule['order'] . ' · ' . $rule['condition']
+                            : 'Not auto-recommended (manual only)';
+                    })
+                    ->badge()
+                    ->color(fn (Plan $record): string => ReportResource::planRecommendationRuleFor($record->key) ? 'info' : 'gray')
+                    ->wrap(),
                 Tables\Columns\TextColumn::make('subscription_price')
                     ->label('Subscription')
-                    ->money('GBP')
+                    // Free-text display string (e.g. "£29.75 / month"), not a
+                    // numeric amount — show it verbatim, don't money()-format it.
                     ->placeholder('—'),
                 Tables\Columns\TextColumn::make('updated_at')
                     ->label('Updated')

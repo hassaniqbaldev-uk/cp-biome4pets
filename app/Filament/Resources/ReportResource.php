@@ -5,9 +5,11 @@ namespace App\Filament\Resources;
 use App\Filament\Resources\ReportResource\Pages;
 use App\Models\CatalogProduct;
 use App\Models\Plan;
+use App\Models\PlanTriggerCondition;
 use App\Models\Report;
 use App\Models\Test;
 use App\Services\CsvParserService;
+use App\Services\LabResultParser;
 use App\Services\OpenAiService;
 use App\Support\AdminFormatting;
 use App\Support\PetFindings;
@@ -18,8 +20,13 @@ use Filament\Notifications\Notification;
 use Filament\Resources\Resource;
 use Filament\Tables;
 use Filament\Tables\Table;
+use Illuminate\Contracts\Support\Htmlable;
+use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Database\Eloquent\Model;
+use Illuminate\Support\HtmlString;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Storage;
+use Livewire\Features\SupportFileUploads\TemporaryUploadedFile;
 
 class ReportResource extends Resource
 {
@@ -33,10 +40,22 @@ class ReportResource extends Resource
 
     protected static ?string $recordTitleAttribute = 'sample_id';
 
+    /**
+     * Resolve the record title from the linked Test explicitly, rather than
+     * relying on Filament reading $recordTitleAttribute ('sample_id') off the
+     * report — that column was dropped and only resolves via the in-memory
+     * getAttribute proxy. This keeps the title robust (and never hits the
+     * dropped column in any SQL context).
+     */
+    public static function getRecordTitle(?Model $record): string|Htmlable|null
+    {
+        return $record?->test?->sample_id ?? $record?->slug ?? static::getModelLabel();
+    }
+
     public static function getGloballySearchableAttributes(): array
     {
-        // sample_id now lives on the linked Test (the record title resolves it
-        // through the Report→Test proxy via getRecordTitleAttribute).
+        // sample_id now lives on the linked Test; search the relationship path
+        // (Filament JOINs to tests), and the title resolves via getRecordTitle().
         return ['pet.name', 'test.sample_id', 'client.email'];
     }
 
@@ -44,6 +63,44 @@ class ReportResource extends Resource
     {
         return $form
             ->schema([
+                // Post-create "done" state. After the wizard submits, the user is
+                // redirected to the edit page with ?created=1, which EditReport
+                // surfaces as $livewire->justCreated — so instead of silently
+                // landing back on step 1, a clear confirmation with next actions
+                // is shown above the form. Hidden on plain edits and on create.
+                Forms\Components\Section::make('Report created')
+                    ->icon('heroicon-o-check-circle')
+                    ->description('Your report is ready. Choose what to do next.')
+                    ->visible(fn ($livewire): bool => $livewire instanceof Pages\EditReport && $livewire->justCreated)
+                    ->schema([
+                        Forms\Components\Actions::make([
+                            Forms\Components\Actions\Action::make('done_view_report')
+                                ->label('View report')
+                                ->icon('heroicon-o-eye')
+                                ->color('info')
+                                ->url(fn (?Report $record): ?string => $record ? route('report.show', $record->slug) : null)
+                                ->openUrlInNewTab(),
+                            Forms\Components\Actions\Action::make('done_publish')
+                                ->label('Publish')
+                                ->icon('heroicon-o-globe-alt')
+                                ->color('success')
+                                ->visible(fn (?Report $record): bool => $record?->status === 'draft')
+                                ->requiresConfirmation()
+                                ->modalHeading('Publish Report')
+                                ->modalDescription('This will make the report publicly accessible. Continue?')
+                                ->action(function (?Report $record, $livewire): void {
+                                    $record->update(['status' => 'published']);
+                                    $livewire->fillForm();
+                                    Notification::make()->title('Report published')->success()->send();
+                                }),
+                            Forms\Components\Actions\Action::make('done_edit_report')
+                                ->label('Edit report')
+                                ->icon('heroicon-o-pencil-square')
+                                ->color('gray')
+                                ->action(fn ($livewire): bool => $livewire->justCreated = false),
+                        ]),
+                    ]),
+
                 Forms\Components\Wizard::make([
                     Forms\Components\Wizard\Step::make('Client & Pet Details')
                         ->schema([
@@ -66,8 +123,10 @@ class ReportResource extends Resource
                                     Forms\Components\TextInput::make('phone')
                                         ->tel()
                                         ->maxLength(255),
-                                    Forms\Components\TextInput::make('order_number')
-                                        ->maxLength(255),
+                                    Forms\Components\TextInput::make('shopify_client_id')
+                                        ->label('Shopify Client ID')
+                                        ->maxLength(255)
+                                        ->helperText('Reference ID from Shopify (optional)'),
                                 ]),
                             Forms\Components\Select::make('pet_id')
                                 ->label('Pet')
@@ -99,25 +158,60 @@ class ReportResource extends Resource
                                         ->label('Diet Type')
                                         ->options([
                                             'Raw' => 'Raw',
-                                            'Processed' => 'Processed',
+                                            'Kibble' => 'Kibble',
                                             'Mixed' => 'Mixed',
                                             'Other' => 'Other',
                                         ]),
+                                    // Mirror the full pet-create form: an optional first
+                                    // health-log entry (note and/or weight), both blank ⇒
+                                    // no entry. These are transient (not Pet columns).
+                                    Forms\Components\Textarea::make('initial_note')
+                                        ->label('Initial note')
+                                        ->helperText('Optional. Recorded as the first health-log entry, dated today.')
+                                        ->rows(3),
+                                    Forms\Components\TextInput::make('initial_weight_kg')
+                                        ->label('Initial weight (kg)')
+                                        ->helperText('Optional. Recorded with the first health-log entry.')
+                                        ->numeric()
+                                        ->step(0.01)
+                                        ->minValue(0),
+                                    Forms\Components\TextInput::make('shopify_pet_id')
+                                        ->label('Shopify Pet ID')
+                                        ->maxLength(255)
+                                        ->helperText('Reference ID from Shopify (optional)'),
                                 ])
                                 ->createOptionUsing(function (array $data, Forms\Get $get): int {
                                     $data['client_id'] = $get('client_id');
 
-                                    return \App\Models\Pet::create($data)->getKey();
+                                    // Lift the transient first-entry fields out before the
+                                    // Pet is created (they are not Pet columns), then write
+                                    // them to the health-notes log — same as CreatePet.
+                                    $initialNote = $data['initial_note'] ?? null;
+                                    $initialWeight = $data['initial_weight_kg'] ?? null;
+                                    unset($data['initial_note'], $data['initial_weight_kg']);
+
+                                    $pet = \App\Models\Pet::create($data);
+
+                                    if (filled($initialNote) || filled($initialWeight)) {
+                                        $pet->healthNotes()->create([
+                                            'date' => today(),
+                                            'note' => filled($initialNote) ? $initialNote : null,
+                                            'weight_kg' => filled($initialWeight) ? $initialWeight : null,
+                                        ]);
+                                    }
+
+                                    return $pet->getKey();
                                 }),
 
-                            // Phase 3c: every report attaches to a Test. Either reuse
-                            // an existing report-less test for this pet, or upload a
-                            // new CSV (which creates a Test on save).
+                            // Every report attaches to a Test. Either create a new
+                            // test by uploading its lab CSV, or reuse an existing
+                            // report-less test for this pet. (A CSV upload IS a new
+                            // test — the wording makes that explicit.)
                             Forms\Components\Radio::make('test_source')
-                                ->label('Lab data source')
+                                ->label('Test')
                                 ->options([
-                                    'new' => 'Upload a new CSV (creates a test)',
-                                    'existing' => 'Use an existing test (no report yet)',
+                                    'new' => 'New test (upload lab CSV)',
+                                    'existing' => 'Use an existing test',
                                 ])
                                 ->default('new')
                                 ->live()
@@ -126,17 +220,10 @@ class ReportResource extends Resource
                             Forms\Components\Select::make('existing_test_id')
                                 ->label('Existing test')
                                 ->visible(fn (Forms\Get $get): bool => $get('test_source') === 'existing')
-                                ->options(fn (Forms\Get $get): array => Test::query()
-                                    ->where('pet_id', $get('pet_id'))
-                                    ->whereDoesntHave('reports')
-                                    ->orderByDesc('report_date')
-                                    ->get()
-                                    ->mapWithKeys(fn (Test $t): array => [$t->id => trim(
-                                        $t->order_id
-                                        . ($t->report_date ? ' · ' . $t->report_date->format('j M Y') : '')
-                                        . ($t->microbiome_classification ? ' · ' . $t->microbiome_classification : '')
-                                    )])
-                                    ->all())
+                                ->options(fn (Forms\Get $get): array => static::existingTestOptions(
+                                    $get('pet_id'),
+                                    $get('existing_test_id'),
+                                ))
                                 ->searchable()
                                 ->native(false)
                                 ->live()
@@ -191,31 +278,60 @@ class ReportResource extends Resource
                                 ->label('Sample / Order ID')
                                 ->required()
                                 ->maxLength(255)
-                                ->helperText('For a new CSV this becomes the test\'s Order ID. For an existing test it is filled in for you.'),
+                                ->helperText('For a new test this becomes its Order ID. For an existing test it is filled in for you.'),
                             Forms\Components\DatePicker::make('report_date')
-                                ->required(),
+                                ->required()
+                                // Default to today so it isn't filled by hand each time;
+                                // overridden by the chosen test on the existing-test path.
+                                ->default(now()),
                         ]),
 
-                    Forms\Components\Wizard\Step::make('Upload CSV')
-                        // Only the new-CSV path uploads here; the existing-test path
+                    Forms\Components\Wizard\Step::make('New test (CSV)')
+                        // Only the new-test path uploads here; the existing-test path
                         // skips this step (its data came from the chosen test).
                         ->visible(fn (Forms\Get $get): bool => ($get('test_source') ?? 'new') === 'new')
                         ->schema([
                             Forms\Components\FileUpload::make('csv_path')
-                                ->label('CSV File')
+                                ->label('Lab data (CSV)')
                                 ->acceptedFileTypes(['text/csv', '.csv'])
                                 ->directory('csv')
                                 ->disk('public')
                                 ->maxSize(10240)
-                                ->helperText('After uploading your CSV, click the button below to generate AI interpretations.')
+                                // Auto/manual line: the deterministic parse (phyla/scores)
+                                // runs automatically here on upload so the metrics appear
+                                // immediately and can't be forgotten. The paid OpenAI step
+                                // stays a separate, explicit button below.
+                                ->live()
+                                ->afterStateUpdated(fn ($state, Forms\Set $set) => static::parseCsvIntoForm($state, $set))
+                                ->helperText('The CSV is parsed automatically on upload — review the parsed metrics below, then click "Generate AI interpretations".')
                                 ->columnSpanFull(),
                             Forms\Components\TextInput::make('csv_stored_path')
                                 ->hidden(),
+
+                            // Live read-out of the deterministic parse, so the user can
+                            // sanity-check the metrics before spending the AI call.
+                            Forms\Components\Placeholder::make('parsed_preview')
+                                ->label('Parsed metrics')
+                                ->columnSpanFull()
+                                ->content(function (Forms\Get $get): string {
+                                    $class = $get('microbiome_classification');
+                                    if (blank($class)) {
+                                        return 'No metrics yet — upload a CSV above and it will be parsed automatically.';
+                                    }
+
+                                    return 'Classification: ' . $class
+                                        . '  ·  Diversity: ' . $get('diversity_score')
+                                        . '  ·  Richness: ' . $get('species_richness')
+                                        . '  ·  Dysbiosis: ' . $get('dysbiosis_score');
+                                }),
                             Forms\Components\Actions::make([
-                                Forms\Components\Actions\Action::make('process_csv')
-                                    ->label('Process CSV & Generate AI Content')
+                                Forms\Components\Actions\Action::make('generate_ai')
+                                    ->label('Generate AI interpretations & recommendations')
                                     ->icon('heroicon-o-sparkles')
                                     ->color('primary')
+                                    // The explicit, paid step — only enabled once the CSV
+                                    // has been parsed (metrics present).
+                                    ->disabled(fn (Forms\Get $get): bool => blank($get('phylum_data')))
                                     ->action(function (Forms\Get $get, Forms\Set $set) {
                                         $csvPath = $get('csv_path');
 
@@ -532,6 +648,7 @@ class ReportResource extends Resource
                                         $set('subscription_snapshot', [
                                             'available' => (bool) $plan->subscription_available,
                                             'price' => $plan->subscription_price,
+                                            'full_price' => $plan->subscription_full_price,
                                             'billing_note' => $plan->subscription_billing_note,
                                             'saving_label' => $plan->subscription_saving_label,
                                             'url' => $plan->subscription_url,
@@ -642,17 +759,9 @@ class ReportResource extends Resource
                     ->submitAction(new \Illuminate\Support\HtmlString('<button type="submit" class="fi-btn fi-btn-size-md relative grid-flow-col items-center justify-center font-semibold outline-none transition duration-75 focus-visible:ring-2 rounded-lg fi-color-custom fi-btn-color-primary fi-color-primary fi-size-md fi-btn-size-md gap-1.5 px-3 py-2 text-sm inline-grid shadow-sm bg-custom-600 text-white hover:bg-custom-500 dark:bg-custom-500 dark:hover:bg-custom-400 focus-visible:ring-custom-500/50 dark:focus-visible:ring-custom-400/50" style="--c-400:var(--primary-400);--c-500:var(--primary-500);--c-600:var(--primary-600);">Create Report</button>'))
                     ->columnSpanFull(),
 
-                // Per-report Klaviyo observability. Shown on edit only; the send
-                // itself is the manual "Send Report" header action.
-                Forms\Components\Section::make('Klaviyo')
-                    ->icon('heroicon-o-paper-airplane')
-                    ->schema([
-                        Forms\Components\Placeholder::make('klaviyo_last_sent')
-                            ->label('Last sent to Klaviyo')
-                            ->content(fn (?Report $record): string => $record?->klaviyoLastSentSummary() ?? 'Not yet sent'),
-                    ])
-                    ->visible(fn (?Report $record): bool => $record !== null)
-                    ->collapsible(),
+                // Klaviyo send status is no longer a persistent bottom-of-form
+                // block — it lives in the "Send Report" action's tooltip and modal
+                // (EditReport header), shown only where the send actually happens.
             ]);
     }
 
@@ -668,34 +777,317 @@ class ReportResource extends Resource
      * Load an existing test's identity + raw lab data into the wizard form state
      * (used by the existing-test path). AI/plan are generated separately.
      */
-    public static function loadTestIntoForm(mixed $testId, Forms\Set $set): void
+    /**
+     * Resolve the FileUpload state to a file and parse it into the raw metric
+     * fields (phyla/scores). Pure of form/UI concerns so it can be unit-tested.
+     * Tolerates the shapes the state can take (TemporaryUploadedFile, array, or an
+     * already-stored path on edit). Returns [] when there is nothing to parse or
+     * the file is missing; otherwise the field map keyed for form state, with
+     * 'csv_stored_path' set when a fresh upload was persisted to the public disk.
+     */
+    public static function parseUploadedCsv(mixed $state): array
     {
-        $test = Test::find($testId);
-        if (! $test) {
+        $csv = is_array($state) ? (array_values($state)[0] ?? null) : $state;
+
+        if (empty($csv)) {
+            return [];
+        }
+
+        $storedPath = null;
+
+        if ($csv instanceof TemporaryUploadedFile) {
+            $path = $csv->getRealPath();
+            // Persist to the public disk now so the parsed file survives to save
+            // even if the user never re-touches the field.
+            $storedPath = $csv->store('csv', 'public');
+        } elseif (is_string($csv)) {
+            $path = Storage::disk('public')->path($csv);
+        } else {
+            $path = null;
+        }
+
+        if (! $path || ! is_file($path)) {
+            return [];
+        }
+
+        $results = (new LabResultParser(new CsvParserService()))->fromPath($path)['csv_data'];
+
+        return [
+            'csv_stored_path' => $storedPath,
+            'phylum_data' => $results['phylum_totals'],
+            'diversity_score' => $results['diversity_score'],
+            'csv_data' => $results,
+            'species_richness' => $results['species_richness'],
+            'dysbiosis_score' => $results['dysbiosis_score'],
+            'microbiome_classification' => $results['microbiome_classification'],
+        ];
+    }
+
+    /**
+     * The deterministic half of CSV processing: parse the uploaded lab CSV and
+     * write the raw metrics into form state. Runs automatically on upload
+     * (FileUpload::afterStateUpdated) so the user can't forget it; it does NO
+     * AI/paid work — that stays the explicit "Generate AI interpretations" button.
+     */
+    public static function parseCsvIntoForm(mixed $state, Forms\Set $set): void
+    {
+        $csv = is_array($state) ? (array_values($state)[0] ?? null) : $state;
+
+        if (empty($csv)) {
             return;
         }
 
-        $set('sample_id', $test->sample_id);
-        $set('report_date', optional($test->report_date)->toDateString());
-        $set('phylum_data', $test->phylum_data);
-        $set('diversity_score', $test->diversity_score);
-        $set('species_richness', $test->species_richness);
-        $set('dysbiosis_score', $test->dysbiosis_score);
-        $set('microbiome_classification', $test->microbiome_classification);
-        $set('csv_data', $test->csv_data);
+        $parsed = static::parseUploadedCsv($state);
+
+        if ($parsed === []) {
+            Notification::make()->title('CSV file not found on disk')->danger()->send();
+
+            return;
+        }
+
+        foreach ($parsed as $key => $value) {
+            if ($key === 'csv_stored_path' && blank($value)) {
+                continue;
+            }
+
+            $set($key, $value);
+        }
+
+        Notification::make()
+            ->title('CSV parsed')
+            ->body($parsed['microbiome_classification']
+                . ' · diversity ' . $parsed['diversity_score']
+                . ' · richness ' . $parsed['species_richness'])
+            ->success()
+            ->send();
+    }
+
+    public static function loadTestIntoForm(mixed $testId, Forms\Set $set): void
+    {
+        foreach (static::testFormState($testId) as $key => $value) {
+            $set($key, $value);
+        }
+    }
+
+    /**
+     * The wizard's step-1 form state for a given test: its identity (sample_id /
+     * report_date) plus the raw lab fields. These columns were dropped from
+     * `reports` (they live on the linked Test now), so neither form-fill nor any
+     * other attributesToArray() path repopulates them — callers (the existing-
+     * test path on create, and EditReport's fill) hydrate from here instead.
+     * Returns [] for an unknown test.
+     */
+    public static function testFormState(mixed $testId): array
+    {
+        $test = Test::find($testId);
+        if (! $test) {
+            return [];
+        }
+
+        return [
+            'sample_id' => $test->sample_id,
+            'report_date' => optional($test->report_date)->toDateString(),
+            'phylum_data' => $test->phylum_data,
+            'diversity_score' => $test->diversity_score,
+            'species_richness' => $test->species_richness,
+            'dysbiosis_score' => $test->dysbiosis_score,
+            'microbiome_classification' => $test->microbiome_classification,
+            'csv_data' => $test->csv_data,
+        ];
+    }
+
+    /**
+     * Options for the existing-test select: this pet's tests that have no report
+     * yet. On EDIT the report's own test already has a report (this one), so it
+     * would be excluded — $currentTestId keeps it in the list so the preselected
+     * value resolves to a label and stays findable when searching.
+     */
+    public static function existingTestOptions(mixed $petId, mixed $currentTestId = null): array
+    {
+        return Test::query()
+            ->where('pet_id', $petId)
+            ->where(fn (Builder $q) => $q
+                ->whereDoesntHave('reports')
+                ->orWhere('id', $currentTestId))
+            ->orderByDesc('report_date')
+            ->get()
+            ->mapWithKeys(fn (Test $t): array => [$t->id => trim(
+                $t->order_id
+                . ($t->report_date ? ' · ' . $t->report_date->format('j M Y') : '')
+                . ($t->microbiome_classification ? ' · ' . $t->microbiome_classification : '')
+            )])
+            ->all();
     }
 
     public static function recommendPlanId(array $triggers): ?int
     {
-        $key = match (true) {
-            in_array('FMT', $triggers, true) => 'rebuild-renew',
-            in_array('AMR', $triggers, true) && in_array('Antimicrobic', $triggers, true) => 'reset-recover',
-            in_array('AMR', $triggers, true) && in_array('Prebiotic', $triggers, true) => 'restore-rebalance',
-            empty($triggers) => 'maintain-protect',
-            default => null,
-        };
+        $plans = static::recommendationPlans();
 
-        return $key ? Plan::enabled()->where('key', $key)->value('id') : null;
+        // No triggers fired → the configured fallback plan (if any). Modelled as a
+        // flag, never an empty condition set (which would match everything).
+        if (empty($triggers)) {
+            return $plans->firstWhere('is_fallback', true)?->id;
+        }
+
+        // First plan (by match_priority, then id) with ANY satisfied condition wins.
+        foreach ($plans as $plan) {
+            foreach ($plan->triggerConditions as $condition) {
+                $required = $condition->required_triggers ?? [];
+
+                // AND within a row; an empty set never auto-matches (guard).
+                if ($required !== [] && array_diff($required, $triggers) === []) {
+                    return $plan->id;
+                }
+            }
+        }
+
+        // Triggers fired but matched no plan → no recommendation.
+        return null;
+    }
+
+    /**
+     * Enabled plans in recommendation precedence: ordered by match_priority
+     * (lower checked first), then id as a deterministic tiebreak when two plans
+     * share a priority. Conditions eager-loaded for the matcher/explainer.
+     */
+    protected static function recommendationPlans(): \Illuminate\Database\Eloquent\Collection
+    {
+        return Plan::enabled()
+            ->with('triggerConditions')
+            ->orderBy('match_priority')
+            ->orderBy('id')
+            ->get();
+    }
+
+    /**
+     * A read-only, human-readable view of the CONFIGURED recommendation
+     * precedence — now DATA-DRIVEN (Phase 2), derived from plan_trigger_conditions
+     * + plans.is_fallback / match_priority. List order is the match order (first
+     * match wins): condition plans by match_priority, then the fallback plan last
+     * (chosen only when no triggers fire). A result that fires triggers but
+     * matches no condition plan yields null. Resilient to a missing plans table.
+     *
+     * @return list<array{order:int, key:string, condition:string}>
+     */
+    public static function planRecommendationRules(): array
+    {
+        try {
+            $plans = Plan::query()
+                ->with('triggerConditions')
+                ->orderBy('match_priority')
+                ->orderBy('id')
+                ->get();
+        } catch (\Throwable) {
+            return [];
+        }
+
+        $rules = [];
+        $order = 0;
+
+        foreach ($plans as $plan) {
+            $sets = $plan->triggerConditions
+                ->map(fn (PlanTriggerCondition $c): array => array_values($c->required_triggers ?? []))
+                ->filter(fn (array $set): bool => $set !== [])
+                ->values();
+
+            if ($sets->isEmpty()) {
+                continue;
+            }
+
+            $rules[] = [
+                'order' => ++$order,
+                'key' => $plan->key,
+                'condition' => static::describeTriggerSets($sets->all()),
+            ];
+        }
+
+        if ($fallback = $plans->firstWhere('is_fallback', true)) {
+            $rules[] = [
+                'order' => ++$order,
+                'key' => $fallback->key,
+                'condition' => 'No triggers fire (default fallback)',
+            ];
+        }
+
+        return $rules;
+    }
+
+    /**
+     * Human phrasing for a plan's trigger condition sets. A single set reads
+     * "A trigger fires" / "A and B both fire" / "A, B and C all fire"; multiple
+     * sets (OR) are joined with " — or — ".
+     *
+     * @param  list<list<string>>  $sets
+     */
+    protected static function describeTriggerSets(array $sets): string
+    {
+        $parts = array_map(static function (array $set): string {
+            $set = array_values($set);
+            $count = count($set);
+
+            if ($count <= 1) {
+                return ($set[0] ?? '?') . ' trigger fires';
+            }
+
+            if ($count === 2) {
+                return $set[0] . ' and ' . $set[1] . ' both fire';
+            }
+
+            $last = array_pop($set);
+
+            return implode(', ', $set) . ' and ' . $last . ' all fire';
+        }, $sets);
+
+        return implode(' — or — ', $parts);
+    }
+
+    /**
+     * The precedence rule for a given plan key, or null when that plan is never
+     * auto-recommended (it can still be chosen manually in the report builder).
+     *
+     * @return array{order:int, key:string, condition:string}|null
+     */
+    public static function planRecommendationRuleFor(?string $key): ?array
+    {
+        foreach (static::planRecommendationRules() as $rule) {
+            if ($rule['key'] === $key) {
+                return $rule;
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * A read-only HTML explainer of the configured plan-recommendation decision
+     * flow, surfaced on the Settings → Trigger Rules tab. Reads the editable
+     * config (planRecommendationRules) and spells out the no-match→null vs
+     * no-triggers→fallback distinction.
+     */
+    public static function planRecommendationExplainerHtml(): HtmlString
+    {
+        try {
+            $names = Plan::query()->pluck('name', 'key')->all();
+        } catch (\Throwable) {
+            $names = [];
+        }
+
+        $rows = '';
+        foreach (static::planRecommendationRules() as $rule) {
+            $name = $names[$rule['key']] ?? null;
+            $target = $name
+                ? e($name) . ' <span style="color:#9ca3af;">(' . e($rule['key']) . ')</span>'
+                : e($rule['key']);
+            $rows .= '<li style="margin:4px 0;"><strong>' . e($rule['condition']) . '</strong> &rarr; ' . $target . '</li>';
+        }
+
+        return new HtmlString(
+            '<div style="font-size:13px; color:#374151; line-height:1.6;">'
+            . '<p style="margin:0 0 8px;">After the product triggers above fire, the report builder selects <strong>one</strong> plan using the rules below, <strong>checked top to bottom — the first match wins</strong>. This order is the recommendation precedence (each plan&rsquo;s <em>match priority</em>); it is <em>not</em> the same as a plan&rsquo;s display position.</p>'
+            . '<ol style="margin:0 0 8px 18px; padding:0;">' . $rows . '</ol>'
+            . '<p style="margin:0; color:#6b7280;">If triggers fire but match none of the condition rules above, <strong>no plan is auto-recommended</strong> — the report is left blank for manual selection. The default (fallback) plan applies only when <strong>no triggers fire at all</strong>.</p>'
+            . '</div>'
+        );
     }
 
     /**

@@ -3,6 +3,7 @@
 namespace App\Filament\Resources\PlanResource\Pages;
 
 use App\Filament\Resources\PlanResource;
+use App\Models\Plan;
 use App\Models\PlanStep;
 use Filament\Resources\Pages\CreateRecord;
 
@@ -12,12 +13,17 @@ class CreatePlan extends CreateRecord
 
     protected array $planSteps = [];
 
+    protected array $planTriggerConditions = [];
+
     protected function mutateFormDataBeforeCreate(array $data): array
     {
-        // Hold the nested steps aside; persisted via relations after create
-        // (kept out of the core Plan mass-assignment).
+        // Hold the nested steps + trigger conditions aside; persisted via
+        // relations after create (kept out of the core Plan mass-assignment).
         $this->planSteps = $data['steps'] ?? [];
         unset($data['steps']);
+
+        $this->planTriggerConditions = $data['trigger_conditions'] ?? [];
+        unset($data['trigger_conditions']);
 
         return $data;
     }
@@ -25,7 +31,43 @@ class CreatePlan extends CreateRecord
     protected function afterCreate(): void
     {
         $this->persistPlanSteps($this->planSteps);
+        $this->persistTriggerConditions($this->planTriggerConditions);
+        $this->enforceSingleFallback();
         $this->syncSubscriptionIncludes();
+    }
+
+    /**
+     * Rebuild plan_trigger_conditions from the `trigger_conditions` form state.
+     * Empty rows are dropped (an empty required set would match everything).
+     */
+    protected function persistTriggerConditions(array $rows): void
+    {
+        $this->record->triggerConditions()->delete();
+
+        foreach (array_values($rows) as $position => $row) {
+            $triggers = array_values(array_filter((array) ($row['required_triggers'] ?? [])));
+
+            if ($triggers === []) {
+                continue;
+            }
+
+            $this->record->triggerConditions()->create([
+                'position' => $position,
+                'required_triggers' => $triggers,
+            ]);
+        }
+    }
+
+    /** Guard rail: at most one fallback plan (clear the flag on every other plan). */
+    protected function enforceSingleFallback(): void
+    {
+        if (! $this->record->is_fallback) {
+            return;
+        }
+
+        Plan::where('id', '!=', $this->record->getKey())
+            ->where('is_fallback', true)
+            ->update(['is_fallback' => false]);
     }
 
     /**

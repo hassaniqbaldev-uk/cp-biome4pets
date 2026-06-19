@@ -50,7 +50,6 @@ class ReportFromTestTest extends TestCase
             'order_id' => $orderId,
             'sample_id' => $orderId,
             'report_date' => '2026-06-17',
-            'status' => 'results_received',
             'csv_path' => 'csv/x.csv',
             'csv_data' => ['phylum_totals' => ['Bacteroidetes' => 5]],
             'phylum_data' => ['Bacteroidetes' => 5, 'Firmicutes' => 10],
@@ -73,7 +72,10 @@ class ReportFromTestTest extends TestCase
 
     public function test_A_generate_report_from_an_existing_test_links_and_populates_it(): void
     {
-        $plan = Plan::create(['key' => 'restore-rebalance', 'name' => 'Restore & Rebalance', 'enabled' => true]);
+        $plan = Plan::create(['key' => 'restore-rebalance', 'name' => 'Restore & Rebalance', 'enabled' => true, 'match_priority' => 3]);
+        // Data-driven recommendation (Phase 2): this plan is selected when AMR +
+        // Prebiotic both fire (the test's raw data fires exactly those).
+        $plan->triggerConditions()->create(['position' => 0, 'required_triggers' => ['AMR', 'Prebiotic']]);
 
         $client = Client::create(['name' => 'Owner', 'email' => 'o@e.com']);
         $pet = Pet::create(['client_id' => $client->id, 'name' => 'Biscuit']);
@@ -105,8 +107,8 @@ class ReportFromTestTest extends TestCase
         $this->assertNotEmpty($report->slug);
         $this->assertNotNull($report->report_date);
 
-        // The test advanced to report_generated, and the double-guard now holds.
-        $this->assertSame('report_generated', $test->fresh()->status);
+        // The test is now "reported" (derived state), and the guard now holds.
+        $this->assertTrue($test->fresh()->hasReport());
         $this->assertTrue($test->fresh()->reports()->exists());
     }
 
@@ -131,7 +133,7 @@ class ReportFromTestTest extends TestCase
         $this->assertSame('ORD-B', $report->sample_id);                    // via proxy
         $this->assertSame(['Bacteroidetes' => 5, 'Firmicutes' => 10], $report->phylum_data);
         $this->assertSame(1, Test::count(), 'no new test should be created');
-        $this->assertSame('report_generated', $test->fresh()->status);
+        $this->assertTrue($test->fresh()->hasReport());
     }
 
     public function test_C_wizard_with_new_csv_creates_a_test_and_links(): void
@@ -164,6 +166,17 @@ class ReportFromTestTest extends TestCase
         // Raw landed on the TEST (not only the report).
         $this->assertSame(['Firmicutes' => 50, 'Bacteroidetes' => 20], $test->phylum_data);
         $this->assertSame(2.4, (float) $test->diversity_score);
+
+        // Completeness: a wizard-created test is indistinguishable from one created
+        // directly under the pet — it has its identity, date, CSV path/data and
+        // metrics, and shows up under the pet's Tests.
+        $this->assertSame('2026-06-17', $test->report_date->toDateString());
+        $this->assertSame('csv/new.csv', $test->csv_path);
+        $this->assertNotEmpty($test->csv_data);
+        $this->assertSame(580, (int) $test->species_richness);
+        $this->assertSame('Imbalanced', $test->microbiome_classification);
+        $this->assertTrue($pet->fresh()->tests()->whereKey($test->id)->exists());
+        $this->assertTrue($test->hasReport());
     }
 
     public function test_D_every_creation_path_links_a_test_no_orphan_raw_on_report(): void

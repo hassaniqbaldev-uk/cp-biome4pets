@@ -3,26 +3,34 @@
 namespace App\Filament\Resources\ReportResource\Pages;
 
 use App\Filament\Resources\ReportResource;
-use App\Models\CatalogProduct;
 use App\Models\ReportStep;
 use App\Models\Setting;
-use App\Models\Test;
-use App\Services\CsvParserService;
 use App\Services\KlaviyoService;
-use App\Services\LabResultParser;
-use App\Services\OpenAiService;
 use Filament\Actions;
 use Filament\Notifications\Notification;
 use Filament\Resources\Pages\EditRecord;
 use Illuminate\Support\Carbon;
-use Illuminate\Support\Facades\Log;
-use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\HtmlString;
 use Illuminate\Support\Str;
 
 class EditReport extends EditRecord
 {
     protected static string $resource = ReportResource::class;
+
+    /**
+     * True only when this edit page was reached straight from creating the report
+     * (CreateReport redirects here with ?created=1). The wizard form uses it to
+     * show a "Report created" confirmation banner with next-step actions instead
+     * of silently dropping the user back on step 1.
+     */
+    public bool $justCreated = false;
+
+    public function mount(int | string $record): void
+    {
+        parent::mount($record);
+
+        $this->justCreated = request()->boolean('created');
+    }
 
     protected function getHeaderActions(): array
     {
@@ -59,9 +67,11 @@ class EditReport extends EditRecord
                 ->label('Send Report')
                 ->icon('heroicon-o-paper-airplane')
                 ->color('warning')
-                // Sub-label / tooltip tells the admin the channel — or, when
+                // Sub-label / tooltip tells the admin the channel and the Klaviyo
+                // send status (the relocated "not sent" indicator) — or, when
                 // blocked, exactly why the button is greyed out.
-                ->tooltip(fn (): string => $this->sendReportBlockedReason() ?? 'Via Klaviyo')
+                ->tooltip(fn (): string => $this->sendReportBlockedReason()
+                    ?? ('Via Klaviyo · last sent: ' . ($this->record->klaviyoLastSentSummary() ?? 'not yet sent')))
                 ->disabled(fn (): bool => $this->sendReportBlockedReason() !== null)
                 ->requiresConfirmation()
                 ->modalHeading('Send Report via Klaviyo')
@@ -89,7 +99,12 @@ class EditReport extends EditRecord
                         'report_id' => $report->id,
                         'pet_name' => $report->pet?->name,
                         'report_url' => $report->report_url,
-                        'report_date' => Carbon::parse($report->report_date)->format('F j, Y'),
+                        // report_date is proxied from the linked Test; for a report
+                        // with no test (legacy/orphan) it is null — send null rather
+                        // than Carbon::parse(null) which would silently emit today.
+                        'report_date' => $report->report_date
+                            ? Carbon::parse($report->report_date)->format('F j, Y')
+                            : null,
                         'client_name' => $report->petClient?->name,
                     ]);
 
@@ -117,143 +132,6 @@ class EditReport extends EditRecord
                 // logic. x-data="{}" gives Alpine a scope to evaluate the handler.
                 ->extraAttributes(['x-data' => '{}'])
                 ->alpineClickHandler(fn () => $this->copyLinkJs(route('report.show', $this->record->slug))),
-            Actions\Action::make('parse_and_generate')
-                ->label('Parse CSV & Generate AI Interpretations')
-                ->icon('heroicon-o-sparkles')
-                ->requiresConfirmation()
-                ->action(function () {
-                    $record = $this->record;
-
-                    if (empty($record->csv_path)) {
-                        Notification::make()
-                            ->title('No CSV file uploaded')
-                            ->danger()
-                            ->send();
-                        return;
-                    }
-
-                    $filePath = Storage::disk('public')->path($record->csv_path);
-
-                    if (!file_exists($filePath)) {
-                        Notification::make()
-                            ->title('CSV file not found')
-                            ->body("Path: {$filePath}")
-                            ->danger()
-                            ->send();
-                        return;
-                    }
-
-                    $csvParser = new CsvParserService();
-                    // Same parse blob as before (via the extracted helper).
-                    $results = (new LabResultParser($csvParser))->fromPath($filePath)['csv_data'];
-
-                    // Build pet context so the AI copy can address the pet by
-                    // name and tailor advice to this specific pet.
-                    $pet = $record->pet;
-                    // Part 2: notes history AS OF this report's date (report_date is
-                    // proxied from the linked test; collected_at backs it up).
-                    $asOf = $record->report_date ?? $record->test?->collected_at;
-                    $petContext = $pet ? [
-                        'name' => $pet->name,
-                        'breed' => $pet->breed,
-                        'sex' => $pet->sex,
-                        'diet' => $pet->diet,
-                        // Owner-reported notes ground the copy (dated history up to
-                        // the report date). Framing in OpenAiService is unchanged.
-                        'health_notes' => $pet->healthNotesForContext($asOf),
-                    ] : [];
-
-                    // Generate AI interpretations
-                    $openAi = new OpenAiService();
-                    $interpretations = $openAi->generateReportInterpretations(
-                        $results['phylum_totals'],
-                        $results['diversity_score'],
-                        $petContext,
-                    );
-
-                    $allEmpty = collect($interpretations)->every(fn ($val) => empty($val));
-
-                    if ($allEmpty) {
-                        Notification::make()
-                            ->title('AI interpretations returned empty')
-                            ->body('Check your OpenAI API key and credits. See storage/logs/laravel.log for details.')
-                            ->warning()
-                            ->persistent()
-                            ->send();
-                    }
-
-                    $record->update([
-                        // Raw lab data is written to the Test below; the report
-                        // stores only the AI copy, scores and the pet snapshot.
-                        // Re-freeze the pet snapshot in lockstep with the AI/CSV
-                        // snapshot so the frozen pet matches the regenerated copy
-                        // (notes history as of the report date).
-                        'pet_snapshot' => \App\Models\Report::buildPetSnapshot($pet, $asOf),
-                        'ai_summary' => $interpretations['summary'],
-                        'ai_bacteroidetes_interpretation' => $interpretations['bacteroidetes_interpretation'],
-                        'ai_firmicutes_interpretation' => $interpretations['firmicutes_interpretation'],
-                        'ai_fusobacteria_interpretation' => $interpretations['fusobacteria_interpretation'],
-                        'ai_proteobacteria_interpretation' => $interpretations['proteobacteria_interpretation'],
-                        'ai_diversity_interpretation' => $interpretations['diversity_interpretation'],
-                        'vet_summary' => $interpretations['vet_summary'],
-                        'goal' => $interpretations['goal'],
-                        'recommended_actions' => $interpretations['recommended_actions'],
-                        'score_gut_wall' => $interpretations['score_gut_wall'],
-                        'score_skin_allergy' => $interpretations['score_skin_allergy'],
-                        'score_behaviour_mood' => $interpretations['score_behaviour_mood'],
-                        'score_gut_barrier' => $interpretations['score_gut_barrier'],
-                        'score_gas_digestive' => $interpretations['score_gas_digestive'],
-                        'score_stress_resilience' => $interpretations['score_stress_resilience'],
-                    ]);
-
-                    // Refresh the raw lab data on the Test (its sole home).
-                    // Find-or-create by (pet_id + order_id == sample_id) and link
-                    // if not yet linked. sample_id/report_date/csv_path resolve
-                    // through the Report→Test proxy off the already-linked test.
-                    $test = Test::syncRawForReport([
-                        'pet_id' => $record->pet_id,
-                        'client_id' => $record->client_id,
-                        'sample_id' => $record->sample_id,
-                        'report_date' => $record->report_date,
-                        'csv_path' => $record->csv_path,
-                        'csv_data' => $results,
-                        'phylum_data' => $results['phylum_totals'],
-                        'diversity_score' => $results['diversity_score'],
-                        'species_richness' => $results['species_richness'],
-                        'dysbiosis_score' => $results['dysbiosis_score'],
-                        'microbiome_classification' => $results['microbiome_classification'],
-                    ]);
-                    if ($record->test_id !== $test->id) {
-                        $record->update(['test_id' => $test->id]);
-                    }
-
-                    // Auto-select catalog products based on triggered rules
-                    $triggeredRules = $csvParser->evaluateProductRules(
-                        $results['phylum_totals'],
-                        $results['diversity_score'],
-                    );
-
-                    $matchedIds = CatalogProduct::active()
-                        ->whereHas('triggerEntries', fn ($q) => $q->whereIn('trigger', $triggeredRules))
-                        ->pluck('id')
-                        ->all();
-
-                    $syncData = [];
-                    foreach ($matchedIds as $position => $id) {
-                        $syncData[$id] = ['position' => $position];
-                    }
-                    $record->catalogProducts()->sync($syncData);
-
-                    $record->refresh();
-                    $this->fillForm();
-
-                    if (!$allEmpty) {
-                        Notification::make()
-                            ->title('CSV parsed and AI interpretations generated')
-                            ->success()
-                            ->send();
-                    }
-                }),
             Actions\DeleteAction::make(),
         ];
     }
@@ -332,6 +210,19 @@ class EditReport extends EditRecord
 
     protected function mutateFormDataBeforeFill(array $data): array
     {
+        // The edit page reuses the create Wizard. Its step 1 reads sample_id /
+        // report_date / raw lab fields and the test-source selector from form
+        // state — but those columns were dropped from `reports` (they live on the
+        // linked Test now), so attributesToArray() (what Filament fills from)
+        // omits them and the getAttribute proxy never fires for array fills.
+        // Re-hydrate them from the linked Test so the wizard opens on the right
+        // step with the test preselected and its fields populated.
+        if ($this->record->test_id) {
+            $data = array_merge($data, ReportResource::testFormState($this->record->test_id));
+            $data['test_source'] = 'existing';
+            $data['existing_test_id'] = $this->record->test_id;
+        }
+
         $data['catalog_product_ids'] = $this->record->catalogProducts->pluck('id')->all();
 
         // Hydrate the phased plan steps (ordered by position) with their

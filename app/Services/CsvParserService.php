@@ -92,7 +92,7 @@ class CsvParserService
         if ($diversityScore >= 3.0 && $dysbiosisScore >= 0.2 && $dysbiosisScore <= 0.5) {
             $microbiomeClassification = 'Stable';
         } elseif ($diversityScore < 1.9 || $speciesRichness < 400) {
-            $microbiomeClassification = 'Imbalanced & Missing';
+            $microbiomeClassification = 'Imbalanced & Depleted';
         } else {
             $microbiomeClassification = 'Imbalanced';
         }
@@ -178,7 +178,7 @@ class CsvParserService
             $triggered[] = 'Antimicrobic';
         }
 
-        if ($diversityScore < 2.2) {
+        if ($diversityScore < 1.6) {
             $triggered[] = 'FMT';
         }
 

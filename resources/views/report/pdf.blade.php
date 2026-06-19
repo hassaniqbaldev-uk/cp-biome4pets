@@ -407,7 +407,7 @@
             $classCards = [
                 ['name' => 'Stable', 'border' => '#22c55e', 'text' => '#16a34a', 'active' => '#dcfce7', 'desc' => 'Core bacteria present at healthy levels'],
                 ['name' => 'Imbalanced', 'border' => '#f59e0b', 'text' => '#d97706', 'active' => '#fef3c7', 'desc' => 'Core bacteria present but at levels that may impact gut health'],
-                ['name' => 'Imbalanced & Missing', 'border' => '#ef4444', 'text' => '#dc2626', 'active' => '#fee2e2', 'desc' => 'Key beneficial bacteria low or missing'],
+                ['name' => 'Imbalanced & Depleted', 'border' => '#ef4444', 'text' => '#dc2626', 'active' => '#fee2e2', 'desc' => 'Key beneficial bacteria low or missing'],
             ];
         @endphp
         <table style="width: 100%; margin-bottom: 14px;" cellspacing="0" cellpadding="0">
@@ -602,13 +602,19 @@
     $subsGloballyEnabled = blank($subsGlobalRaw) ? true : filter_var($subsGlobalRaw, FILTER_VALIDATE_BOOLEAN);
     $subAvailable = $subsGloballyEnabled && (bool) data_get($snapshot, 'available', false);
     $subPrice = data_get($snapshot, 'price');
+    // Full (pre-subscription) price + saving label, to convey old→new in the clause.
+    $subFullPrice = data_get($snapshot, 'full_price');
+    $subSaving = data_get($snapshot, 'saving_label');
 
     // Precompute the one-line descriptor clauses (avoids inline @if in markup).
     $phaseClause = $phaseCount > 0
         ? ' — ' . $phaseCount . ' phase' . ($phaseCount === 1 ? '' : 's') . ' across ' . $stepCount . ' guided step' . ($stepCount === 1 ? '' : 's')
         : '';
+    $savingClause = (filled($subSaving) && filled($subFullPrice))
+        ? ' — ' . $subSaving . ' the usual ' . $subFullPrice
+        : (filled($subSaving) ? ' — ' . $subSaving : '');
     $subClause = ($subAvailable && filled($subPrice))
-        ? ' and available as a subscription from ' . $subPrice
+        ? ' and available as a subscription from ' . $subPrice . $savingClause
         : '';
 @endphp
 <div style="page-break-before: always;"></div>
@@ -631,6 +637,24 @@
                 </tr>
             </table>
         </div>
+
+        {{-- Kibble-diet nutritionist CTA (mirrors the web view's block). DomPDF-safe:
+             single-cell table, tinted bg, square corners, border-left accent,
+             inline-block link-button. No flexbox / emoji / inline SVG. --}}
+        @if($report->recommendsNutritionist())
+        <div style="page-break-inside: avoid; margin-top: 18px;">
+            <table style="width: 100%; border-collapse: collapse;" cellspacing="0" cellpadding="0">
+                <tr>
+                    <td style="background-color: #F3F8FC; border-left: 4px solid #4E7BA4; padding: 22px 24px; vertical-align: top;">
+                        <div style="font-size: 11px; color: #4E7BA4; text-transform: uppercase; letter-spacing: 2px; font-weight: bold; margin-bottom: 8px;">Nutrition support</div>
+                        <div style="font-size: 17px; font-weight: bold; color: #301C47; margin-bottom: 8px;">We recommend speaking to a nutritionist</div>
+                        <div style="font-size: 12px; color: #4b5563; line-height: 1.6; margin-bottom: 16px;">Pets on a kibble diet can benefit from tailored guidance on supporting gut health. Our nutritionists can help you build a plan suited to {{ $petName }}'s individual results.</div>
+                        <a href="https://biome4pets.com/nutritionists" style="background-color: #4E7BA4; color: #ffffff; font-size: 13px; font-weight: bold; text-decoration: none; padding: 12px 24px; display: inline-block;">View recommendations &raquo;</a>
+                    </td>
+                </tr>
+            </table>
+        </div>
+        @endif
     </div>
 </div>
 
