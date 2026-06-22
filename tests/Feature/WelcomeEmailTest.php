@@ -48,22 +48,43 @@ class WelcomeEmailTest extends TestCase
         ]);
     }
 
-    public function test_creating_a_user_sends_the_welcome_email(): void
+    public function test_create_form_has_no_password_field_but_edit_does(): void
+    {
+        $this->actingAs($this->superAdmin());
+
+        // Create: no password field (the user sets their own via the welcome link).
+        Livewire::test(CreateUser::class)->assertFormFieldIsHidden('password');
+
+        // Edit: the optional password field is available (Super Admin can reset).
+        $existing = User::create([
+            'name' => 'Existing', 'email' => 'e2@example.com',
+            'password' => bcrypt('StrongPassw0rd!!'), 'role' => User::ROLE_ADMIN,
+        ]);
+        Livewire::test(EditUser::class, ['record' => $existing->getRouteKey()])
+            ->assertFormFieldExists('password');
+    }
+
+    public function test_creating_a_user_sends_the_welcome_email_and_sets_a_placeholder_password(): void
     {
         Notification::fake();
         $this->actingAs($this->superAdmin());
 
+        // No password is typed on create.
         Livewire::test(CreateUser::class)
             ->fillForm([
                 'name' => 'New Admin',
                 'email' => 'new.admin@example.com',
                 'role' => User::ROLE_ADMIN,
-                'password' => 'StrongPassw0rd!!',
             ])
             ->call('create')
             ->assertHasNoFormErrors();
 
         $user = User::where('email', 'new.admin@example.com')->firstOrFail();
+
+        // A non-null, unusable placeholder password was stored (column not null),
+        // and the welcome "set your password" email fired.
+        $this->assertNotEmpty($user->password);
+        $this->assertTrue(\Illuminate\Support\Facades\Hash::isHashed($user->password));
         Notification::assertSentTo($user, WelcomeUserNotification::class);
     }
 

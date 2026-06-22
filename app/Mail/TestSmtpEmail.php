@@ -9,9 +9,11 @@ use Illuminate\Mail\Mailables\Envelope;
 use Illuminate\Queue\SerializesModels;
 
 /**
- * A plain "your SMTP works" email sent from the Email & Integrations screen's
- * "Send test email" button. From-address/name come from the applied mail config
- * (the saved SMTP settings). British English, no em dashes.
+ * The "your SMTP works" email sent from the Settings → Email (SMTP) "Send test
+ * email" button. Renders through the SAME shared branded layout
+ * (emails/layout.blade.php) as the welcome and password-reset emails, so all three
+ * are identical in chrome (coloured logo, #4654A4 accent, footer) and differ only
+ * in body copy. From-address/name come from the applied SMTP mail config.
  */
 class TestSmtpEmail extends Mailable
 {
@@ -27,10 +29,7 @@ class TestSmtpEmail extends Mailable
     public function content(): Content
     {
         return new Content(
-            htmlString: '<p>Hello,</p>'
-                . '<p>This is a test email confirming that your Biome4Pets portal SMTP settings are working.</p>'
-                . '<p>If you received this, outbound email is configured correctly.</p>'
-                . '<p>Thanks,<br>The Biome4Pets team</p>',
+            view: 'emails.test',
         );
     }
 }

@@ -5,6 +5,7 @@ namespace App\Providers;
 use App\Support\SmtpConfig;
 use Illuminate\Cache\RateLimiting\Limit;
 use Illuminate\Http\Request;
+use Illuminate\Routing\Middleware\ValidateSignature;
 use Illuminate\Support\Facades\RateLimiter;
 use Illuminate\Support\ServiceProvider;
 use Illuminate\Validation\Rules\Password;
@@ -35,6 +36,16 @@ class AppServiceProvider extends ServiceProvider
 
         $this->configurePasswordPolicy();
         $this->configureRateLimiters();
+
+        // Filament's password-reset / set-password URL is a SIGNED route. We append
+        // UTM params (Utm::email) to those email links for analytics, which would
+        // otherwise invalidate the signature → a 403 when the user clicks the link.
+        // Ignore utm_* during signature validation so the links work AND stay
+        // tagged. Security is unaffected: the email+token are still signed and the
+        // token is independently validated by the password broker.
+        ValidateSignature::except([
+            'utm_source', 'utm_medium', 'utm_campaign', 'utm_content',
+        ]);
     }
 
     /**

@@ -102,6 +102,12 @@ class EditPet extends EditRecord implements HasInfolists
                                 ->state(fn (Pet $record): ?string => $record->latestWeightKg() !== null
                                     ? number_format($record->latestWeightKg(), 2) . ' kg'
                                     : null),
+                            \Filament\Infolists\Components\IconEntry::make('is_sensitive')
+                                ->label('Sensitive animal')
+                                ->boolean(),
+                            \Filament\Infolists\Components\IconEntry::make('is_large_breed')
+                                ->label('Large breed')
+                                ->boolean(),
                         ]),
                     ]),
             ]);

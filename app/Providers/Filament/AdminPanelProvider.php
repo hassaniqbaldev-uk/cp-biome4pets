@@ -28,7 +28,9 @@ class AdminPanelProvider extends PanelProvider
             ->id('admin')
             ->path('admin')
             ->login()
-            ->passwordReset()
+            // Custom reset/SET-password page: shows the password requirements
+            // upfront (helperText) for both the welcome-link and forgot-password flows.
+            ->passwordReset(\App\Filament\Pages\Auth\ResetPassword::class)
             ->brandName('Biome4Pets Portal')
             // The white logo is invisible on the light panel. Use the coloured
             // logo for light mode and the white one for dark mode so it reads in
@@ -84,6 +86,9 @@ class AdminPanelProvider extends PanelProvider
                 SubstituteBindings::class,
                 DisableBladeIconComponents::class,
                 DispatchServingFilamentEvent::class,
+                // Friendly "you're already signed in" page when a logged-in user
+                // opens a set-password / reset link (instead of a blocked redirect).
+                \App\Http\Middleware\PasswordResetWhileAuthenticated::class,
             ])
             ->authMiddleware([
                 Authenticate::class,

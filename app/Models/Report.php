@@ -49,6 +49,8 @@ class Report extends Model
         'pet_snapshot',
         'klaviyo_last_sent_at',
         'klaviyo_last_result',
+        'app_last_sent_at',
+        'app_last_result',
         // Phase 3 quality flags.
         'needs_review',
         'review_flags',
@@ -64,6 +66,8 @@ class Report extends Model
         'pet_snapshot' => 'array',
         'klaviyo_last_sent_at' => 'datetime',
         'klaviyo_last_result' => 'array',
+        'app_last_sent_at' => 'datetime',
+        'app_last_result' => 'array',
         // Phase 3: the visible flag is a bool; review_flags is the recorded verdict.
         'needs_review' => 'boolean',
         'review_flags' => 'array',
@@ -231,6 +235,34 @@ class Report extends Model
         $message = $result['message'] ?? '';
 
         return $this->klaviyo_last_sent_at->format('M j, Y g:ia')
+            .' — '.$status
+            .($message !== '' ? ': '.$message : '');
+    }
+
+    /**
+     * Persist the outcome of a manual "Send via App" (direct SMTP) send. Mirrors
+     * recordKlaviyoSend; called only from the admin action, never automatically.
+     */
+    public function recordAppSend(bool $ok, string $message): void
+    {
+        $this->update([
+            'app_last_sent_at' => now(),
+            'app_last_result' => ['ok' => $ok, 'message' => $message],
+        ]);
+    }
+
+    /** Human-readable "last emailed via the app" line, mirroring the Klaviyo one. */
+    public function appLastSentSummary(): string
+    {
+        if (! $this->app_last_sent_at) {
+            return 'Not yet sent';
+        }
+
+        $result = $this->app_last_result ?? [];
+        $status = ! empty($result['ok']) ? 'OK' : 'Failed';
+        $message = $result['message'] ?? '';
+
+        return $this->app_last_sent_at->format('M j, Y g:ia')
             .' — '.$status
             .($message !== '' ? ': '.$message : '');
     }

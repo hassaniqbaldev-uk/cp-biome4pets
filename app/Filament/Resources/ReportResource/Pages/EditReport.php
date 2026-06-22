@@ -3,6 +3,7 @@
 namespace App\Filament\Resources\ReportResource\Pages;
 
 use App\Filament\Resources\ReportResource;
+use App\Mail\ReportPublishedMail;
 use App\Models\Pet;
 use App\Models\ReportStep;
 use App\Models\Setting;
@@ -13,6 +14,7 @@ use Filament\Actions;
 use Filament\Notifications\Notification;
 use Filament\Resources\Pages\EditRecord;
 use Illuminate\Support\Carbon;
+use Illuminate\Support\Facades\Mail;
 use Illuminate\Support\HtmlString;
 use Illuminate\Support\Str;
 
@@ -87,69 +89,138 @@ class EditReport extends EditRecord
                 ->url(fn () => route('report.show', $this->record->public_token))
                 ->openUrlInNewTab()
                 ->visible(fn () => $this->record->status === 'published'),
-            Actions\Action::make('send_report')
+            // Two send channels behind one "Send Report ▾" chooser (a dropdown
+            // keeps the header tidy and lets each channel keep its own gating /
+            // confirmation). Staff pick the channel each time.
+            Actions\ActionGroup::make([
+                // EXISTING Klaviyo send — logic UNCHANGED, only relabelled and
+                // moved into the chooser.
+                Actions\Action::make('send_via_klaviyo')
+                    ->label('Send via Klaviyo')
+                    ->icon('heroicon-o-bolt')
+                    ->tooltip(fn (): string => $this->sendReportBlockedReason()
+                        ?? ('Via Klaviyo · last sent: '.($this->record->klaviyoLastSentSummary() ?? 'not yet sent')))
+                    ->disabled(fn (): bool => $this->sendReportBlockedReason() !== null)
+                    ->requiresConfirmation()
+                    ->modalHeading('Send Report via Klaviyo')
+                    ->modalDescription(fn (): HtmlString => new HtmlString(
+                        'Send a <strong>report_published</strong> event to <strong>'
+                        .e($this->record->petClient?->email ?? '—')
+                        .'</strong> via Klaviyo.<br><span style="color:#6b7280;">Last sent: '
+                        .e($this->record->klaviyoLastSentSummary()).'</span>'
+                    ))
+                    ->modalSubmitActionLabel('Send now')
+                    ->action(function () {
+                        // L2: Klaviyo send — cap per admin.
+                        if (PaidActionLimiter::exceeded('klaviyo-send', 10)) {
+                            return;
+                        }
+
+                        // Re-check the guards at click time — never call with a
+                        // disabled integration or a missing/empty client email.
+                        $reason = $this->sendReportBlockedReason();
+                        if ($reason !== null) {
+                            Notification::make()->title('Cannot send')->body($reason)->danger()->send();
+
+                            return;
+                        }
+
+                        $report = $this->record;
+                        $email = $report->petClient->email;
+
+                        $result = app(KlaviyoService::class)->sendEvent('report_published', $email, [
+                            'report_id' => $report->id,
+                            'pet_name' => $report->pet?->name,
+                            // Klaviyo delivers this as an email link → tag for attribution.
+                            'report_url' => Utm::klaviyo($report->report_url, 'report_published', 'email_button'),
+                            // report_date is proxied from the linked Test; for a report
+                            // with no test (legacy/orphan) it is null — send null rather
+                            // than Carbon::parse(null) which would silently emit today.
+                            'report_date' => $report->report_date
+                                ? Carbon::parse($report->report_date)->format('F j, Y')
+                                : null,
+                            'client_name' => $report->petClient?->name,
+                        ]);
+
+                        $report->recordKlaviyoSend(
+                            $result['ok'],
+                            $result['ok'] ? 'Report sent to Klaviyo' : $result['message'],
+                        );
+                        $this->fillForm();
+
+                        Notification::make()
+                            ->title($result['ok'] ? 'Report sent to Klaviyo' : 'Send failed')
+                            ->body($result['ok'] ? 'Sent to '.$email : $result['message'])
+                            ->{$result['ok'] ? 'success' : 'danger'}()
+                            ->send();
+                    }),
+
+                // NEW: direct SMTP send of the branded report email to the pet
+                // owner (the report's client). Same role access as the Klaviyo
+                // send (page-level — Admins + Super Admins).
+                Actions\Action::make('send_via_app')
+                    ->label('Send via App')
+                    ->icon('heroicon-o-envelope')
+                    ->tooltip(fn (): string => 'Via email (our SMTP) · last sent: '.$this->record->appLastSentSummary())
+                    ->requiresConfirmation()
+                    ->modalHeading('Send Report via App')
+                    ->modalDescription(fn (): HtmlString => new HtmlString(
+                        'Email the branded report directly to <strong>'
+                        .e($this->record->petClient?->email ?? '—')
+                        .'</strong> from our mail server.<br><span style="color:#6b7280;">Last sent: '
+                        .e($this->record->appLastSentSummary()).'</span>'
+                    ))
+                    ->modalSubmitActionLabel('Send now')
+                    ->action(function () {
+                        // Cap per admin (SES send), mirroring the Klaviyo limiter.
+                        if (PaidActionLimiter::exceeded('app-send', 10)) {
+                            return;
+                        }
+
+                        $report = $this->record;
+                        $email = $report->petClient?->email;
+
+                        // No recipient → don't send; clear error toast (not a crash).
+                        if (blank($email)) {
+                            Notification::make()
+                                ->title('Cannot send')
+                                ->body('This client has no email address')
+                                ->danger()
+                                ->send();
+
+                            return;
+                        }
+
+                        // Wrap the transport in try/catch so an SMTP error surfaces
+                        // as a toast and is recorded — never a silent fail or 500.
+                        try {
+                            Mail::to($email)->send(new ReportPublishedMail($report));
+
+                            $report->recordAppSend(true, 'Report emailed to '.$email);
+                            $this->fillForm();
+
+                            Notification::make()
+                                ->title('Report sent')
+                                ->body('Report sent to '.$email)
+                                ->success()
+                                ->send();
+                        } catch (\Throwable $e) {
+                            report($e);
+                            $report->recordAppSend(false, $e->getMessage());
+                            $this->fillForm();
+
+                            Notification::make()
+                                ->title('Send failed')
+                                ->body($e->getMessage())
+                                ->danger()
+                                ->send();
+                        }
+                    }),
+            ])
                 ->label('Send Report')
                 ->icon('heroicon-o-paper-airplane')
                 ->color('warning')
-                // Sub-label / tooltip tells the admin the channel and the Klaviyo
-                // send status (the relocated "not sent" indicator) — or, when
-                // blocked, exactly why the button is greyed out.
-                ->tooltip(fn (): string => $this->sendReportBlockedReason()
-                    ?? ('Via Klaviyo · last sent: '.($this->record->klaviyoLastSentSummary() ?? 'not yet sent')))
-                ->disabled(fn (): bool => $this->sendReportBlockedReason() !== null)
-                ->requiresConfirmation()
-                ->modalHeading('Send Report via Klaviyo')
-                ->modalDescription(fn (): HtmlString => new HtmlString(
-                    'Send a <strong>report_published</strong> event to <strong>'
-                    .e($this->record->petClient?->email ?? '—')
-                    .'</strong> via Klaviyo.<br><span style="color:#6b7280;">Last sent: '
-                    .e($this->record->klaviyoLastSentSummary()).'</span>'
-                ))
-                ->modalSubmitActionLabel('Send now')
-                ->action(function () {
-                    // L2: Klaviyo send — cap per admin.
-                    if (PaidActionLimiter::exceeded('klaviyo-send', 10)) {
-                        return;
-                    }
-
-                    // Re-check the guards at click time — never call with a
-                    // disabled integration or a missing/empty client email.
-                    $reason = $this->sendReportBlockedReason();
-                    if ($reason !== null) {
-                        Notification::make()->title('Cannot send')->body($reason)->danger()->send();
-
-                        return;
-                    }
-
-                    $report = $this->record;
-                    $email = $report->petClient->email;
-
-                    $result = app(KlaviyoService::class)->sendEvent('report_published', $email, [
-                        'report_id' => $report->id,
-                        'pet_name' => $report->pet?->name,
-                        // Klaviyo delivers this as an email link → tag for attribution.
-                        'report_url' => Utm::klaviyo($report->report_url, 'report_published', 'email_button'),
-                        // report_date is proxied from the linked Test; for a report
-                        // with no test (legacy/orphan) it is null — send null rather
-                        // than Carbon::parse(null) which would silently emit today.
-                        'report_date' => $report->report_date
-                            ? Carbon::parse($report->report_date)->format('F j, Y')
-                            : null,
-                        'client_name' => $report->petClient?->name,
-                    ]);
-
-                    $report->recordKlaviyoSend(
-                        $result['ok'],
-                        $result['ok'] ? 'Report sent to Klaviyo' : $result['message'],
-                    );
-                    $this->fillForm();
-
-                    Notification::make()
-                        ->title($result['ok'] ? 'Report sent to Klaviyo' : 'Send failed')
-                        ->body($result['ok'] ? 'Sent to '.$email : $result['message'])
-                        ->{$result['ok'] ? 'success' : 'danger'}()
-                        ->send();
-                }),
+                ->button(),
             Actions\Action::make('copy_link')
                 ->label('Copy Report Link')
                 ->icon('heroicon-o-clipboard-document')

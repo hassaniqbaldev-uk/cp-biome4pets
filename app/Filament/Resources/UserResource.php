@@ -64,20 +64,19 @@ class UserResource extends Resource
                             ->password()
                             ->revealable()
                             ->autocomplete('new-password')
-                            // Required only when creating; on edit, blank = keep
-                            // the current password. The User model casts password
-                            // to 'hashed', so a plaintext value is hashed on save.
-                            ->required(fn (string $operation): bool => $operation === 'create')
+                            // EDIT-ONLY. On create no password is collected — the new
+                            // user sets their own via the welcome email's "set your
+                            // password" link (a random unusable placeholder is stored,
+                            // see CreateUser::mutateFormDataBeforeCreate). On edit a
+                            // Super Admin may set a new password; blank = keep current.
+                            ->visible(fn (string $operation): bool => $operation === 'edit')
                             ->dehydrated(fn (?string $state): bool => filled($state))
                             ->maxLength(255)
-                            // M3: enforce the strong-password baseline (Password::default()
-                            // configured in AppServiceProvider). On edit a blank value is
-                            // allowed (keeps the current password) — 'nullable' short-circuits
-                            // the rule so we only validate a newly typed password.
-                            ->rules(fn (string $operation): array => $operation === 'create'
-                                ? [Password::default()]
-                                : ['nullable', Password::default()])
-                            ->helperText('Min 12 characters with upper & lower case and a number. Leave blank when editing to keep the current password.'),
+                            // 'nullable' short-circuits so the strong-password rule
+                            // (Password::default(), set in AppServiceProvider) only
+                            // validates a newly typed value.
+                            ->rules(['nullable', Password::default()])
+                            ->helperText('Optional. Leave blank to keep the current password. A new password needs at least 12 characters with upper and lower case and a number.'),
                     ]),
             ]);
     }

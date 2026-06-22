@@ -655,10 +655,16 @@
                                 @foreach($subIncludes as $inc)
                                     <li style="font-size:14px; padding:5px 0 5px 24px; position:relative;">
                                         <span style="position:absolute; left:0; top:9px; width:12px; height:12px; border-radius:50%; background:#4654A4;"></span>
-                                        <b class="text-navy">{{ data_get($inc, 'name') }}</b>@if(! is_null(data_get($inc, 'price'))) - £{{ number_format((float) data_get($inc, 'price'), 2) }}@endif
+                                        <b class="text-navy">{{ data_get($inc, 'name') }}</b>@if(! is_null(data_get($inc, 'price'))) <span style="color:#7a7580;">— £{{ number_format((float) data_get($inc, 'price'), 2) }} individually</span>@endif
                                     </li>
                                 @endforeach
                             </ul>
+                            {{-- Make the relationship explicit: the individual prices above
+                                 are all covered by the one monthly subscription (derived from
+                                 the frozen snapshot — $subPrice / $savingLine). --}}
+                            @if(filled($subPrice))
+                                <p style="font-size:12.5px; color:#55505A; margin:12px 0 0; line-height:1.5;">All included in the <b class="text-navy">{{ $subPrice }}</b> subscription{{ $savingLine ? ' — '.$savingLine.' vs buying each separately' : '' }}, not {{ count($subIncludes) }} × the individual price.</p>
+                            @endif
                         @endif
                         <p style="font-size:13px; color:#55505A; margin:14px 0 0;">Pause or cancel anytime.</p>
                     </div>
@@ -781,8 +787,19 @@
                                             @endif
                                             <div style="flex:1; min-width:0;">
                                                 <h4 class="text-navy" style="font-weight:600; font-size:18px; margin:0;">{{ $catalog?->name }}</h4>
+                                                @php
+                                                    // Plan-included products (NOT optional add-ons) are covered by the
+                                                    // monthly subscription. The "on the plan" price is the WHOLE-plan
+                                                    // monthly figure ($subPrice), never a per-product price, so it only
+                                                    // shows for subscription-included items when a subscription exists.
+                                                    $isPlanIncluded = $product->inclusion !== 'optional';
+                                                @endphp
                                                 @if(! is_null($catalog?->price))
-                                                    <div style="font-size:14px; color:#55505A; margin:2px 0 12px; font-weight:500;"><b style="color:#55505A;">£{{ number_format($catalog->price, 2) }}</b></div>
+                                                    @if($isPlanIncluded && $subAvailable && filled($subPrice))
+                                                        <div style="font-size:14px; color:#55505A; margin:2px 0 12px; line-height:1.5;"><b style="color:#55505A;">£{{ number_format($catalog->price, 2) }}</b> individually <span style="color:#4654A4; font-weight:600;">· {{ $subPrice }} on the plan{{ $savingLine ? ' ('.$savingLine.')' : '' }}</span></div>
+                                                    @else
+                                                        <div style="font-size:14px; color:#55505A; margin:2px 0 12px; font-weight:500;"><b style="color:#55505A;">£{{ number_format($catalog->price, 2) }}</b></div>
+                                                    @endif
                                                 @endif
                                                 @if(! is_null($subDiscounted))
                                                     <div style="font-size:13px; color:#55505A; margin:0 0 12px; line-height:1.5;">£{{ \App\Support\ReportContent::num($catalog->price) }}, or £{{ \App\Support\ReportContent::num($subDiscounted) }} with the 6-month subscription discount ({{ $catalog->subscription_discount_percent }}% off)</div>

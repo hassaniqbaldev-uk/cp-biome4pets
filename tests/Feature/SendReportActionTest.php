@@ -79,7 +79,7 @@ class SendReportActionTest extends TestCase
         $report = $this->makeReport();
 
         Livewire::test(EditReport::class, ['record' => $report->getRouteKey()])
-            ->callAction('send_report')
+            ->callAction('send_via_klaviyo')
             ->assertNotified('Report sent to Klaviyo');
 
         Http::assertSent(function ($request) use ($report) {
@@ -111,7 +111,7 @@ class SendReportActionTest extends TestCase
         $report = $this->makeReport();
 
         Livewire::test(EditReport::class, ['record' => $report->getRouteKey()])
-            ->callAction('send_report')
+            ->callAction('send_via_klaviyo')
             ->assertNotified('Send failed');
 
         $fresh = $report->fresh();
@@ -130,7 +130,7 @@ class SendReportActionTest extends TestCase
         $report = $this->makeReport();
 
         Livewire::test(EditReport::class, ['record' => $report->getRouteKey()])
-            ->assertActionDisabled('send_report');
+            ->assertActionDisabled('send_via_klaviyo');
 
         Http::assertNothingSent();
         $this->assertNull($report->fresh()->klaviyo_last_sent_at);
@@ -143,7 +143,7 @@ class SendReportActionTest extends TestCase
         $report = $this->makeReport();
 
         Livewire::test(EditReport::class, ['record' => $report->getRouteKey()])
-            ->assertActionDisabled('send_report');
+            ->assertActionDisabled('send_via_klaviyo');
 
         Http::assertNothingSent();
     }
@@ -156,7 +156,7 @@ class SendReportActionTest extends TestCase
         $report = $this->makeReport('');
 
         Livewire::test(EditReport::class, ['record' => $report->getRouteKey()])
-            ->assertActionDisabled('send_report');
+            ->assertActionDisabled('send_via_klaviyo');
 
         Http::assertNothingSent();
     }

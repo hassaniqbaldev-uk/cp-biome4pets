@@ -72,6 +72,7 @@ class PetResource extends Resource
                                 'Mixed' => 'Mixed',
                                 'Other' => 'Other',
                             ]),
+                        ...\App\Filament\Forms\PetProfileFields::flags(),
                         Forms\Components\TextInput::make('shopify_pet_id')
                             ->label('Shopify Pet ID')
                             ->maxLength(255)
@@ -93,6 +94,9 @@ class PetResource extends Resource
                             ->numeric()
                             ->step(0.01)
                             ->minValue(0)
+                            // Weight drives the Large breed flag (>= 35 kg).
+                            ->live()
+                            ->afterStateUpdated(\App\Filament\Forms\PetProfileFields::largeBreedFromWeight())
                             ->visibleOn('create'),
                     ]),
             ]);

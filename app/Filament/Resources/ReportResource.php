@@ -264,6 +264,7 @@ class ReportResource extends Resource
                                             'Mixed' => 'Mixed',
                                             'Other' => 'Other',
                                         ]),
+                                    ...\App\Filament\Forms\PetProfileFields::flags(),
                                     // Mirror the full pet-create form: an optional first
                                     // health-log entry (note and/or weight), both blank ⇒
                                     // no entry. These are transient (not Pet columns).
@@ -276,7 +277,10 @@ class ReportResource extends Resource
                                         ->helperText('Optional. Recorded with the first health-log entry.')
                                         ->numeric()
                                         ->step(0.01)
-                                        ->minValue(0),
+                                        ->minValue(0)
+                                        // Weight drives the Large breed flag (>= 35 kg).
+                                        ->live()
+                                        ->afterStateUpdated(\App\Filament\Forms\PetProfileFields::largeBreedFromWeight()),
                                     Forms\Components\TextInput::make('shopify_pet_id')
                                         ->label('Shopify Pet ID')
                                         ->maxLength(255)

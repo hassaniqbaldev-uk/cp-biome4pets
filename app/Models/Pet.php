@@ -19,11 +19,15 @@ class Pet extends Model
         'date_of_birth',
         'sex',
         'diet',
+        'is_sensitive',
+        'is_large_breed',
         'shopify_pet_id',
     ];
 
     protected $casts = [
         'date_of_birth' => 'date',
+        'is_sensitive' => 'boolean',
+        'is_large_breed' => 'boolean',
     ];
 
     public function client(): BelongsTo

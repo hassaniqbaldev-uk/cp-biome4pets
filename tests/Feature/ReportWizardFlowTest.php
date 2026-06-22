@@ -108,7 +108,9 @@ class ReportWizardFlowTest extends TestCase
 
         Livewire::test(EditReport::class, ['record' => $report->getKey()])
             ->assertActionDoesNotExist('parse_and_generate')
-            ->assertActionExists('send_report')
+            // Send Report is now a two-channel chooser (Klaviyo + App).
+            ->assertActionExists('send_via_klaviyo')
+            ->assertActionExists('send_via_app')
             ->assertActionExists('publish');
     }
 

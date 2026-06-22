@@ -42,6 +42,7 @@ class PetsRelationManager extends RelationManager
                         'Mixed' => 'Mixed',
                         'Other' => 'Other',
                     ]),
+                ...\App\Filament\Forms\PetProfileFields::flags(),
                 // Health notes are a dated log on the Pet hub. On CREATE only,
                 // capture an optional first entry (note and/or weight); both blank
                 // ⇒ no entry. Transient fields handled in the CreateAction below.
@@ -56,6 +57,9 @@ class PetsRelationManager extends RelationManager
                     ->numeric()
                     ->step(0.01)
                     ->minValue(0)
+                    // Weight drives the Large breed flag (>= 35 kg).
+                    ->live()
+                    ->afterStateUpdated(\App\Filament\Forms\PetProfileFields::largeBreedFromWeight())
                     ->visibleOn('create'),
                 Forms\Components\TextInput::make('shopify_pet_id')
                     ->label('Shopify Pet ID')

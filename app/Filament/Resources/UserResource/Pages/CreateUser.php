@@ -7,11 +7,27 @@ use App\Notifications\WelcomeUserNotification;
 use Filament\Facades\Filament;
 use Filament\Notifications\Notification;
 use Filament\Resources\Pages\CreateRecord;
+use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Password;
+use Illuminate\Support\Str;
 
 class CreateUser extends CreateRecord
 {
     protected static string $resource = UserResource::class;
+
+    /**
+     * No password is collected on create — the new user sets their own via the
+     * welcome email's "set your password" link. Store a random, UNUSABLE
+     * placeholder so the column is never null and the admin never has to type (or
+     * communicate) a password. We store an already-hashed random value; the 'hashed'
+     * cast detects it is already hashed (Hash::isHashed) and leaves it as-is.
+     */
+    protected function mutateFormDataBeforeCreate(array $data): array
+    {
+        $data['password'] = Hash::make(Str::random(40));
+
+        return $data;
+    }
 
     /**
      * Send the branded welcome email after the user is created. afterCreate runs
