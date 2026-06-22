@@ -169,7 +169,10 @@ return [
     |
     */
 
-    'secure' => env('SESSION_SECURE_COOKIE'),
+    // Default the secure flag ON in production (HTTPS-only session cookie), while
+    // leaving local/staging over plain http working. An explicit SESSION_SECURE_COOKIE
+    // still wins if set.
+    'secure' => env('SESSION_SECURE_COOKIE', env('APP_ENV') === 'production'),
 
     /*
     |--------------------------------------------------------------------------

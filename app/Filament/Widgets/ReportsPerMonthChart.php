@@ -33,8 +33,11 @@ class ReportsPerMonthChart extends ChartWidget
                 [
                     'label' => 'Reports created',
                     'data' => $counts,
-                    'borderColor' => '#2D7D46',
-                    'backgroundColor' => 'rgba(45, 125, 70, 0.15)',
+                    // Biome4Pets report palette: line in #4168D5 (the first palette
+                    // colour with enough contrast for a line stroke); translucent
+                    // area fill from #6CE5E8 (the light cyan suits a fill).
+                    'borderColor' => '#4168D5',
+                    'backgroundColor' => 'rgba(108, 229, 232, 0.18)',
                     'fill' => true,
                     'tension' => 0.3,
                 ],

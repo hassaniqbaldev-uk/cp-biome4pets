@@ -71,7 +71,7 @@
         .section { max-width: 750px; margin: 0 auto 20px auto; page-break-inside: avoid; }
         .section-bar { background-color: #301C47; color: #ffffff; padding: 14px 20px; font-size: 20px; font-weight: bold; }
         .section-body { background-color: #ffffff; border: 1px solid #e6e6ea; border-top: none; padding: 20px; }
-        .accent-bar { border-left: 4px solid #4E7BA4; padding-left: 14px; margin-top: 6px; }
+        .accent-bar { border-left: 4px solid #4654A4; padding-left: 14px; margin-top: 6px; }
     </style>
 </head>
 <body>
@@ -89,26 +89,26 @@
     // Shared data — see app/Support/ReportContent.php (kept in sync with the web view).
     $healthyDog = ReportContent::HEALTHY_DOG_PHYLA;
     $top6 = ReportContent::topPhyla($phylumData);
-    $microbes = ReportContent::microbes($report);
+    $microbes = ReportContent::keyMicrobes($report);
     $insights = ReportContent::insights($report);
 
     // Diversity / Species Richness / Dysbiosis: label + colour by threshold.
-    // (Thresholds are identical to the web view — see docs/report-pdf.md.)
+    // Band cutoffs + labels come from ONE place (ReportContent — identical to the
+    // web view by construction); this view only maps the tone to its hex palette.
+    $toneHex = ['bad' => '#dc2626', 'warn' => '#d97706', 'good' => '#16a34a'];
+
     $ds = $report->diversity_score ?? 0;
-    if ($ds < 1.9) { $dsLabel = 'Low'; $dsColor = '#dc2626'; }
-    elseif ($ds <= 2.5) { $dsLabel = 'Medium'; $dsColor = '#d97706'; }
-    else { $dsLabel = 'High'; $dsColor = '#16a34a'; }
+    $dsBand = ReportContent::diversityBand($ds);
+    $dsLabel = $dsBand['label']; $dsColor = $toneHex[$dsBand['tone']];
     $dsPercent = min(max(($ds / 4) * 100, 0), 100);
 
     $sr = $report->species_richness ?? 0;
-    if ($sr < 400) { $srLabel = 'Low'; $srColor = '#dc2626'; }
-    elseif ($sr <= 650) { $srLabel = 'Moderate'; $srColor = '#d97706'; }
-    else { $srLabel = 'Healthy'; $srColor = '#16a34a'; }
+    $srBand = ReportContent::richnessBand($sr);
+    $srLabel = $srBand['label']; $srColor = $toneHex[$srBand['tone']];
 
     $dyb = $report->dysbiosis_score ?? 0;
-    if ($dyb < 0.2) { $dybLabel = 'Low'; $dybColor = '#d97706'; }
-    elseif ($dyb <= 0.5) { $dybLabel = 'Healthy'; $dybColor = '#16a34a'; }
-    else { $dybLabel = 'High'; $dybColor = '#dc2626'; }
+    $dybBand = ReportContent::dysbiosisBand($dyb);
+    $dybLabel = $dybBand['label']; $dybColor = $toneHex[$dybBand['tone']];
 
     $classification = $report->microbiome_classification ?? 'Unknown';
 
@@ -162,14 +162,14 @@
         <td style="vertical-align: middle; text-align: center;">
             <div style="padding-bottom: 34px; font-family: Arial, sans-serif;">
                 <span style="font-size: 28px; font-weight: bold; color: #301C47;">Biome4Pets</span><br>
-                <span style="font-size: 13px; color: #4E7BA4;">Microbiome Testing Service</span>
+                <span style="font-size: 13px; color: #4654A4;">Microbiome Testing Service</span>
             </div>
 
             <div style="background-color: #E3F0FF; padding: 52px 30px; text-align: center;">
                 <div style="margin-bottom: 22px;"><img src="{{ $logoPath }}" style="width: 185px;" /></div>
                 <div style="font-size: 33px; font-weight: bold; color: #301C47; margin-bottom: 22px;">Petbiome Microbiome Profile</div>
-                <div style="height: 3px; width: 70px; background-color: #4E7BA4; margin: 0 auto 22px auto;"></div>
-                <div style="font-size: 13px; color: #4E7BA4; text-transform: uppercase; letter-spacing: 3px; margin-bottom: 10px;">Prepared For</div>
+                <div style="height: 3px; width: 70px; background-color: #4654A4; margin: 0 auto 22px auto;"></div>
+                <div style="font-size: 13px; color: #4654A4; text-transform: uppercase; letter-spacing: 3px; margin-bottom: 10px;">Prepared For</div>
                 <div style="font-size: 24px; font-weight: bold; color: #301C47; margin-bottom: 8px;">{{ $ownerName }} &amp; {{ $report->petField('name') }}</div>
                 <div style="font-size: 13px; color: #55505A;">{{ $reportDate }}</div>
             </div>
@@ -197,7 +197,7 @@
         @endphp
         @foreach($toc as $i => $item)
             <div style="padding: 8px 0; {{ $loop->last ? '' : 'border-bottom: 1px dotted #cccccc;' }} font-size: 13px;">
-                <span style="color: #4E7BA4; font-weight: bold;">{{ str_pad($i + 1, 2, '0', STR_PAD_LEFT) }}</span>
+                <span style="color: #4654A4; font-weight: bold;">{{ str_pad($i + 1, 2, '0', STR_PAD_LEFT) }}</span>
                 &nbsp;&mdash;&nbsp; {{ $item }}
             </div>
         @endforeach
@@ -296,42 +296,36 @@
             <tr>
                 {{-- Diversity Score --}}
                 <td style="width: 32%; vertical-align: top;">
-                    <div style="background-color: #FAF8FF; border: 2px solid #4E7BA4; padding: 14px; text-align: center;">
+                    <div style="background-color: #FAF8FF; border: 2px solid #4654A4; padding: 14px; text-align: center;">
                         <div style="font-size: 11px; color: #55505A; font-weight: bold; margin-bottom: 6px;">Diversity Score</div>
                         <div style="font-size: 34px; font-weight: bold; color: {{ $dsColor }};">{{ $ds }}</div>
                         <div style="font-size: 11px; font-weight: bold; color: {{ $dsColor }}; margin-top: 2px;">{{ $dsLabel }}</div>
                         <div style="font-size: 9px; color: #55505A; margin-top: 8px; line-height: 1.7;">
-                            <span style="color:#dc2626; font-weight:bold;">Low</span> &lt; 1.9<br>
-                            <span style="color:#d97706; font-weight:bold;">Medium</span> 1.9 - 2.5<br>
-                            <span style="color:#16a34a; font-weight:bold;">High</span> &gt; 2.5
+                            @foreach(ReportContent::diversityLegend() as $b)<span style="color:{{ $toneHex[$b['tone']] }}; font-weight:bold;">{{ $b['label'] }}</span> {{ $b['range'] }}@if(!$loop->last)<br>@endif @endforeach
                         </div>
                     </div>
                 </td>
                 <td style="width: 2%;"></td>
                 {{-- Species Richness --}}
                 <td style="width: 32%; vertical-align: top;">
-                    <div style="background-color: #FAF8FF; border: 2px solid #4E7BA4; padding: 14px; text-align: center;">
+                    <div style="background-color: #FAF8FF; border: 2px solid #4654A4; padding: 14px; text-align: center;">
                         <div style="font-size: 11px; color: #55505A; font-weight: bold; margin-bottom: 6px;">Species Richness</div>
                         <div style="font-size: 34px; font-weight: bold; color: {{ $srColor }};">{{ $sr }}</div>
                         <div style="font-size: 11px; font-weight: bold; color: {{ $srColor }}; margin-top: 2px;">{{ $srLabel }}</div>
                         <div style="font-size: 9px; color: #55505A; margin-top: 8px; line-height: 1.7;">
-                            <span style="color:#dc2626; font-weight:bold;">Low</span> &lt; 400<br>
-                            <span style="color:#d97706; font-weight:bold;">Moderate</span> 400 - 650<br>
-                            <span style="color:#16a34a; font-weight:bold;">Healthy</span> &gt; 650
+                            @foreach(ReportContent::richnessLegend() as $b)<span style="color:{{ $toneHex[$b['tone']] }}; font-weight:bold;">{{ $b['label'] }}</span> {{ $b['range'] }}@if(!$loop->last)<br>@endif @endforeach
                         </div>
                     </div>
                 </td>
                 <td style="width: 2%;"></td>
                 {{-- Dysbiosis --}}
                 <td style="width: 32%; vertical-align: top;">
-                    <div style="background-color: #FAF8FF; border: 2px solid #4E7BA4; padding: 14px; text-align: center;">
+                    <div style="background-color: #FAF8FF; border: 2px solid #4654A4; padding: 14px; text-align: center;">
                         <div style="font-size: 11px; color: #55505A; font-weight: bold; margin-bottom: 6px;">Dysbiosis Pattern Score</div>
                         <div style="font-size: 34px; font-weight: bold; color: {{ $dybColor }};">{{ $dyb }}</div>
                         <div style="font-size: 11px; font-weight: bold; color: {{ $dybColor }}; margin-top: 2px;">{{ $dybLabel }}</div>
                         <div style="font-size: 9px; color: #55505A; margin-top: 8px; line-height: 1.7;">
-                            <span style="color:#d97706; font-weight:bold;">Low</span> &lt; 0.2<br>
-                            <span style="color:#16a34a; font-weight:bold;">Healthy</span> 0.2 - 0.5<br>
-                            <span style="color:#dc2626; font-weight:bold;">High</span> &gt; 0.5
+                            @foreach(ReportContent::dysbiosisLegend() as $b)<span style="color:{{ $toneHex[$b['tone']] }}; font-weight:bold;">{{ $b['label'] }}</span> {{ $b['range'] }}@if(!$loop->last)<br>@endif @endforeach
                         </div>
                     </div>
                 </td>
@@ -345,10 +339,11 @@
             <div style="font-size: 12px; font-weight: bold; color: {{ $dsColor }}; margin-bottom: 8px;">{{ $dsLabel }}</div>
             <div style="text-align: center;">{!! ChartSvg::slider($dsPercent) !!}</div>
             <table style="width: 520px; margin: 4px auto 0 auto;" cellspacing="0" cellpadding="0">
+                @php $dLow = ReportContent::num(ReportContent::DIVERSITY_LOW_MAX); $dHigh = ReportContent::num(ReportContent::DIVERSITY_HIGH_MIN); @endphp
                 <tr>
-                    <td style="text-align: left; font-size: 10px; color: #dc2626; font-weight: bold;">Low (&lt;1.9)</td>
-                    <td style="text-align: center; font-size: 10px; color: #d97706; font-weight: bold;">Medium (1.9-2.5)</td>
-                    <td style="text-align: right; font-size: 10px; color: #16a34a; font-weight: bold;">High (&gt;2.5)</td>
+                    <td style="text-align: left; font-size: 10px; color: #dc2626; font-weight: bold;">Low (&lt;{{ $dLow }})</td>
+                    <td style="text-align: center; font-size: 10px; color: #d97706; font-weight: bold;">Medium ({{ $dLow }}-{{ $dHigh }})</td>
+                    <td style="text-align: right; font-size: 10px; color: #16a34a; font-weight: bold;">High (&gt;{{ $dHigh }})</td>
                 </tr>
             </table>
         </div>
@@ -475,11 +470,15 @@
 
         {{-- Range bar chart (div columns; DomPDF renders block backgrounds fine) --}}
         @php
+            // Brand palette, shade = level (darker = higher, lighter = lower) — no
+            // red/amber alarm colours. Matches the web Chart.js bars exactly.
+            //   High  → #31356E (darkest indigo)   Target → #2D8BBA (medium blue)
+            //   Low   → #6CE5E8 (light cyan)        Your Pet → #4168D5 (distinct blue)
             $barItems = [
-                ['label' => 'Target', 'value' => $microbe['target'], 'color' => '#4E7BA4'],
-                ['label' => 'High', 'value' => $microbe['high'], 'color' => '#ef4444'],
-                ['label' => 'Low', 'value' => $microbe['low'], 'color' => '#f59e0b'],
-                ['label' => 'Your Pet', 'value' => $microbe['value'], 'color' => '#301C47'],
+                ['label' => 'Target', 'value' => $microbe['target'], 'color' => '#2D8BBA'],
+                ['label' => 'High', 'value' => $microbe['high'], 'color' => '#31356E'],
+                ['label' => 'Low', 'value' => $microbe['low'], 'color' => '#6CE5E8'],
+                ['label' => 'Your Pet', 'value' => $microbe['value'], 'color' => '#4168D5'],
             ];
             $maxBarVal = max($microbe['target'], $microbe['high'], $microbe['low'], $microbe['value'], 1);
         @endphp
@@ -504,7 +503,7 @@
             </tr>
         </table>
 
-        <div style="background-color: #E3F0FF; border-left: 4px solid #4E7BA4; padding: 8px 14px; font-size: 10px; font-style: italic; color: #301C47; margin-top: 12px;">See Veterinary Summary for clinical interpretation and recommendations.</div>
+        <div style="background-color: #E3F0FF; border-left: 4px solid #4654A4; padding: 8px 14px; font-size: 10px; font-style: italic; color: #301C47; margin-top: 12px;">See Veterinary Summary for clinical interpretation and recommendations.</div>
     </div>
 </div>
 @endforeach
@@ -589,7 +588,10 @@
     // step-by-step protocol, product cards and subscription checkout live on the
     // interactive online report (avoids the multi-page step/card pagination).
     $planName = $report->plan?->name ?: 'a tailored plan';
-    $reportUrl = $report->report_url; // public /report/{slug} URL (App\Models\Report::getReportUrlAttribute)
+    $reportUrl = $report->report_url; // public /report/{public_token} URL (App\Models\Report::getReportUrlAttribute)
+    // UTM-tagged variant for the clickable "view online" links (the visible text
+    // URL stays clean/short; only the hrefs carry the tracking params).
+    $reportUrlCta = \App\Support\Utm::report($reportUrl, 'report_share', 'pdf_view_online');
 
     // One-line descriptor: distinct "Phase N" labels + total step count.
     $phaseCount = collect($report->steps)
@@ -631,8 +633,8 @@
                         <div style="font-size: 11px; color: #A99CC4; text-transform: uppercase; letter-spacing: 2px; font-weight: bold; margin-bottom: 10px;">Your tailored plan is online</div>
                         <div style="font-size: 21px; font-weight: bold; color: #ffffff; margin-bottom: 10px;">View {{ $petName }}'s full plan &amp; subscription</div>
                         <div style="font-size: 11px; color: #cdbfe0; margin-bottom: 20px; line-height: 1.6;">The complete step-by-step protocol, recommended products with dosing, and one-click subscription are all available on {{ $petName }}'s secure online report.</div>
-                        <a href="{{ $reportUrl }}" style="background-color: #4E7BA4; color: #ffffff; font-size: 13px; font-weight: bold; text-decoration: none; padding: 12px 24px; display: inline-block;">View plan online &raquo;</a>
-                        <div style="font-size: 10px; color: #A99CC4; margin-top: 16px; word-break: break-all;"><a href="{{ $reportUrl }}" style="color: #9FC0E0; text-decoration: underline;">{{ $reportUrl }}</a></div>
+                        <a href="{{ $reportUrlCta }}" style="background-color: #4654A4; color: #ffffff; font-size: 13px; font-weight: bold; text-decoration: none; padding: 12px 24px; display: inline-block;">View plan online &raquo;</a>
+                        <div style="font-size: 10px; color: #A99CC4; margin-top: 16px; word-break: break-all;"><a href="{{ $reportUrlCta }}" style="color: #9FC0E0; text-decoration: underline;">{{ $reportUrl }}</a></div>
                     </td>
                 </tr>
             </table>
@@ -645,11 +647,11 @@
         <div style="page-break-inside: avoid; margin-top: 18px;">
             <table style="width: 100%; border-collapse: collapse;" cellspacing="0" cellpadding="0">
                 <tr>
-                    <td style="background-color: #F3F8FC; border-left: 4px solid #4E7BA4; padding: 22px 24px; vertical-align: top;">
-                        <div style="font-size: 11px; color: #4E7BA4; text-transform: uppercase; letter-spacing: 2px; font-weight: bold; margin-bottom: 8px;">Nutrition support</div>
+                    <td style="background-color: #F3F8FC; border-left: 4px solid #4654A4; padding: 22px 24px; vertical-align: top;">
+                        <div style="font-size: 11px; color: #4654A4; text-transform: uppercase; letter-spacing: 2px; font-weight: bold; margin-bottom: 8px;">Nutrition support</div>
                         <div style="font-size: 17px; font-weight: bold; color: #301C47; margin-bottom: 8px;">We recommend speaking to a nutritionist</div>
                         <div style="font-size: 12px; color: #4b5563; line-height: 1.6; margin-bottom: 16px;">Pets on a kibble diet can benefit from tailored guidance on supporting gut health. Our nutritionists can help you build a plan suited to {{ $petName }}'s individual results.</div>
-                        <a href="https://biome4pets.com/nutritionists" style="background-color: #4E7BA4; color: #ffffff; font-size: 13px; font-weight: bold; text-decoration: none; padding: 12px 24px; display: inline-block;">View recommendations &raquo;</a>
+                        <a href="{{ \App\Support\Utm::report('https://biome4pets.com/nutritionists', 'nutritionist', 'nutritionist_cta') }}" style="background-color: #4654A4; color: #ffffff; font-size: 13px; font-weight: bold; text-decoration: none; padding: 12px 24px; display: inline-block;">View recommendations &raquo;</a>
                     </td>
                 </tr>
             </table>
@@ -672,13 +674,13 @@
 
         @foreach($report->catalogProducts as $index => $product)
             <div style="border: 1px solid #e6e6ea; padding: 14px; margin-bottom: 12px; page-break-inside: avoid;">
-                <div style="font-size: 10px; color: #4E7BA4; font-weight: bold; margin-bottom: 4px;">Step {{ $index + 1 }}</div>
+                <div style="font-size: 10px; color: #4654A4; font-weight: bold; margin-bottom: 4px;">Step {{ $index + 1 }}</div>
                 <div style="font-size: 13px; font-weight: bold; color: #301C47; margin-bottom: 4px;">{{ $product->name }}</div>
                 @if($product->description)
                     <div style="font-size: 11px; color: #55505A; margin-bottom: 6px;">{{ $product->description }}</div>
                 @endif
                 @if($product->url)
-                    <div style="font-size: 10px; color: #4E7BA4; word-break: break-all;">{{ $product->url }}</div>
+                    <div style="font-size: 10px; color: #4654A4; word-break: break-all;">{{ $product->url }}</div>
                 @endif
             </div>
         @endforeach
@@ -693,21 +695,20 @@
 <div class="section">
     <div class="section-bar">Help and Contacts</div>
     <div class="section-body">
+        {{-- Static report-text blocks: admin-editable in Settings → Report Text,
+             resolved via ReportContent so the web report shows identical copy. --}}
         <h3>About This Report</h3>
-        <p>This report is based on advanced analysis of your dog's gut microbiome using 16S rRNA sequencing, one of the most accurate methods available for identifying bacterial populations. Biome4Pets maintains one of the largest canine microbiome data libraries, built from thousands of samples across a wide range of breeds, diets, and health conditions. Using population-based data analysis and artificial intelligence, we are able to identify patterns associated with both health and disease. This report provides a detailed snapshot of your dog's microbiome and highlights key areas of imbalance. While this information is a powerful tool for understanding gut health, it is not intended to diagnose disease. If your dog is unwell, please consult your veterinarian.</p>
+        <p>{!! nl2br(e(ReportContent::reportAboutText())) !!}</p>
 
         <h3 style="margin-top: 16px;">Our Approach</h3>
         <ul style="padding-left: 18px; margin-bottom: 14px;">
-            <li>Large-scale canine microbiome database</li>
-            <li>AI-driven analysis and pattern recognition</li>
-            <li>Linked to real-world health conditions</li>
-            <li>Focused on practical, evidence-based support</li>
+            @foreach(ReportContent::reportApproachLines() as $line)
+                <li>{{ $line }}</li>
+            @endforeach
         </ul>
 
         <h3>Support &amp; Next Steps</h3>
-        <p>If you would like help interpreting your dog's results or guidance on next steps, we are here to support you.</p>
-        <p>Email: info@biome4pets.com<br>Website: www.biome4pets.com</p>
-        <p>Consultations are available if you would like to discuss your dog's results in more detail, please book through the website.</p>
+        <p>{!! nl2br(e(ReportContent::reportSupportText())) !!}</p>
     </div>
 </div>
 

@@ -49,6 +49,14 @@ class CatalogProductResource extends Resource
                     ->minValue(0)
                     ->nullable()
                     ->maxLength(20),
+                Forms\Components\TextInput::make('subscription_discount_percent')
+                    ->label('Subscription discount')
+                    ->numeric()
+                    ->suffix('% off')
+                    ->minValue(1)
+                    ->maxValue(100)
+                    ->nullable()
+                    ->helperText('Optional. When set, optional add-ons of this product show "£price, or £discounted with the 6-month subscription discount (n% off)". Leave blank to show the plain price with no discount line.'),
                 Forms\Components\Toggle::make('is_active')
                     ->label('Active')
                     ->default(true),

@@ -3,6 +3,7 @@
 namespace App\Support;
 
 use App\Models\Report;
+use App\Models\Setting;
 
 /**
  * SHARED report content/data for BOTH report templates:
@@ -19,20 +20,23 @@ use App\Models\Report;
 class ReportContent
 {
     /**
-     * Canonical phylum -> brand colour map. Used by the web Chart.js pies/donut
-     * and by the PDF's server-side SVG pies, so the two documents always agree.
+     * Canonical phylum -> brand colour map (Biome4Pets report palette, applied in
+     * order). One fixed colour per phylum so the SAME phylum reads identically in
+     * the web Chart.js pies/donut, the PDF's server-side SVG pies, and the legend.
+     * Any phylum beyond these six (rare/uncategorised) falls back to a muted grey
+     * so the six brand colours stay the visual anchors.
      */
     public const PHYLUM_COLORS = [
-        'Bacteroidetes'   => '#4E7BA4',
-        'Fusobacteria'    => '#3b82f6',
-        'Firmicutes'      => '#f97316',
-        'Proteobacteria'  => '#ef4444',
-        'Verrucomicrobia' => '#9ca3af',
-        'Other'           => '#d1d5db',
+        'Bacteroidetes'   => '#6CE5E8',
+        'Fusobacteria'    => '#4168D5',
+        'Firmicutes'      => '#2D8BBA',
+        'Proteobacteria'  => '#1B8165',
+        'Verrucomicrobia' => '#2F5F98',
+        'Other'           => '#31356E',
     ];
 
-    /** Fallback colour for any phylum not in PHYLUM_COLORS. */
-    public const PHYLUM_COLOR_FALLBACK = '#6b7280';
+    /** Fallback colour for any phylum not in PHYLUM_COLORS (muted, non-palette). */
+    public const PHYLUM_COLOR_FALLBACK = '#9ca3af';
 
     /** Reference "healthy dog" phylum distribution (the comparison baseline). */
     public const HEALTHY_DOG_PHYLA = [
@@ -48,6 +52,223 @@ class ReportContent
     public static function phylumColor(string $name): string
     {
         return self::PHYLUM_COLORS[$name] ?? self::PHYLUM_COLOR_FALLBACK;
+    }
+
+    /*
+    |---------------------------------------------------------------------------
+    | Static report text blocks (the "Help and Contacts" section)
+    |---------------------------------------------------------------------------
+    | Same on every report, admin-editable in Settings. Resolved HERE (one place)
+    | so the web report and the PDF read identical copy and can never drift, and
+    | a blank setting transparently falls back to the original hardcoded default.
+    | Render escaped (these are admin-entered) — see the views' nl2br(e(...)) use.
+    */
+
+    /** A static report-text block, falling back to its default when blank. */
+    public static function reportText(string $key, string $default): string
+    {
+        $value = trim((string) Setting::get($key));
+
+        return $value !== '' ? $value : $default;
+    }
+
+    /** The "About This Report" block (method + disclaimer), default-backed. */
+    public static function reportAboutText(): string
+    {
+        return self::reportText(Setting::REPORT_ABOUT_TEXT, Setting::REPORT_ABOUT_TEXT_DEFAULT);
+    }
+
+    /** The "Support & Next Steps" block, default-backed. */
+    public static function reportSupportText(): string
+    {
+        return self::reportText(Setting::REPORT_SUPPORT_TEXT, Setting::REPORT_SUPPORT_TEXT_DEFAULT);
+    }
+
+    /** The "Our Approach" block as a list of non-blank bullet lines. */
+    public static function reportApproachLines(): array
+    {
+        $text = self::reportText(Setting::REPORT_APPROACH_TEXT, Setting::REPORT_APPROACH_TEXT_DEFAULT);
+
+        return array_values(array_filter(
+            array_map('trim', preg_split('/\r\n|\r|\n/', $text)),
+            fn (string $line): bool => $line !== '',
+        ));
+    }
+
+    /*
+    |---------------------------------------------------------------------------
+    | Clinical interpretation bands (SINGLE SOURCE OF TRUTH)
+    |---------------------------------------------------------------------------
+    | The cutoffs + labels for the three headline microbiome metrics (Diversity,
+    | Species Richness, Dysbiosis) used to live triplicated across the web report,
+    | the PDF report AND the classification logic in CsvParserService — so editing
+    | one silently disagreed with the others. They now live here once and are
+    | consumed by all three, so the printed bands and the computed classification
+    | badge can never drift apart.
+    |
+    | These are CLINICAL cutoffs, intentionally kept in CODE (not exposed as
+    | client-editable settings): a non-expert changing them would mislabel real
+    | samples. Centralised here only to remove the former duplication — the VALUES
+    | are unchanged from the original three copies.
+    |
+    | Each band() method preserves the EXACT original comparison semantics
+    | (lower bound exclusive `<`, middle-band upper bound inclusive `<=`) and
+    | returns a label plus a semantic tone ('bad' | 'warn' | 'good'). Each view
+    | maps the tone to its own palette (Tailwind classes for the web, hex for the
+    | PDF) — styling stays per-template, only the numbers/labels/tones are shared.
+    */
+
+    /** Diversity: Low when score < this. */
+    public const DIVERSITY_LOW_MAX = 1.9;
+
+    /** Diversity: High when score > this (Medium between, inclusive of this). */
+    public const DIVERSITY_HIGH_MIN = 2.5;
+
+    /** Diversity at/above which a microbiome may be classified "Stable" (the
+     *  classification-only upper threshold — distinct from the display bands,
+     *  whose top band starts at DIVERSITY_HIGH_MIN). */
+    public const DIVERSITY_STABLE_MIN = 3.0;
+
+    /** The three microbiome classification verdicts (the only values classify()
+     *  returns). Named so plan-routing + the quality grader share one definition
+     *  of "unwell" instead of repeating the literal strings. */
+    public const CLASSIFICATION_STABLE = 'Stable';
+
+    public const CLASSIFICATION_IMBALANCED = 'Imbalanced';
+
+    public const CLASSIFICATION_DEPLETED = 'Imbalanced & Depleted';
+
+    /** Species richness: Low when count < this. */
+    public const RICHNESS_LOW_MAX = 400;
+
+    /** Species richness: Healthy when count > this (Moderate between, inclusive). */
+    public const RICHNESS_HEALTHY_MIN = 650;
+
+    /** Dysbiosis: Healthy band lower bound (below = Low). */
+    public const DYSBIOSIS_HEALTHY_MIN = 0.2;
+
+    /** Dysbiosis: Healthy band upper bound, inclusive (above = High). */
+    public const DYSBIOSIS_HEALTHY_MAX = 0.5;
+
+    /** Tone semantics, kept stable so views can map them to their own palettes. */
+    public const TONE_BAD = 'bad';
+
+    public const TONE_WARN = 'warn';
+
+    public const TONE_GOOD = 'good';
+
+    /** Diversity band (label + tone) for a score. */
+    public static function diversityBand(float $score): array
+    {
+        if ($score < self::DIVERSITY_LOW_MAX) {
+            return ['label' => 'Low', 'tone' => self::TONE_BAD];
+        }
+        if ($score <= self::DIVERSITY_HIGH_MIN) {
+            return ['label' => 'Medium', 'tone' => self::TONE_WARN];
+        }
+
+        return ['label' => 'High', 'tone' => self::TONE_GOOD];
+    }
+
+    /** Species-richness band (label + tone) for a count. */
+    public static function richnessBand(float $richness): array
+    {
+        if ($richness < self::RICHNESS_LOW_MAX) {
+            return ['label' => 'Low', 'tone' => self::TONE_BAD];
+        }
+        if ($richness <= self::RICHNESS_HEALTHY_MIN) {
+            return ['label' => 'Moderate', 'tone' => self::TONE_WARN];
+        }
+
+        return ['label' => 'Healthy', 'tone' => self::TONE_GOOD];
+    }
+
+    /** Dysbiosis band (label + tone) for a score. NB: Low is a WARNING (amber),
+     *  not "good" — only the middle band is Healthy. */
+    public static function dysbiosisBand(float $score): array
+    {
+        if ($score < self::DYSBIOSIS_HEALTHY_MIN) {
+            return ['label' => 'Low', 'tone' => self::TONE_WARN];
+        }
+        if ($score <= self::DYSBIOSIS_HEALTHY_MAX) {
+            return ['label' => 'Healthy', 'tone' => self::TONE_GOOD];
+        }
+
+        return ['label' => 'High', 'tone' => self::TONE_BAD];
+    }
+
+    /**
+     * The deterministic microbiome classification — the SINGLE definition shared
+     * by report generation (CsvParserService) and anywhere a badge is shown. Uses
+     * the same cutoff constants as the display bands so the badge and the printed
+     * bands can't disagree (e.g. "Imbalanced & Depleted" uses the same 1.9 / 400
+     * Low cutoffs; "Stable" requires dysbiosis within the same 0.2–0.5 Healthy band).
+     */
+    public static function classify(float $diversity, float $richness, float $dysbiosis): string
+    {
+        if ($diversity >= self::DIVERSITY_STABLE_MIN
+            && $dysbiosis >= self::DYSBIOSIS_HEALTHY_MIN
+            && $dysbiosis <= self::DYSBIOSIS_HEALTHY_MAX) {
+            return self::CLASSIFICATION_STABLE;
+        }
+
+        if ($diversity < self::DIVERSITY_LOW_MAX || $richness < self::RICHNESS_LOW_MAX) {
+            return self::CLASSIFICATION_DEPLETED;
+        }
+
+        return self::CLASSIFICATION_IMBALANCED;
+    }
+
+    /**
+     * Whether a classification verdict means the pet is unwell (Imbalanced or
+     * Imbalanced & Depleted). "Stable", null and any unknown value are NOT unwell,
+     * so callers degrade safely. Shared by the classification-gated plan router
+     * (the maintenance plan is only valid for a non-unwell result) and the quality
+     * grader's "unwell but no plan matched" safety flag.
+     */
+    public static function isUnwellClassification(?string $classification): bool
+    {
+        return in_array(
+            $classification,
+            [self::CLASSIFICATION_IMBALANCED, self::CLASSIFICATION_DEPLETED],
+            true,
+        );
+    }
+
+    /** Printed legend rows (label + tone + range string) for the diversity card. */
+    public static function diversityLegend(): array
+    {
+        return [
+            ['label' => 'Low', 'tone' => self::TONE_BAD, 'range' => '< '.self::num(self::DIVERSITY_LOW_MAX)],
+            ['label' => 'Medium', 'tone' => self::TONE_WARN, 'range' => self::num(self::DIVERSITY_LOW_MAX).' - '.self::num(self::DIVERSITY_HIGH_MIN)],
+            ['label' => 'High', 'tone' => self::TONE_GOOD, 'range' => '> '.self::num(self::DIVERSITY_HIGH_MIN)],
+        ];
+    }
+
+    /** Printed legend rows for the species-richness card. */
+    public static function richnessLegend(): array
+    {
+        return [
+            ['label' => 'Low', 'tone' => self::TONE_BAD, 'range' => '< '.self::num(self::RICHNESS_LOW_MAX)],
+            ['label' => 'Moderate', 'tone' => self::TONE_WARN, 'range' => self::num(self::RICHNESS_LOW_MAX).' - '.self::num(self::RICHNESS_HEALTHY_MIN)],
+            ['label' => 'Healthy', 'tone' => self::TONE_GOOD, 'range' => '> '.self::num(self::RICHNESS_HEALTHY_MIN)],
+        ];
+    }
+
+    /** Printed legend rows for the dysbiosis card. */
+    public static function dysbiosisLegend(): array
+    {
+        return [
+            ['label' => 'Low', 'tone' => self::TONE_WARN, 'range' => '< '.self::num(self::DYSBIOSIS_HEALTHY_MIN)],
+            ['label' => 'Healthy', 'tone' => self::TONE_GOOD, 'range' => self::num(self::DYSBIOSIS_HEALTHY_MIN).' - '.self::num(self::DYSBIOSIS_HEALTHY_MAX)],
+            ['label' => 'High', 'tone' => self::TONE_BAD, 'range' => '> '.self::num(self::DYSBIOSIS_HEALTHY_MAX)],
+        ];
+    }
+
+    /** Format a cutoff for display, trimming trailing zeros (1.9 → "1.9", 400 → "400"). */
+    public static function num(int|float $value): string
+    {
+        return rtrim(rtrim(number_format((float) $value, 2, '.', ''), '0'), '.');
     }
 
     /**
@@ -162,6 +383,22 @@ class ReportContent
                 ],
             ],
         ];
+    }
+
+    /**
+     * The key-microbe cards that actually have data to show. We don't yet retain
+     * genus-level data, so the Prevotella card is always empty (value 0, no
+     * interpretation) and renders as a broken placeholder — drop any such card
+     * rather than show it. Data-driven, not name-specific: a card is kept when it
+     * has a non-zero value OR an AI interpretation, so the four phyla always show,
+     * and Prevotella would reappear automatically if genus data is added later.
+     */
+    public static function keyMicrobes(Report $report): array
+    {
+        return array_values(array_filter(
+            self::microbes($report),
+            fn (array $m): bool => ((float) ($m['value'] ?? 0)) > 0 || filled($m['interpretation'] ?? null),
+        ));
     }
 
     /** Microbiome-driven health insight scores (title, the report's score, copy). */

@@ -94,7 +94,9 @@ return [
         'users' => [
             'provider' => 'users',
             'table' => env('AUTH_PASSWORD_RESET_TOKEN_TABLE', 'password_reset_tokens'),
-            'expire' => 60,
+            // L4: tighten reset-link lifetime from 60 to 30 minutes (smaller window
+            // for a leaked/intercepted reset link to be usable).
+            'expire' => 30,
             'throttle' => 60,
         ],
     ],

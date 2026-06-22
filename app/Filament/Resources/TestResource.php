@@ -2,11 +2,11 @@
 
 namespace App\Filament\Resources;
 
-use App\Filament\Resources\PetResource;
-use App\Filament\Resources\ReportResource;
+use App\Filament\Concerns\SoftDeletableResource;
 use App\Filament\Resources\TestResource\Pages;
 use App\Models\Test;
 use App\Support\AdminFormatting;
+use App\Support\PaidActionLimiter;
 use App\Support\ReportGeneration;
 use Filament\Infolists;
 use Filament\Infolists\Infolist;
@@ -27,6 +27,8 @@ use Illuminate\Database\Eloquent\Model;
  */
 class TestResource extends Resource
 {
+    use SoftDeletableResource;
+
     protected static ?string $model = Test::class;
 
     protected static ?string $navigationIcon = 'heroicon-o-beaker';
@@ -149,6 +151,11 @@ class TestResource extends Resource
                     ->modalDescription('Generates the AI interpretation and recommended plan from this test\'s lab data, then opens the report for review.')
                     ->visible(fn (Test $record): bool => $record->reports()->doesntExist())
                     ->action(function (Test $record) {
+                        // L2: this runs the paid AI interpretation + plan copy — cap per admin.
+                        if (PaidActionLimiter::exceeded('generate-ai', 10)) {
+                            return null;
+                        }
+
                         $report = ReportGeneration::createReportFromTest($record);
 
                         Notification::make()
@@ -167,6 +174,14 @@ class TestResource extends Resource
                     ->url(fn (Test $record): ?string => ($report = $record->reports()->latest()->first())
                         ? ReportResource::getUrl('edit', ['record' => $report->getKey()])
                         : null),
+                // Soft delete + Restore only — force-delete (which would also wipe
+                // the CSV via the forceDeleted hook) is NOT exposed in the UI.
+                Tables\Actions\RestoreAction::make(),
+            ])
+            ->bulkActions([
+                Tables\Actions\BulkActionGroup::make([
+                    Tables\Actions\RestoreBulkAction::make(),
+                ]),
             ]);
     }
 
@@ -186,7 +201,12 @@ class TestResource extends Resource
                         ->getStateUsing(fn (Test $record): string => AdminFormatting::testStateLabel($record->hasReport()))
                         ->color(fn (Test $record): string => AdminFormatting::testStateColor($record->hasReport())),
                     Infolists\Components\TextEntry::make('report_date')->label('Test date')->date(AdminFormatting::DATE)->placeholder('—'),
-                    Infolists\Components\TextEntry::make('csv_path')->label('Lab data (CSV)')->placeholder('—'),
+                    Infolists\Components\TextEntry::make('csv_path')
+                        ->label('Lab data (CSV)')
+                        ->placeholder('—')
+                        ->formatStateUsing(fn (?string $state): string => filled($state) ? 'Download CSV' : '—')
+                        ->url(fn (Test $record): ?string => filled($record->csv_path) ? route('admin.tests.csv', $record) : null)
+                        ->openUrlInNewTab(),
                 ]),
             Infolists\Components\Section::make('Parsed metrics')
                 ->columns(4)

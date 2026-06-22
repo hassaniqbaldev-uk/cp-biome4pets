@@ -31,6 +31,9 @@ class ReportsStatsOverview extends BaseWidget
         // status column. whereDoesntHave('reports') is that same derived condition.
         $awaitingReports = Test::query()->whereDoesntHave('reports')->count();
 
+        // Phase 3: reports the quality checks flagged (deterministic only).
+        $needsReview = Report::where('needs_review', true)->count();
+
         return [
             Stat::make('Total Clients', Client::count())
                 ->description('Registered owners')
@@ -57,6 +60,13 @@ class ReportsStatsOverview extends BaseWidget
                 ->descriptionIcon('heroicon-m-clock')
                 ->color($awaitingReports > 0 ? 'warning' : 'gray')
                 ->url(TestResource::getUrl('index', ['tableFilters[report_state][value]' => 'awaiting'])),
+
+            // Quality flag — links to the reports list filtered to needs-review.
+            Stat::make('Reports Needing Review', $needsReview)
+                ->description('Flagged by automated quality checks')
+                ->descriptionIcon('heroicon-m-flag')
+                ->color($needsReview > 0 ? 'warning' : 'gray')
+                ->url(ReportResource::getUrl('index', ['tableFilters[needs_review][value]' => '1'])),
         ];
     }
 }

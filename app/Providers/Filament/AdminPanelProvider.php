@@ -30,11 +30,15 @@ class AdminPanelProvider extends PanelProvider
             ->login()
             ->passwordReset()
             ->brandName('Biome4Pets Portal')
-            ->brandLogo('/images/biome4pets-logo-white.png')
+            // The white logo is invisible on the light panel. Use the coloured
+            // logo for light mode and the white one for dark mode so it reads in
+            // both. (Filament swaps these on the .dark class automatically.)
+            ->brandLogo('/images/biome4pets-logo.png')
+            ->darkModeBrandLogo('/images/biome4pets-logo-white.png')
             ->brandLogoHeight('3rem')
             ->favicon('/favicon.svg')
             ->colors([
-                'primary' => Color::hex('#2D7D46'),
+                'primary' => Color::hex('#4654A4'),
             ])
             ->navigationGroups([
                 'Operations',
@@ -52,6 +56,13 @@ class AdminPanelProvider extends PanelProvider
             ->renderHook(
                 PanelsRenderHook::HEAD_START,
                 fn (): string => view('partials.favicons')->render(),
+            )
+            // Defence-in-depth noindex on every admin page (incl. the login). The
+            // global X-Robots-Tag header is the authoritative control; this is a
+            // belt-and-braces <meta> tag.
+            ->renderHook(
+                PanelsRenderHook::HEAD_START,
+                fn (): string => '<meta name="robots" content="noindex, nofollow, noarchive">',
             )
             ->renderHook(
                 PanelsRenderHook::FOOTER,

@@ -3,9 +3,12 @@
 namespace App\Filament\Resources\ReportResource\Pages;
 
 use App\Filament\Resources\ReportResource;
+use App\Models\Pet;
 use App\Models\ReportStep;
 use App\Models\Setting;
 use App\Services\KlaviyoService;
+use App\Support\PaidActionLimiter;
+use App\Support\Utm;
 use Filament\Actions;
 use Filament\Notifications\Notification;
 use Filament\Resources\Pages\EditRecord;
@@ -25,7 +28,7 @@ class EditReport extends EditRecord
      */
     public bool $justCreated = false;
 
-    public function mount(int | string $record): void
+    public function mount(int|string $record): void
     {
         parent::mount($record);
 
@@ -35,6 +38,27 @@ class EditReport extends EditRecord
     protected function getHeaderActions(): array
     {
         return [
+            // Phase 3: acknowledge the advisory quality flag. Clears needs_review
+            // (so it leaves the dashboard/list/nav surfaces) but KEEPS review_flags
+            // for the record and stamps who/when. Purely advisory — it does not
+            // touch the draft/published flow.
+            Actions\Action::make('mark_reviewed')
+                ->label('Mark as reviewed')
+                ->icon('heroicon-o-flag')
+                ->color('warning')
+                ->visible(fn (): bool => (bool) $this->record->needs_review)
+                ->requiresConfirmation()
+                ->modalHeading('Mark this report as reviewed')
+                ->modalDescription('Clears the "needs review" flag. The recorded issues are kept for the audit trail.')
+                ->action(function (): void {
+                    $this->record->update([
+                        'needs_review' => false,
+                        'reviewed_at' => now(),
+                        'reviewed_by' => auth()->id(),
+                    ]);
+                    $this->fillForm();
+                    Notification::make()->title('Marked as reviewed')->success()->send();
+                }),
             Actions\Action::make('publish')
                 ->label('Publish Report')
                 ->icon('heroicon-o-globe-alt')
@@ -47,7 +71,7 @@ class EditReport extends EditRecord
                     $this->record->update(['status' => 'published']);
                     $this->fillForm();
 
-                    $url = route('report.show', $this->record->slug);
+                    $url = route('report.show', $this->record->public_token);
 
                     Notification::make()
                         ->title('Report Published')
@@ -60,7 +84,7 @@ class EditReport extends EditRecord
                 ->label('View Report')
                 ->icon('heroicon-o-eye')
                 ->color('info')
-                ->url(fn () => route('report.show', $this->record->slug))
+                ->url(fn () => route('report.show', $this->record->public_token))
                 ->openUrlInNewTab()
                 ->visible(fn () => $this->record->status === 'published'),
             Actions\Action::make('send_report')
@@ -71,18 +95,23 @@ class EditReport extends EditRecord
                 // send status (the relocated "not sent" indicator) — or, when
                 // blocked, exactly why the button is greyed out.
                 ->tooltip(fn (): string => $this->sendReportBlockedReason()
-                    ?? ('Via Klaviyo · last sent: ' . ($this->record->klaviyoLastSentSummary() ?? 'not yet sent')))
+                    ?? ('Via Klaviyo · last sent: '.($this->record->klaviyoLastSentSummary() ?? 'not yet sent')))
                 ->disabled(fn (): bool => $this->sendReportBlockedReason() !== null)
                 ->requiresConfirmation()
                 ->modalHeading('Send Report via Klaviyo')
                 ->modalDescription(fn (): HtmlString => new HtmlString(
                     'Send a <strong>report_published</strong> event to <strong>'
-                    . e($this->record->petClient?->email ?? '—')
-                    . '</strong> via Klaviyo.<br><span style="color:#6b7280;">Last sent: '
-                    . e($this->record->klaviyoLastSentSummary()) . '</span>'
+                    .e($this->record->petClient?->email ?? '—')
+                    .'</strong> via Klaviyo.<br><span style="color:#6b7280;">Last sent: '
+                    .e($this->record->klaviyoLastSentSummary()).'</span>'
                 ))
                 ->modalSubmitActionLabel('Send now')
                 ->action(function () {
+                    // L2: Klaviyo send — cap per admin.
+                    if (PaidActionLimiter::exceeded('klaviyo-send', 10)) {
+                        return;
+                    }
+
                     // Re-check the guards at click time — never call with a
                     // disabled integration or a missing/empty client email.
                     $reason = $this->sendReportBlockedReason();
@@ -98,7 +127,8 @@ class EditReport extends EditRecord
                     $result = app(KlaviyoService::class)->sendEvent('report_published', $email, [
                         'report_id' => $report->id,
                         'pet_name' => $report->pet?->name,
-                        'report_url' => $report->report_url,
+                        // Klaviyo delivers this as an email link → tag for attribution.
+                        'report_url' => Utm::klaviyo($report->report_url, 'report_published', 'email_button'),
                         // report_date is proxied from the linked Test; for a report
                         // with no test (legacy/orphan) it is null — send null rather
                         // than Carbon::parse(null) which would silently emit today.
@@ -116,7 +146,7 @@ class EditReport extends EditRecord
 
                     Notification::make()
                         ->title($result['ok'] ? 'Report sent to Klaviyo' : 'Send failed')
-                        ->body($result['ok'] ? 'Sent to ' . $email : $result['message'])
+                        ->body($result['ok'] ? 'Sent to '.$email : $result['message'])
                         ->{$result['ok'] ? 'success' : 'danger'}()
                         ->send();
                 }),
@@ -131,7 +161,11 @@ class EditReport extends EditRecord
                 // no Livewire round-trip, no DOM re-render to interrupt the clipboard
                 // logic. x-data="{}" gives Alpine a scope to evaluate the handler.
                 ->extraAttributes(['x-data' => '{}'])
-                ->alpineClickHandler(fn () => $this->copyLinkJs(route('report.show', $this->record->slug))),
+                // The copied link is shared with the customer (e.g. pasted into a
+                // message), so tag it as a shareable report link for attribution.
+                ->alpineClickHandler(fn () => $this->copyLinkJs(
+                    Utm::report(route('report.show', $this->record->public_token), 'report_share', 'copy_link')
+                )),
             Actions\DeleteAction::make(),
         ];
     }
@@ -256,8 +290,8 @@ class EditReport extends EditRecord
         // proxy so the slug stays stable regardless of the (informational) form
         // field. The raw lab columns no longer exist, so there is nothing to
         // guard against an edit-save nulling — the proxy is their sole source.
-        $petName = \App\Models\Pet::find($data['pet_id'] ?? null)?->name;
-        $data['slug'] = Str::slug($petName . '-' . $this->record->sample_id);
+        $petName = Pet::find($data['pet_id'] ?? null)?->name;
+        $data['slug'] = Str::slug($petName.'-'.$this->record->sample_id);
 
         $this->catalogProductIds = $data['catalog_product_ids'] ?? [];
         unset($data['catalog_product_ids']);

@@ -48,7 +48,7 @@ class PlanRecommendationSurfacingTest extends TestCase
         Plan::create(['key' => 'custom-extra', 'name' => 'Custom Extra', 'enabled' => true, 'position' => 9, 'match_priority' => 1000]);
 
         $this->actingAs(User::create([
-            'name' => 'Admin', 'email' => 'admin@example.com', 'password' => bcrypt('secret'),
+            'name' => 'Admin', 'email' => 'admin@example.com', 'role' => 'super_admin', 'password' => bcrypt('secret'),
         ]));
         Filament::setCurrentPanel(Filament::getPanel('admin'));
     }

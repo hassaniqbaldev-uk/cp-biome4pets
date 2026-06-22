@@ -8,6 +8,7 @@ use App\Models\ProductRule;
 use App\Models\Setting;
 use App\Services\KlaviyoService;
 use App\Services\OpenAiService;
+use App\Support\PaidActionLimiter;
 use App\Support\SmtpConfig;
 use Filament\Forms\Components\Actions;
 use Filament\Forms\Components\Actions\Action;
@@ -57,6 +58,21 @@ class Settings extends Page implements HasForms
 
     protected static string $view = 'filament.pages.settings';
 
+    /**
+     * Sensitive page (API keys / integrations): Super Admins only. canAccess()
+     * is the security gate — Filament aborts 403 on direct URL access when it
+     * returns false. shouldRegisterNavigation() additionally hides the nav item.
+     */
+    public static function canAccess(): bool
+    {
+        return auth()->user()?->isSuperAdmin() === true;
+    }
+
+    public static function shouldRegisterNavigation(): bool
+    {
+        return static::canAccess();
+    }
+
     public ?array $data = [];
 
     /**
@@ -77,6 +93,7 @@ class Settings extends Page implements HasForms
             Setting::OPENAI_DIRECTIVE_SCORES => Setting::get(Setting::OPENAI_DIRECTIVE_SCORES, ''),
             Setting::SIGNS_OF_STABILITY => Setting::get(Setting::SIGNS_OF_STABILITY, ''),
             ...$this->loadPlansGeneration(),
+            ...$this->loadReportText(),
             ...$this->loadKlaviyo(),
             ...$this->loadSmtp(),
             'product_rules' => $this->loadRules(),
@@ -99,6 +116,8 @@ class Settings extends Page implements HasForms
             // Blank ⇒ default ON (sensible default for the master switch).
             Setting::SUBSCRIPTIONS_ENABLED => blank($subsRaw) ? true : filter_var($subsRaw, FILTER_VALIDATE_BOOLEAN),
             Setting::CURRENCY => Setting::get(Setting::CURRENCY) ?: 'GBP',
+            Setting::REVIEW_RATING => Setting::get(Setting::REVIEW_RATING) ?: Setting::REVIEW_RATING_DEFAULT,
+            Setting::REVIEW_COUNT => Setting::get(Setting::REVIEW_COUNT) ?: Setting::REVIEW_COUNT_DEFAULT,
         ];
     }
 
@@ -106,6 +125,19 @@ class Settings extends Page implements HasForms
      * The Klaviyo tab values, loaded from settings with revision / base URL
      * pre-filled to their *_DEFAULT. The API key is deliberately omitted.
      */
+    /**
+     * The Report Text tab values — the static every-report blocks, each pre-filled
+     * to its current value or the seeded default so the editor never shows blank.
+     */
+    protected function loadReportText(): array
+    {
+        return [
+            Setting::REPORT_ABOUT_TEXT => Setting::get(Setting::REPORT_ABOUT_TEXT) ?: Setting::REPORT_ABOUT_TEXT_DEFAULT,
+            Setting::REPORT_APPROACH_TEXT => Setting::get(Setting::REPORT_APPROACH_TEXT) ?: Setting::REPORT_APPROACH_TEXT_DEFAULT,
+            Setting::REPORT_SUPPORT_TEXT => Setting::get(Setting::REPORT_SUPPORT_TEXT) ?: Setting::REPORT_SUPPORT_TEXT_DEFAULT,
+        ];
+    }
+
     protected function loadKlaviyo(): array
     {
         $enabledRaw = Setting::get(Setting::KLAVIYO_ENABLED);
@@ -166,6 +198,7 @@ class Settings extends Page implements HasForms
                     ->tabs([
                         $this->openAiTab(),
                         $this->plansGenerationTab(),
+                        $this->reportTextTab(),
                         $this->triggerRulesTab(),
                         $this->klaviyoTab(),
                         $this->smtpTab(),
@@ -267,6 +300,52 @@ class Settings extends Page implements HasForms
                     ->maxLength(8)
                     ->default('GBP')
                     ->helperText('Display currency code. Stored for display use; blank falls back to "GBP".'),
+                Section::make('Reviews')
+                    ->description('Social-proof figures shown on the subscribe page. Blank falls back to the defaults.')
+                    ->schema([
+                        TextInput::make(Setting::REVIEW_RATING)
+                            ->label('Review rating shown on subscribe page')
+                            ->maxLength(16)
+                            ->default(Setting::REVIEW_RATING_DEFAULT)
+                            ->helperText('e.g. "4.9". Blank falls back to "'.Setting::REVIEW_RATING_DEFAULT.'".'),
+                        TextInput::make(Setting::REVIEW_COUNT)
+                            ->label('Review count shown on subscribe page')
+                            ->maxLength(32)
+                            ->default(Setting::REVIEW_COUNT_DEFAULT)
+                            ->helperText('e.g. "1,000+". Blank falls back to "'.Setting::REVIEW_COUNT_DEFAULT.'".'),
+                    ]),
+            ]);
+    }
+
+    /**
+     * The Report Text tab — the static, every-report copy in the report's "Help
+     * and Contacts" section. One edit here updates BOTH the web report and the
+     * PDF (they read these via ReportContent), so the two can never drift. Blank
+     * reverts to the original built-in default.
+     */
+    protected function reportTextTab(): Tabs\Tab
+    {
+        return Tabs\Tab::make('Report Text')
+            ->icon('heroicon-o-document-text')
+            ->schema([
+                Placeholder::make('report_text_explainer')
+                    ->label('')
+                    ->content(new HtmlString('<p style="color:#6b7280;">This copy appears on <strong>every</strong> report, identically on the web report and the downloadable PDF. Editing it here updates both. Leave a field blank to restore its original default text.</p>')),
+                Textarea::make(Setting::REPORT_ABOUT_TEXT)
+                    ->label('About This Report (method + disclaimer)')
+                    ->rows(8)
+                    ->default(Setting::REPORT_ABOUT_TEXT_DEFAULT)
+                    ->helperText('The "About This Report" paragraph. Includes the 16S rRNA method description AND the compliance disclaimer ("not intended to diagnose disease… consult your veterinarian"). Plain text; line breaks are preserved.'),
+                Textarea::make(Setting::REPORT_APPROACH_TEXT)
+                    ->label('Our Approach (one bullet per line)')
+                    ->rows(5)
+                    ->default(Setting::REPORT_APPROACH_TEXT_DEFAULT)
+                    ->helperText('Shown as a bulleted list under "Our Approach". Enter one bullet per line; blank lines are ignored.'),
+                Textarea::make(Setting::REPORT_SUPPORT_TEXT)
+                    ->label('Support & Next Steps')
+                    ->rows(5)
+                    ->default(Setting::REPORT_SUPPORT_TEXT_DEFAULT)
+                    ->helperText('The "Support & Next Steps" contact block. Plain text; line breaks are preserved.'),
             ]);
     }
 
@@ -399,6 +478,10 @@ class Settings extends Page implements HasForms
                                 ->helperText('The dummy event is attached to this Klaviyo profile.'),
                         ])
                         ->action(function (array $data): void {
+                            // L2: Klaviyo API call — cap per admin.
+                            if (PaidActionLimiter::exceeded('klaviyo-test', 5)) {
+                                return;
+                            }
                             $this->save();
                             $this->runSendTestEvent($data['test_email'] ?? null);
                         }),
@@ -629,6 +712,10 @@ class Settings extends Page implements HasForms
                                 ->helperText('In the SES sandbox this must be a verified address.'),
                         ])
                         ->action(function (array $data): void {
+                            // L2: SMTP send — cap per admin.
+                            if (PaidActionLimiter::exceeded('smtp-test', 5)) {
+                                return;
+                            }
                             $this->save();
                             $this->runSendTestEmail($data['test_email'] ?? null);
                         }),
@@ -682,7 +769,7 @@ class Settings extends Page implements HasForms
         SmtpConfig::apply();
 
         try {
-            Mail::to($email)->send(new TestSmtpEmail());
+            Mail::to($email)->send(new TestSmtpEmail);
 
             $this->recordSmtpResult('Send test email', true, 'Test email sent to '.$email);
 
@@ -758,6 +845,14 @@ class Settings extends Page implements HasForms
         Setting::set(Setting::DEFAULT_DOSE, $data[Setting::DEFAULT_DOSE] ?? '');
         Setting::set(Setting::SUBSCRIPTIONS_ENABLED, ! empty($data[Setting::SUBSCRIPTIONS_ENABLED]) ? '1' : '0');
         Setting::set(Setting::CURRENCY, $data[Setting::CURRENCY] ?? '');
+        Setting::set(Setting::REVIEW_RATING, $data[Setting::REVIEW_RATING] ?? '');
+        Setting::set(Setting::REVIEW_COUNT, $data[Setting::REVIEW_COUNT] ?? '');
+
+        // Report Text — store verbatim; blank reverts to the built-in default at
+        // render time (ReportContent::reportText), so wiping a field is safe.
+        Setting::set(Setting::REPORT_ABOUT_TEXT, $data[Setting::REPORT_ABOUT_TEXT] ?? '');
+        Setting::set(Setting::REPORT_APPROACH_TEXT, $data[Setting::REPORT_APPROACH_TEXT] ?? '');
+        Setting::set(Setting::REPORT_SUPPORT_TEXT, $data[Setting::REPORT_SUPPORT_TEXT] ?? '');
 
         // ── Klaviyo ──────────────────────────────────────────────────────────
         // Only overwrite the key when a new value was entered (same guard as the
@@ -800,6 +895,7 @@ class Settings extends Page implements HasForms
             Setting::OPENAI_DIRECTIVE_SCORES => Setting::get(Setting::OPENAI_DIRECTIVE_SCORES, ''),
             Setting::SIGNS_OF_STABILITY => Setting::get(Setting::SIGNS_OF_STABILITY, ''),
             ...$this->loadPlansGeneration(),
+            ...$this->loadReportText(),
             ...$this->loadKlaviyo(),
             ...$this->loadSmtp(),
             'product_rules' => $this->loadRules(),

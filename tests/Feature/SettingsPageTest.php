@@ -49,7 +49,7 @@ class SettingsPageTest extends TestCase
             $table->timestamps();
         });
 
-        $this->actingAs(new User(['name' => 'Admin User', 'email' => 'admin@cp.agency']));
+        $this->actingAs(new User(['name' => 'Admin User', 'email' => 'admin@cp.agency', 'role' => 'super_admin']));
         Filament::setCurrentPanel(Filament::getPanel('admin'));
     }
 

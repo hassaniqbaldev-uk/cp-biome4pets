@@ -2,6 +2,7 @@
 
 namespace App\Filament\Resources;
 
+use App\Filament\Concerns\SoftDeletableResource;
 use App\Filament\Resources\PetResource\Pages;
 use App\Filament\Resources\PetResource\RelationManagers;
 use App\Models\Pet;
@@ -19,6 +20,8 @@ use Filament\Tables\Table;
  */
 class PetResource extends Resource
 {
+    use SoftDeletableResource;
+
     protected static ?string $model = Pet::class;
 
     protected static ?string $navigationIcon = 'heroicon-o-heart';
@@ -122,12 +125,18 @@ class PetResource extends Resource
             ->emptyStateIcon('heroicon-o-heart')
             ->emptyStateHeading('No pets yet')
             ->emptyStateDescription('Pets are added under their owner on the client hub, or create one here.')
+            ->filters([
+                Tables\Filters\TrashedFilter::make(),
+            ])
             ->actions([
                 Tables\Actions\EditAction::make(),
+                // Soft delete + Restore only — no force-delete in the UI (any role).
+                Tables\Actions\RestoreAction::make(),
             ])
             ->bulkActions([
                 Tables\Actions\BulkActionGroup::make([
                     Tables\Actions\DeleteBulkAction::make(),
+                    Tables\Actions\RestoreBulkAction::make(),
                 ]),
             ]);
     }

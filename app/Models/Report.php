@@ -5,11 +5,21 @@ namespace App\Models;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Database\Eloquent\SoftDeletes;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Str;
 
 class Report extends Model
 {
+    use SoftDeletes;
+
+    /**
+     * Length of a newly-generated public_token. 16 alphanumeric chars ≈ 95 bits of
+     * entropy (62^16) — unguessable, while shorter/friendlier than the original 40.
+     * The column is VARCHAR(40), so legacy 40-char tokens still fit and resolve.
+     */
+    public const PUBLIC_TOKEN_LENGTH = 16;
+
     protected $fillable = [
         'client_id',
         'pet_id',
@@ -23,6 +33,7 @@ class Report extends Model
         'vet_notes',
         'status',
         'slug',
+        'public_token',
         'score_gut_wall',
         'score_skin_allergy',
         'score_behaviour_mood',
@@ -38,6 +49,11 @@ class Report extends Model
         'pet_snapshot',
         'klaviyo_last_sent_at',
         'klaviyo_last_result',
+        // Phase 3 quality flags.
+        'needs_review',
+        'review_flags',
+        'reviewed_at',
+        'reviewed_by',
     ];
 
     protected $casts = [
@@ -48,7 +64,46 @@ class Report extends Model
         'pet_snapshot' => 'array',
         'klaviyo_last_sent_at' => 'datetime',
         'klaviyo_last_result' => 'array',
+        // Phase 3: the visible flag is a bool; review_flags is the recorded verdict.
+        'needs_review' => 'boolean',
+        'review_flags' => 'array',
+        'reviewed_at' => 'datetime',
     ];
+
+    /**
+     * The recorded quality issues (all tiers), as stored by the generation paths.
+     *
+     * @return array<int,array{code:string,severity:string,tier:string,detail:string}>
+     */
+    public function reviewIssues(): array
+    {
+        return $this->review_flags['issues'] ?? [];
+    }
+
+    /**
+     * Deterministic issues only — these are what drove needs_review and what the
+     * edit-page banner surfaces prominently.
+     */
+    public function deterministicReviewIssues(): array
+    {
+        return array_values(array_filter(
+            $this->reviewIssues(),
+            fn (array $i): bool => ($i['tier'] ?? null) === 'deterministic',
+        ));
+    }
+
+    /**
+     * Heuristic issues only — recorded for the record but log-only/informational;
+     * they never count toward needs_review and are shown only in a clearly
+     * separated "unverified" subsection.
+     */
+    public function heuristicReviewIssues(): array
+    {
+        return array_values(array_filter(
+            $this->reviewIssues(),
+            fn (array $i): bool => ($i['tier'] ?? null) === 'heuristic',
+        ));
+    }
 
     /**
      * The pet fields frozen into pet_snapshot at generation time. Phase 1 of the
@@ -114,23 +169,39 @@ class Report extends Model
         static::creating(function (Report $report) {
             if (empty($report->slug)) {
                 $petName = $report->pet?->name ?? optional(Pet::find($report->pet_id))->name;
-                $base = Str::slug($petName . '-' . $report->sample_id);
+                $base = Str::slug($petName.'-'.$report->sample_id);
                 $slug = $base;
                 $counter = 1;
 
                 while (static::where('slug', $slug)->exists()) {
-                    $slug = $base . '-' . $counter;
+                    $slug = $base.'-'.$counter;
                     $counter++;
                 }
 
                 $report->slug = $slug;
+            }
+
+            // High-entropy public URL key — the report is served at
+            // /report/{public_token}, NOT the guessable slug, so URLs can't be
+            // enumerated even when the pet name / sample id are known.
+            //
+            // 16 alphanumeric chars (Str::random draws from [A-Za-z0-9]) is 62^16
+            // ≈ 4.8e28 ≈ 95 bits of entropy — completely infeasible to guess, just
+            // friendlier in the URL than the original 40. The VARCHAR(40) column
+            // still holds legacy 40-char tokens, which keep resolving unchanged.
+            if (empty($report->public_token)) {
+                do {
+                    $token = Str::random(self::PUBLIC_TOKEN_LENGTH);
+                } while (static::where('public_token', $token)->exists());
+
+                $report->public_token = $token;
             }
         });
     }
 
     public function getReportUrlAttribute(): string
     {
-        return url('/report/' . $this->slug);
+        return url('/report/'.$this->public_token);
     }
 
     /**
@@ -160,23 +231,27 @@ class Report extends Model
         $message = $result['message'] ?? '';
 
         return $this->klaviyo_last_sent_at->format('M j, Y g:ia')
-            . ' — ' . $status
-            . ($message !== '' ? ': ' . $message : '');
+            .' — '.$status
+            .($message !== '' ? ': '.$message : '');
     }
 
     public function client()
     {
-        return $this->belongsTo(Client::class);
+        return $this->belongsTo(Client::class)->withTrashed();
     }
 
     public function pet()
     {
-        return $this->belongsTo(Pet::class);
+        return $this->belongsTo(Pet::class)->withTrashed();
     }
 
     public function test()
     {
-        return $this->belongsTo(Test::class);
+        // withTrashed is essential: the Report→Test proxy (getAttribute below) reads
+        // its raw lab data from the linked Test. A soft-deleted Test must still
+        // resolve so a recoverable report keeps showing its data, and the public
+        // report doesn't break just because the test was (accidentally) deleted.
+        return $this->belongsTo(Test::class)->withTrashed();
     }
 
     /**

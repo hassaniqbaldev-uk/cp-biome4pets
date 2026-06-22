@@ -20,9 +20,20 @@ class User extends Authenticatable implements FilamentUser
      *
      * @var list<string>
      */
+    public const ROLE_SUPER_ADMIN = 'super_admin';
+
+    public const ROLE_ADMIN = 'admin';
+
+    /** Selectable roles (value => label) for the admin UI. */
+    public const ROLES = [
+        self::ROLE_SUPER_ADMIN => 'Super Admin',
+        self::ROLE_ADMIN => 'Admin',
+    ];
+
     protected $fillable = [
         'name',
         'email',
+        'role',
         'password',
     ];
 
@@ -52,6 +63,23 @@ class User extends Authenticatable implements FilamentUser
     public function canAccessPanel(Panel $panel): bool
     {
         return true;
+    }
+
+    /** Super Admins can reach the sensitive Settings + Users management. */
+    public function isSuperAdmin(): bool
+    {
+        return $this->role === self::ROLE_SUPER_ADMIN;
+    }
+
+    /**
+     * Admin-level staff: Admin OR Super Admin (Super Admin is a superset of
+     * Admin). Gate staff-only-but-not-sensitive surfaces (e.g. Report an Issue)
+     * on this. The future "client" self-login role will NOT be admin-level, so it
+     * would return false here without any rework to existing gates.
+     */
+    public function isAdmin(): bool
+    {
+        return in_array($this->role, [self::ROLE_ADMIN, self::ROLE_SUPER_ADMIN], true);
     }
 
     /**

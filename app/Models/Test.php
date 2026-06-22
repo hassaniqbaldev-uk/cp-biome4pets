@@ -6,6 +6,8 @@ use App\Support\AdminFormatting;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Database\Eloquent\SoftDeletes;
+use Illuminate\Support\Facades\Storage;
 
 /**
  * A Test = one sample analysis: the raw CSV / lab-derived data for a pet.
@@ -14,6 +16,8 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
  */
 class Test extends Model
 {
+    use SoftDeletes;
+
     protected $fillable = [
         'pet_id',
         'client_id',
@@ -52,14 +56,30 @@ class Test extends Model
         'sample_id', 'report_date',
     ];
 
+    protected static function booted(): void
+    {
+        // No orphaned PII: delete the private lab CSV when its Test is permanently
+        // removed. forceDeleted (NOT deleting) so a SOFT delete keeps the CSV — the
+        // test can be restored with its data intact; only a real force-delete wipes
+        // the file. (With SoftDeletes, `deleting` fires on soft deletes too, which
+        // would destroy a recoverable record's CSV — hence forceDeleted.)
+        static::forceDeleted(function (Test $test): void {
+            if (filled($test->csv_path) && Storage::disk('local')->exists($test->csv_path)) {
+                Storage::disk('local')->delete($test->csv_path);
+            }
+        });
+    }
+
     public function pet(): BelongsTo
     {
-        return $this->belongsTo(Pet::class);
+        // withTrashed so a test still resolves its pet/client for display even when
+        // the parent was soft-deleted (we don't cascade soft deletes).
+        return $this->belongsTo(Pet::class)->withTrashed();
     }
 
     public function client(): BelongsTo
     {
-        return $this->belongsTo(Client::class);
+        return $this->belongsTo(Client::class)->withTrashed();
     }
 
     public function reports(): HasMany

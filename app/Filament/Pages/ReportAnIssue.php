@@ -29,4 +29,20 @@ class ReportAnIssue extends Page
 
     /** The CreativePixels agency credit logo shown on this page. */
     public const AGENCY_LOGO = 'https://cp.cpdev.uk/wp-content/uploads/2024/09/Logo-dark.svg';
+
+    /**
+     * Open to all admin-level staff (Admin AND Super Admin) — anyone managing the
+     * platform can report an issue. canAccess() is the security gate (Filament
+     * aborts 403 on direct URL access when false); shouldRegisterNavigation()
+     * hides the nav for anyone who can't access it (e.g. the future client role).
+     */
+    public static function canAccess(): bool
+    {
+        return auth()->user()?->isAdmin() === true;
+    }
+
+    public static function shouldRegisterNavigation(): bool
+    {
+        return static::canAccess();
+    }
 }

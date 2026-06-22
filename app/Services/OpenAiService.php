@@ -34,6 +34,11 @@ Rules for the copy you write:
     specific elevated/low taxa or scores this product addresses. If a product's role
     doesn't map to any finding, describe its general benefit for this pet instead.
   - Do NOT invent findings. Only use what is in the input.
+  - Do not invent or alter any numbers, percentages, taxa or scores. Use exactly the
+    figures and taxa given in the input; never change them, round them differently, or
+    estimate them, and never name a bacterium, species or taxon that is not in the input.
+  - If you cannot ground a statement in the input findings, omit it rather than inventing
+    or speculating.
   - If the input includes owner_reported_health_notes, treat them as owner-reported
     context only, NOT a clinical record. Use them to make the copy relevant and to set
     tone; never diagnose from them, never present them as fact, and never promise to
@@ -55,8 +60,22 @@ Output: a single valid JSON object matching the scaffold's shape, with the copy 
 filled. No markdown, no code fences, no commentary before or after the JSON.
 PROMPT;
 
-    public function generateReportInterpretations(array $phylumTotals, float $diversityScore, array $petContext = []): array
+    /**
+     * Phase 2 (observe-only): records WHY the last interpretation call returned an
+     * empty result, so the quality validator can distinguish a transport/API
+     * failure ('api_failed') from a malformed-JSON response ('json_parse_failed')
+     * from a structurally-fine-but-blank one (null here + empty fields). Purely
+     * additive — it never changes what generateReportInterpretations() returns.
+     *
+     * @var 'api_failed'|'json_parse_failed'|null
+     */
+    public ?string $lastErrorCode = null;
+
+    public function generateReportInterpretations(array $phylumTotals, float $diversityScore, array $petContext = [], array $deterministic = []): array
     {
+        // Reset the observability signal for this call (success leaves it null).
+        $this->lastErrorCode = null;
+
         $emptyResponse = [
             'summary' => '',
             'goal' => '',
@@ -86,10 +105,12 @@ PROMPT;
 
         if (empty($apiKey)) {
             Log::error('OpenAI API key is not configured.');
+            $this->lastErrorCode = 'api_failed';
+
             return $emptyResponse;
         }
 
-        $prompt = $this->buildInterpretationsPrompt($phylumTotals, $diversityScore, $petContext);
+        $prompt = $this->buildInterpretationsPrompt($phylumTotals, $diversityScore, $petContext, $deterministic);
 
         $payload = json_encode([
             'model' => $model,
@@ -105,7 +126,7 @@ PROMPT;
                 'method' => 'POST',
                 'header' => implode("\r\n", [
                     'Content-Type: application/json',
-                    'Authorization: Bearer ' . $apiKey,
+                    'Authorization: Bearer '.$apiKey,
                 ]),
                 'content' => $payload,
                 'timeout' => 60,
@@ -118,24 +139,39 @@ PROMPT;
 
             if ($response === false) {
                 Log::error('OpenAI API request failed.');
+                $this->lastErrorCode = 'api_failed';
+
                 return $emptyResponse;
             }
 
             $decoded = json_decode($response, true);
 
+            // NB: never log the response body or message content — it is generated
+            // from pet names + owner health notes (PII). Log only non-identifying
+            // metadata (status, token usage, error class) useful for debugging.
             Log::info('OpenAI raw API response', [
                 'http_status' => $http_response_header[0] ?? 'unknown',
                 'has_choices' => isset($decoded['choices']),
-                'error' => $decoded['error'] ?? null,
+                'usage' => $decoded['usage'] ?? null,
+                'error_type' => $decoded['error']['type'] ?? null,
             ]);
 
             if (isset($decoded['error'])) {
-                Log::error('OpenAI API returned error.', ['error' => $decoded['error']]);
+                // The error envelope can echo request content, so log only the
+                // type/code, not the message/body.
+                Log::error('OpenAI API returned error.', [
+                    'error_type' => $decoded['error']['type'] ?? null,
+                    'error_code' => $decoded['error']['code'] ?? null,
+                ]);
+                $this->lastErrorCode = 'api_failed';
+
                 return $emptyResponse;
             }
 
-            if (!isset($decoded['choices'][0]['message']['content'])) {
-                Log::error('Unexpected OpenAI response structure.', ['response' => $response]);
+            if (! isset($decoded['choices'][0]['message']['content'])) {
+                Log::error('Unexpected OpenAI response structure.', ['response_length' => strlen($response)]);
+                $this->lastErrorCode = 'api_failed';
+
                 return $emptyResponse;
             }
 
@@ -148,12 +184,16 @@ PROMPT;
                 $content = preg_replace('/\s*```$/', '', $content);
             }
 
-            Log::info('OpenAI parsed content', ['content' => $content]);
+            Log::info('OpenAI parsed content', ['content_length' => strlen($content)]);
 
             $parsed = json_decode($content, true);
 
-            if (!is_array($parsed)) {
-                Log::error('Failed to parse OpenAI response as JSON.', ['content' => $content]);
+            if (! is_array($parsed)) {
+                // Don't log the content itself (PII); the length is enough to see
+                // whether we got an empty/truncated body.
+                Log::error('Failed to parse OpenAI response as JSON.', ['content_length' => strlen($content)]);
+                $this->lastErrorCode = 'json_parse_failed';
+
                 return $emptyResponse;
             }
 
@@ -175,7 +215,9 @@ PROMPT;
                 'score_stress_resilience' => $parsed['score_stress_resilience'] ?? '',
             ];
         } catch (\Throwable $e) {
-            Log::error('OpenAI API error: ' . $e->getMessage());
+            Log::error('OpenAI API error: '.$e->getMessage());
+            $this->lastErrorCode = 'api_failed';
+
             return $emptyResponse;
         }
     }
@@ -193,12 +235,40 @@ PROMPT;
      *
      * Public so the prompt can be asserted in tests without an HTTP call.
      */
-    public function buildInterpretationsPrompt(array $phylumTotals, float $diversityScore, array $petContext = []): string
+    public function buildInterpretationsPrompt(array $phylumTotals, float $diversityScore, array $petContext = [], array $deterministic = []): string
     {
         $phylumList = '';
         foreach ($phylumTotals as $name => $pct) {
             $phylumList .= "- {$name}: {$pct}%\n";
         }
+
+        // Additional deterministic findings — species richness, the dysbiosis
+        // pattern score and the overall classification. These already exist; we
+        // are NOT recomputing or rescaling anything, only surfacing them to the
+        // model as FIXED facts so the prose is coherent with the badge (it was
+        // previously blind to depletion). Each line is omitted when its value is
+        // absent, so prompts without this context are unchanged.
+        $richness = $deterministic['species_richness'] ?? null;
+        $dysbiosis = $deterministic['dysbiosis_score'] ?? null;
+        $classification = trim((string) ($deterministic['microbiome_classification'] ?? ''));
+
+        $detLines = [];
+        if ($richness !== null && $richness !== '') {
+            $detLines[] = "Species richness (distinct species detected): {$richness}";
+        }
+        if ($dysbiosis !== null && $dysbiosis !== '') {
+            $detLines[] = "Dysbiosis pattern score (Firmicutes to Bacteroidetes ratio): {$dysbiosis}";
+        }
+        if ($classification !== '') {
+            $detLines[] = "Overall microbiome classification: {$classification}";
+        }
+        $deterministicBlock = $detLines === [] ? '' : implode("\n", $detLines)."\n";
+
+        // When a classification is supplied, require the prose to stay consistent
+        // with it — without changing tone, scale, or thresholds.
+        $coherenceRule = $classification !== ''
+            ? "\n- The overall microbiome classification above is a FIXED finding. Keep the WHOLE interpretation consistent with it: do not describe a gut classified \"Imbalanced\" or \"Imbalanced & Depleted\" as thriving, fully balanced, or problem free, and acknowledge low species richness or imbalance honestly where relevant. Stay calm, supportive, non-alarmist and non-diagnostic — note what to work on without overstating risk."
+            : '';
 
         // Build a pet-context block from whatever fields are present. Any
         // missing/blank field is omitted gracefully so the prompt stays clean.
@@ -217,8 +287,8 @@ PROMPT;
             $petParts[] = "Diet: {$petContext['diet']}";
         }
 
-        if (!empty($petParts)) {
-            $petBlock = "Pet details: " . implode('. ', $petParts) . ".\n";
+        if (! empty($petParts)) {
+            $petBlock = 'Pet details: '.implode('. ', $petParts).".\n";
         } else {
             $petBlock = "Pet details: not provided.\n";
         }
@@ -235,7 +305,7 @@ PROMPT;
         // How the model should refer to the pet throughout the copy.
         $nameInstruction = filled($petName)
             ? "Refer to the pet by name (\"{$petName}\") where natural."
-            : "No name was provided, so refer to the pet as \"your pet\".";
+            : 'No name was provided, so refer to the pet as "your pet".';
 
         // Per-section directive suffixes. Each is blank (empty string) unless an
         // admin has set the matching Setting, in which case it becomes a short
@@ -254,7 +324,7 @@ You are a veterinary microbiome expert writing for pet owners. Given the followi
 Phylum percentages:
 {$phylumList}
 Shannon Diversity Index: {$diversityScore}
-
+{$deterministicBlock}
 Respond in valid JSON with exactly these keys:
 - "summary": A 4-5 sentence overall summary of the pet's microbiome health, written warmly for the owner, referencing the pet by name when provided and touching on the overall balance and what it means for this pet.{$summarySuffix}
 - "goal": A warm, encouraging goal statement of 2 to 3 sentences (no em dashes) that sets out one clear, concrete goal for this pet based on the diagnostics, such as bringing an out-of-range phylum back toward its healthy range and/or improving diversity over a sensible timeframe like "the coming weeks" or "8 to 12 weeks". Give a little context on what we are aiming for and why it matters for this pet, keeping it focused and not padded. It MUST reference the pet by name when a name is provided.
@@ -278,6 +348,14 @@ Scale meaning:
 - "score_gut_barrier": Assess gut barrier and metabolic function based on the microbiome composition.
 - "score_gas_digestive": Assess gas and digestive comfort based on the microbiome composition.
 - "score_stress_resilience": Assess environmental stress resilience based on the microbiome composition.{$scoresSuffix}
+
+Grounding rules (these are critical and override any temptation to embellish):
+- The findings and metrics provided above are FIXED facts. Restate them faithfully and never contradict, embellish, or "improve" them.
+- Do not invent or alter any numbers. When you state a percentage or the diversity score, use exactly the figures provided in the data above; do not round them differently, estimate, or infer values that were not given.
+- Only reference the phyla provided in the data above. Do not name specific bacteria, species, or any additional taxa beyond those given to you. This applies especially to the open-prose fields (summary, vet_summary, recommended_actions), where you must not introduce an organism that is not in the data.
+- Each score_* value must be EXACTLY one of: Very High, High, Medium, Low, with no other text, punctuation, or explanation inside the score field.
+- If you cannot ground a statement in the provided data, omit it rather than inventing or speculating.
+- You must still state the actual figures where a field asks for them: the phylum and diversity fields should state the level/score as instructed. State them accurately using the exact numbers above; do not drop the numbers, just never change them.{$coherenceRule}
 
 Style: Write in warm, natural, plain British English as if a knowledgeable person were explaining to a pet owner. Vary sentence length and structure. Avoid AI-cliché phrasing (e.g. 'it's important to note', 'plays a crucial role', 'in conclusion', 'delve', 'tapestry', 'navigating'). Do NOT use em dashes (—) or en dashes (–) anywhere; use commas, full stops, or the word 'to' for ranges. Keep it concrete and specific to this pet's findings, not generic. Do not overuse lists.
 
@@ -309,7 +387,7 @@ PROMPT;
             return '';
         }
 
-        return ' Admin guidance for this field: ' . trim((string) $value);
+        return ' Admin guidance for this field: '.trim((string) $value);
     }
 
     /**
@@ -331,6 +409,7 @@ PROMPT;
 
         if (empty($apiKey)) {
             Log::error('Plan copy generation: OpenAI API key is not configured.');
+
             return $this->emptyPlanCopy($planScaffold);
         }
 
@@ -349,9 +428,9 @@ PROMPT;
 
         $jsonFlags = JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE;
         $userMessage = "PET FINDINGS:\n"
-            . json_encode($petFindings, $jsonFlags)
-            . "\n\nPLAN SCAFFOLD (fill the copy fields, return the whole object as JSON):\n"
-            . json_encode($planScaffold, $jsonFlags);
+            .json_encode($petFindings, $jsonFlags)
+            ."\n\nPLAN SCAFFOLD (fill the copy fields, return the whole object as JSON):\n"
+            .json_encode($planScaffold, $jsonFlags);
 
         $payload = json_encode([
             'model' => $model,
@@ -367,23 +446,32 @@ PROMPT;
 
             if ($response === false) {
                 Log::error('Plan copy generation: OpenAI API request failed.');
+
                 return $this->emptyPlanCopy($planScaffold);
             }
 
             $decoded = json_decode($response, true);
 
+            // Same PII rule as above: log only non-identifying metadata, never the
+            // body/content (it embeds the pet's findings + owner health notes).
             Log::info('Plan copy generation: raw API response', [
                 'has_choices' => isset($decoded['choices']),
-                'error' => $decoded['error'] ?? null,
+                'usage' => $decoded['usage'] ?? null,
+                'error_type' => $decoded['error']['type'] ?? null,
             ]);
 
             if (isset($decoded['error'])) {
-                Log::error('Plan copy generation: OpenAI API returned error.', ['error' => $decoded['error']]);
+                Log::error('Plan copy generation: OpenAI API returned error.', [
+                    'error_type' => $decoded['error']['type'] ?? null,
+                    'error_code' => $decoded['error']['code'] ?? null,
+                ]);
+
                 return $this->emptyPlanCopy($planScaffold);
             }
 
-            if (!isset($decoded['choices'][0]['message']['content'])) {
-                Log::error('Plan copy generation: unexpected OpenAI response structure.', ['response' => $response]);
+            if (! isset($decoded['choices'][0]['message']['content'])) {
+                Log::error('Plan copy generation: unexpected OpenAI response structure.', ['response_length' => strlen($response)]);
+
                 return $this->emptyPlanCopy($planScaffold);
             }
 
@@ -397,14 +485,16 @@ PROMPT;
 
             $parsed = json_decode($content, true);
 
-            if (!is_array($parsed)) {
-                Log::error('Plan copy generation: failed to parse response as JSON.', ['content' => $content]);
+            if (! is_array($parsed)) {
+                Log::error('Plan copy generation: failed to parse response as JSON.', ['content_length' => strlen($content)]);
+
                 return $this->emptyPlanCopy($planScaffold);
             }
 
             return $parsed;
         } catch (\Throwable $e) {
-            Log::error('Plan copy generation error: ' . $e->getMessage());
+            Log::error('Plan copy generation error: '.$e->getMessage());
+
             return $this->emptyPlanCopy($planScaffold);
         }
     }
@@ -421,7 +511,7 @@ PROMPT;
                 'method' => 'POST',
                 'header' => implode("\r\n", [
                     'Content-Type: application/json',
-                    'Authorization: Bearer ' . $apiKey,
+                    'Authorization: Bearer '.$apiKey,
                 ]),
                 'content' => $payload,
                 'timeout' => 60,
@@ -444,6 +534,7 @@ PROMPT;
             if (($step['type'] ?? 'product') === 'prose') {
                 $scaffold['steps'][$i]['body'] = '';
                 $scaffold['steps'][$i]['tip'] = null;
+
                 continue;
             }
 

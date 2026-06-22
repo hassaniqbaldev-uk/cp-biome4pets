@@ -79,8 +79,9 @@ class ReportWizardFlowTest extends TestCase
     /** #4: parsing the uploaded CSV fills the deterministic metric fields. */
     public function test_uploaded_csv_is_parsed_into_metric_fields(): void
     {
-        Storage::fake('public');
-        Storage::disk('public')->put('csv/sample.csv', self::CSV);
+        // CSVs are PII → private 'local' disk (parseUploadedCsv reads from there).
+        Storage::fake('local');
+        Storage::disk('local')->put('csv/sample.csv', self::CSV);
 
         $parsed = ReportResource::parseUploadedCsv('csv/sample.csv');
 

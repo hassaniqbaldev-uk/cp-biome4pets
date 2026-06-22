@@ -3,23 +3,15 @@
 namespace App\Http\Controllers;
 
 use App\Models\Report;
+use App\Models\Setting;
 use Barryvdh\DomPDF\Facade\Pdf;
 use Illuminate\Support\Str;
 
 class ReportController extends Controller
 {
-    /**
-     * Review figures shown on the subscribe interstitial. PLACEHOLDERS — set
-     * these to the real values here. (Swap for a Setting/config later if they
-     * should be admin-editable.)
-     */
-    public const REVIEW_RATING = '4.9';      // e.g. "4.9"
-
-    public const REVIEW_COUNT = '1,000+';    // e.g. "2,300+"
-
-    public function show(string $slug)
+    public function show(string $token)
     {
-        $report = Report::where('slug', $slug)
+        $report = Report::where('public_token', $token)
             ->with(['client', 'pet.client', 'test', 'plan', 'catalogProducts', 'steps.products.catalogProduct'])
             ->firstOrFail();
 
@@ -32,16 +24,16 @@ class ReportController extends Controller
      * live plan is missing/disabled or has no checkout URL, degrade gracefully
      * back to the report.
      */
-    public function subscribe(string $slug)
+    public function subscribe(string $token)
     {
-        $report = Report::where('slug', $slug)
+        $report = Report::where('public_token', $token)
             ->with(['client', 'pet.client', 'plan.steps.products.catalogProduct'])
             ->firstOrFail();
 
         $plan = $report->plan;
 
         if (! $plan || ! $plan->enabled || blank($plan->subscription_url)) {
-            return redirect()->route('report.show', ['slug' => $report->slug]);
+            return redirect()->route('report.show', ['token' => $report->public_token]);
         }
 
         // Product steps in plan order (skip prose/dietary steps for the product
@@ -59,16 +51,18 @@ class ReportController extends Controller
             'firstStep' => $firstStep,
             'firstProduct' => $firstStep?->products->first(),
             'upcomingSteps' => $productSteps->slice(1)->values(),
-            'reviewRating' => self::REVIEW_RATING,
-            'reviewCount' => self::REVIEW_COUNT,
+            // Admin-editable review figures (Settings → Plans / Generation →
+            // Reviews); each falls back to its default so the page is never blank.
+            'reviewRating' => Setting::get(Setting::REVIEW_RATING) ?: Setting::REVIEW_RATING_DEFAULT,
+            'reviewCount' => Setting::get(Setting::REVIEW_COUNT) ?: Setting::REVIEW_COUNT_DEFAULT,
         ]);
     }
 
-    public function downloadPdf(string $slug)
+    public function downloadPdf(string $token)
     {
         // Eager-load the SAME relations as show() so the PDF can render every
         // section the web report does (notably the phased plan + its products).
-        $report = Report::where('slug', $slug)
+        $report = Report::where('public_token', $token)
             ->with(['client', 'pet.client', 'test', 'plan', 'catalogProducts', 'steps.products.catalogProduct'])
             ->firstOrFail();
 

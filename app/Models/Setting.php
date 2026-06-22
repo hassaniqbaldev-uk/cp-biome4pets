@@ -64,6 +64,44 @@ class Setting extends Model
     public const CURRENCY = 'currency';
 
     /**
+     * Review figures shown on the subscribe interstitial. Admin-editable; each
+     * falls back to its *_DEFAULT when blank so the page never shows an empty
+     * rating/count.
+     */
+    public const REVIEW_RATING = 'review_rating';
+
+    public const REVIEW_RATING_DEFAULT = '4.9';
+
+    public const REVIEW_COUNT = 'review_count';
+
+    public const REVIEW_COUNT_DEFAULT = '1,000+';
+
+    /**
+     * Static, every-report text blocks (the "Help and Contacts" section that is
+     * identical on every report). Admin-editable so the same edit updates BOTH the
+     * web report and the PDF (they read from these keys), and so compliance copy
+     * — notably the "not intended to diagnose" disclaimer fused into the About
+     * text — can be changed without a code deploy. Each falls back to its
+     * *_DEFAULT (the original hardcoded copy) when blank, so a fresh install is
+     * visually unchanged.
+     *
+     * APPROACH/SUPPORT are newline-separated: APPROACH renders one bullet per
+     * non-blank line; SUPPORT renders with line breaks preserved. All are escaped
+     * on render (admin-entered, never raw HTML).
+     */
+    public const REPORT_ABOUT_TEXT = 'report_about_text';
+
+    public const REPORT_ABOUT_TEXT_DEFAULT = "This report is based on advanced analysis of your dog's gut microbiome using 16S rRNA sequencing, one of the most accurate methods available for identifying bacterial populations. Biome4Pets maintains one of the largest canine microbiome data libraries, built from thousands of samples across a wide range of breeds, diets, and health conditions. Using population-based data analysis and artificial intelligence, we are able to identify patterns associated with both health and disease. This report provides a detailed snapshot of your dog's microbiome and highlights key areas of imbalance. While this information is a powerful tool for understanding gut health, it is not intended to diagnose disease. If your dog is unwell, please consult your veterinarian.";
+
+    public const REPORT_APPROACH_TEXT = 'report_approach_text';
+
+    public const REPORT_APPROACH_TEXT_DEFAULT = "Large-scale canine microbiome database\nAI-driven analysis and pattern recognition\nLinked to real-world health conditions\nFocused on practical, evidence-based support";
+
+    public const REPORT_SUPPORT_TEXT = 'report_support_text';
+
+    public const REPORT_SUPPORT_TEXT_DEFAULT = "If you would like help interpreting your dog's results or guidance on next steps, we are here to support you.\nEmail: info@biome4pets.com\nWebsite: www.biome4pets.com\nConsultations are available if you would like to discuss your dog's results in more detail, please book through the website.";
+
+    /**
      * Klaviyo integration (server-side Events API). The private API key is
      * stored encrypted (same mechanism as the OpenAI key — setEncrypted /
      * getDecrypted). Revision and base URL are config-driven so they can be

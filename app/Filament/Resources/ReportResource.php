@@ -2,8 +2,11 @@
 
 namespace App\Filament\Resources;
 
+use App\Filament\Concerns\SoftDeletableResource;
 use App\Filament\Resources\ReportResource\Pages;
 use App\Models\CatalogProduct;
+use App\Models\Client;
+use App\Models\Pet;
 use App\Models\Plan;
 use App\Models\PlanTriggerCondition;
 use App\Models\Report;
@@ -12,6 +15,7 @@ use App\Services\CsvParserService;
 use App\Services\LabResultParser;
 use App\Services\OpenAiService;
 use App\Support\AdminFormatting;
+use App\Support\PaidActionLimiter;
 use App\Support\PetFindings;
 use App\Support\ReportGeneration;
 use Filament\Forms;
@@ -22,14 +26,17 @@ use Filament\Tables;
 use Filament\Tables\Table;
 use Illuminate\Contracts\Support\Htmlable;
 use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Database\Eloquent\Model;
-use Illuminate\Support\HtmlString;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Storage;
+use Illuminate\Support\HtmlString;
 use Livewire\Features\SupportFileUploads\TemporaryUploadedFile;
 
 class ReportResource extends Resource
 {
+    use SoftDeletableResource;
+
     protected static ?string $model = Report::class;
 
     protected static ?string $navigationIcon = 'heroicon-o-document-chart-bar';
@@ -59,6 +66,80 @@ class ReportResource extends Resource
         return ['pet.name', 'test.sample_id', 'client.email'];
     }
 
+    /**
+     * Phase 3: sidebar badge = count of reports needing review (deterministic
+     * flags only). Null hides the badge when nothing is flagged.
+     */
+    public static function getNavigationBadge(): ?string
+    {
+        $count = static::getModel()::where('needs_review', true)->count();
+
+        return $count > 0 ? (string) $count : null;
+    }
+
+    public static function getNavigationBadgeColor(): string|array|null
+    {
+        return 'warning';
+    }
+
+    /**
+     * Render the persisted review_flags for the edit-page banner: deterministic
+     * issues prominently, then any heuristic observations in a clearly separated,
+     * explicitly-unverified subsection (heuristics are informational only and do
+     * NOT drive the flag).
+     */
+    protected static function renderReviewFlags(?Report $record): HtmlString
+    {
+        if (! $record) {
+            return new HtmlString('');
+        }
+
+        $deterministic = $record->deterministicReviewIssues();
+        $heuristic = $record->heuristicReviewIssues();
+
+        $items = '';
+        foreach ($deterministic as $issue) {
+            $items .= static::renderReviewIssue($issue, muted: false);
+        }
+        $html = '<ul style="margin:0;padding-left:1.1rem;list-style:disc;">'.$items.'</ul>';
+
+        if (! empty($heuristic)) {
+            $hItems = '';
+            foreach ($heuristic as $issue) {
+                $hItems .= static::renderReviewIssue($issue, muted: true);
+            }
+            $html .= '<p style="margin:.75rem 0 .25rem;color:#6b7280;font-size:.8rem;">'
+                .'Informational only — unverified heuristic observations, not counted toward the review flag:</p>'
+                .'<ul style="margin:0;padding-left:1.1rem;list-style:disc;color:#6b7280;font-size:.8rem;">'.$hItems.'</ul>';
+        }
+
+        return new HtmlString($html);
+    }
+
+    /**
+     * One review-flag list item: lead with the plain-English explanation (what
+     * happened / why / what to do) under a short bold label, then keep the raw
+     * code (and any technical detail) on a muted reference line for traceability.
+     */
+    protected static function renderReviewIssue(array $issue, bool $muted): string
+    {
+        $code = $issue['code'] ?? '';
+        $label = AdminFormatting::reviewIssueLabel($code);
+        $explanation = AdminFormatting::reviewIssueExplanation($code);
+        $detail = $issue['detail'] ?? null;
+
+        $li = '<li style="margin-bottom:.5rem;">';
+        $li .= '<strong>'.e($label).'</strong>';
+        if (filled($explanation)) {
+            $li .= '<div style="margin:.15rem 0;'.($muted ? 'color:#6b7280;' : '').'">'.e($explanation).'</div>';
+        }
+        $li .= '<div style="color:#9ca3af;font-size:.72rem;">Reference: '.e($code)
+            .(filled($detail) ? ' — '.e($detail) : '').'</div>';
+        $li .= '</li>';
+
+        return $li;
+    }
+
     public static function form(Form $form): Form
     {
         return $form
@@ -78,7 +159,7 @@ class ReportResource extends Resource
                                 ->label('View report')
                                 ->icon('heroicon-o-eye')
                                 ->color('info')
-                                ->url(fn (?Report $record): ?string => $record ? route('report.show', $record->slug) : null)
+                                ->url(fn (?Report $record): ?string => $record ? route('report.show', $record->public_token) : null)
                                 ->openUrlInNewTab(),
                             Forms\Components\Actions\Action::make('done_publish')
                                 ->label('Publish')
@@ -100,6 +181,27 @@ class ReportResource extends Resource
                                 ->action(fn ($livewire): bool => $livewire->justCreated = false),
                         ]),
                     ]),
+
+                // Phase 3: advisory "needs review" banner. Shown only when the
+                // deterministic quality checks flagged this report (needs_review).
+                // It lists WHY, with heuristics in a clearly separated, unverified
+                // subsection. The "Mark as reviewed" button lives in the page
+                // header (EditReport) so it is reachable without scrolling. This is
+                // purely informational — it never blocks publishing.
+                Forms\Components\Section::make('Needs review')
+                    ->icon('heroicon-o-flag')
+                    ->description('Automated quality checks flagged this report. Review the items below, then use "Mark as reviewed" (top right).')
+                    ->visible(fn (?Report $record): bool => (bool) ($record?->needs_review))
+                    ->schema([
+                        Forms\Components\Placeholder::make('review_flags_summary')
+                            ->hiddenLabel()
+                            ->content(fn (?Report $record): HtmlString => static::renderReviewFlags($record)),
+                    ]),
+
+                // Carriers for the persisted verdict — set by the generate actions,
+                // saved with the report. needs_review is deterministic-only.
+                Forms\Components\Hidden::make('needs_review')->default(false)->dehydrated(),
+                Forms\Components\Hidden::make('review_flags')->dehydrated(),
 
                 Forms\Components\Wizard::make([
                     Forms\Components\Wizard\Step::make('Client & Pet Details')
@@ -130,7 +232,7 @@ class ReportResource extends Resource
                                 ]),
                             Forms\Components\Select::make('pet_id')
                                 ->label('Pet')
-                                ->options(fn (Forms\Get $get): array => \App\Models\Pet::query()
+                                ->options(fn (Forms\Get $get): array => Pet::query()
                                     ->where('client_id', $get('client_id'))
                                     ->orderBy('name')
                                     ->pluck('name', 'id')
@@ -190,7 +292,7 @@ class ReportResource extends Resource
                                     $initialWeight = $data['initial_weight_kg'] ?? null;
                                     unset($data['initial_note'], $data['initial_weight_kg']);
 
-                                    $pet = \App\Models\Pet::create($data);
+                                    $pet = Pet::create($data);
 
                                     if (filled($initialNote) || filled($initialWeight)) {
                                         $pet->healthNotes()->create([
@@ -217,6 +319,13 @@ class ReportResource extends Resource
                                 ->live()
                                 ->dehydrated(false),
 
+                            // Make it explicit that the CSV upload happens on the
+                            // NEXT wizard step, not here, when "new" is selected.
+                            Forms\Components\Placeholder::make('new_csv_hint')
+                                ->hiddenLabel()
+                                ->visible(fn (Forms\Get $get): bool => ($get('test_source') ?? 'new') === 'new')
+                                ->content(new HtmlString('<span style="color:#4654A4;font-size:.8rem;">You\'ll upload the lab CSV on the next step ("New test (CSV)").</span>')),
+
                             Forms\Components\Select::make('existing_test_id')
                                 ->label('Existing test')
                                 ->visible(fn (Forms\Get $get): bool => $get('test_source') === 'existing')
@@ -239,20 +348,34 @@ class ReportResource extends Resource
                                     ->color('primary')
                                     ->visible(fn (Forms\Get $get): bool => $get('test_source') === 'existing' && filled($get('existing_test_id')))
                                     ->action(function (Forms\Get $get, Forms\Set $set): void {
+                                        // L2: paid OpenAI call — cap per admin.
+                                        if (PaidActionLimiter::exceeded('generate-ai', 10)) {
+                                            return;
+                                        }
+
                                         $test = Test::find($get('existing_test_id'));
                                         if (! $test) {
                                             Notification::make()->title('Select a test first')->warning()->send();
+
                                             return;
                                         }
 
                                         static::loadTestIntoForm($test->getKey(), $set);
 
+                                        $deterministic = [
+                                            'species_richness' => $test->species_richness,
+                                            'dysbiosis_score' => $test->dysbiosis_score,
+                                            'microbiome_classification' => $test->microbiome_classification,
+                                        ];
+                                        $genError = null;
                                         $interp = ReportGeneration::interpretationColumns(
                                             $test->phylum_data ?? [],
                                             $test->diversity_score,
                                             $test->pet,
                                             // Notes history as of the test's date.
                                             $test->report_date ?? $test->collected_at,
+                                            $genError,
+                                            $deterministic,
                                         );
                                         foreach ($interp as $key => $value) {
                                             $set($key, $value);
@@ -261,9 +384,23 @@ class ReportResource extends Resource
                                         $selection = ReportGeneration::productSelection(
                                             $test->phylum_data ?? [],
                                             $test->diversity_score,
+                                            $test->microbiome_classification,
                                         );
                                         $set('catalog_product_ids', $selection['catalog_product_ids']);
                                         $set('plan_id', $selection['plan_id']);
+
+                                        // Phase 2: grade the generation (observe-only; logged + returned).
+                                        // Phase 3: persist the verdict via the hidden fields so it saves
+                                        // with the report. needs_review is deterministic-only.
+                                        $verdict = ReportGeneration::gradeAndLog($interp, [
+                                            'phylum_totals' => $test->phylum_data ?? [],
+                                            'diversity_score' => $test->diversity_score,
+                                            'species_richness' => $test->species_richness,
+                                            'dysbiosis_score' => $test->dysbiosis_score,
+                                            'microbiome_classification' => $test->microbiome_classification,
+                                        ], $selection, $genError, ['path' => 'wizard_existing_test', 'test_id' => $test->getKey()]);
+                                        $set('needs_review', $verdict['needs_review']);
+                                        $set('review_flags', ReportGeneration::reviewFlagsFromVerdict($verdict));
 
                                         $allEmpty = collect($interp)->every(fn ($v) => empty($v));
                                         Notification::make()
@@ -294,8 +431,15 @@ class ReportResource extends Resource
                             Forms\Components\FileUpload::make('csv_path')
                                 ->label('Lab data (CSV)')
                                 ->acceptedFileTypes(['text/csv', '.csv'])
+                                // Server-side hardening: reject anything whose real
+                                // (finfo) MIME isn't a CSV/plain-text — a spoofed
+                                // .html/.svg/.php can't be stored. Combined with the
+                                // private disk + attachment download, the stored-XSS
+                                // vector is closed.
+                                ->rules(['mimetypes:text/csv,text/plain,application/csv,application/vnd.ms-excel'])
                                 ->directory('csv')
-                                ->disk('public')
+                                ->disk('local')
+                                ->visibility('private')
                                 ->maxSize(10240)
                                 // Auto/manual line: the deterministic parse (phyla/scores)
                                 // runs automatically here on upload so the metrics appear
@@ -319,10 +463,10 @@ class ReportResource extends Resource
                                         return 'No metrics yet — upload a CSV above and it will be parsed automatically.';
                                     }
 
-                                    return 'Classification: ' . $class
-                                        . '  ·  Diversity: ' . $get('diversity_score')
-                                        . '  ·  Richness: ' . $get('species_richness')
-                                        . '  ·  Dysbiosis: ' . $get('dysbiosis_score');
+                                    return 'Classification: '.$class
+                                        .'  ·  Diversity: '.$get('diversity_score')
+                                        .'  ·  Richness: '.$get('species_richness')
+                                        .'  ·  Dysbiosis: '.$get('dysbiosis_score');
                                 }),
                             Forms\Components\Actions::make([
                                 Forms\Components\Actions\Action::make('generate_ai')
@@ -333,6 +477,11 @@ class ReportResource extends Resource
                                     // has been parsed (metrics present).
                                     ->disabled(fn (Forms\Get $get): bool => blank($get('phylum_data')))
                                     ->action(function (Forms\Get $get, Forms\Set $set) {
+                                        // L2: paid OpenAI call — cap per admin.
+                                        if (PaidActionLimiter::exceeded('generate-ai', 10)) {
+                                            return;
+                                        }
+
                                         $csvPath = $get('csv_path');
 
                                         Log::info('Process CSV button clicked', [
@@ -350,18 +499,19 @@ class ReportResource extends Resource
                                                 ->title('Please upload a CSV file first')
                                                 ->danger()
                                                 ->send();
+
                                             return;
                                         }
 
                                         // Resolve the file path depending on what we got
                                         $filePath = null;
 
-                                        if ($csvPath instanceof \Livewire\Features\SupportFileUploads\TemporaryUploadedFile) {
+                                        if ($csvPath instanceof TemporaryUploadedFile) {
                                             // Get the real temp path for parsing
                                             $filePath = $csvPath->getRealPath();
 
                                             // Store the file to public disk for permanent storage
-                                            $storedPath = $csvPath->store('csv', 'public');
+                                            $storedPath = $csvPath->store('csv', 'local');
                                             $set('csv_stored_path', $storedPath);
 
                                             Log::info('Process CSV: TemporaryUploadedFile resolved', [
@@ -370,7 +520,7 @@ class ReportResource extends Resource
                                             ]);
                                         } elseif (is_string($csvPath)) {
                                             // Already a stored path (e.g. when editing)
-                                            $filePath = Storage::disk('public')->path($csvPath);
+                                            $filePath = Storage::disk('local')->path($csvPath);
 
                                             Log::info('Process CSV: String path resolved', [
                                                 'csv_path' => $csvPath,
@@ -378,11 +528,12 @@ class ReportResource extends Resource
                                             ]);
                                         }
 
-                                        if (!$filePath || !file_exists($filePath)) {
+                                        if (! $filePath || ! file_exists($filePath)) {
                                             Notification::make()
                                                 ->title('CSV file not found on disk')
                                                 ->danger()
                                                 ->send();
+
                                             return;
                                         }
 
@@ -396,8 +547,8 @@ class ReportResource extends Resource
                                         // returns the same parse blob as before
                                         // (under 'csv_data'), so every downstream
                                         // $results[...] reference is unchanged.
-                                        $csvParser = new CsvParserService();
-                                        $results = (new \App\Services\LabResultParser($csvParser))
+                                        $csvParser = new CsvParserService;
+                                        $results = (new LabResultParser($csvParser))
                                             ->fromPath($filePath)['csv_data'];
 
                                         Log::info('Process CSV button - parse results', [
@@ -417,14 +568,22 @@ class ReportResource extends Resource
                                         // Phase 3c: the AI + product/plan half is now the
                                         // shared ReportGeneration helper (same logic, reused
                                         // by the existing-test and from-test entry points).
-                                        $pet = \App\Models\Pet::find($get('pet_id'));
+                                        $pet = Pet::find($get('pet_id'));
 
+                                        $deterministic = [
+                                            'species_richness' => $results['species_richness'] ?? null,
+                                            'dysbiosis_score' => $results['dysbiosis_score'] ?? null,
+                                            'microbiome_classification' => $results['microbiome_classification'] ?? null,
+                                        ];
+                                        $genError = null;
                                         $interpretations = ReportGeneration::interpretationColumns(
                                             $results['phylum_totals'],
                                             $results['diversity_score'],
                                             $pet,
                                             // Notes history as of the report date being entered.
                                             $get('report_date'),
+                                            $genError,
+                                            $deterministic,
                                         );
                                         foreach ($interpretations as $key => $value) {
                                             $set($key, $value);
@@ -433,9 +592,23 @@ class ReportResource extends Resource
                                         $selection = ReportGeneration::productSelection(
                                             $results['phylum_totals'],
                                             $results['diversity_score'],
+                                            $results['microbiome_classification'] ?? null,
                                         );
                                         $set('catalog_product_ids', $selection['catalog_product_ids']);
                                         $set('plan_id', $selection['plan_id']);
+
+                                        // Phase 2: grade the generation (observe-only; logged + returned).
+                                        // Phase 3: persist the verdict via the hidden fields so it saves
+                                        // with the report. needs_review is deterministic-only.
+                                        $verdict = ReportGeneration::gradeAndLog($interpretations, [
+                                            'phylum_totals' => $results['phylum_totals'],
+                                            'diversity_score' => $results['diversity_score'],
+                                            'species_richness' => $results['species_richness'] ?? null,
+                                            'dysbiosis_score' => $results['dysbiosis_score'] ?? null,
+                                            'microbiome_classification' => $results['microbiome_classification'] ?? null,
+                                        ], $selection, $genError, ['path' => 'wizard_new_csv', 'pet_id' => $get('pet_id')]);
+                                        $set('needs_review', $verdict['needs_review']);
+                                        $set('review_flags', ReportGeneration::reviewFlagsFromVerdict($verdict));
 
                                         $allEmpty = collect($interpretations)->every(fn ($val) => empty($val));
                                         if ($allEmpty) {
@@ -566,6 +739,12 @@ class ReportResource extends Resource
                                 ->label('Plan')
                                 ->options(fn (): array => Plan::enabled()->orderBy('position')->pluck('name', 'id')->all())
                                 ->searchable()
+                                // A searchable Select lazy-loads its display label and
+                                // does NOT render a value set programmatically (the
+                                // auto-recommended plan applied via $set during CSV
+                                // processing) unless we resolve that label here — so
+                                // the pre-selected plan stays visible to the user.
+                                ->getOptionLabelUsing(fn ($value): ?string => Plan::find($value)?->name)
                                 ->live()
                                 ->helperText('Pick the plan for this pet, then click "Apply plan" to load its steps. A recommendation is pre-selected from the fired triggers when a CSV has been processed. (Species filtering is inactive — the app is dog-only.)'),
 
@@ -575,10 +754,16 @@ class ReportResource extends Resource
                                     ->icon('heroicon-o-clipboard-document-list')
                                     ->color('primary')
                                     ->action(function (Forms\Get $get, Forms\Set $set) {
+                                        // L2: paid OpenAI plan-copy call — cap per admin.
+                                        if (PaidActionLimiter::exceeded('apply-plan', 10)) {
+                                            return;
+                                        }
+
                                         $planId = $get('plan_id');
 
                                         if (blank($planId)) {
                                             Notification::make()->title('Select a plan first')->warning()->send();
+
                                             return;
                                         }
 
@@ -586,13 +771,14 @@ class ReportResource extends Resource
 
                                         if (! $plan) {
                                             Notification::make()->title('Plan not found')->danger()->send();
+
                                             return;
                                         }
 
                                         // Build pet findings from the current form state (the
                                         // report may not be saved yet at apply time).
-                                        $pet = filled($get('pet_id')) ? \App\Models\Pet::find($get('pet_id')) : null;
-                                        $owner = $pet?->client ?? (filled($get('client_id')) ? \App\Models\Client::find($get('client_id')) : null);
+                                        $pet = filled($get('pet_id')) ? Pet::find($get('pet_id')) : null;
+                                        $owner = $pet?->client ?? (filled($get('client_id')) ? Client::find($get('client_id')) : null);
 
                                         $findings = PetFindings::build([
                                             'pet_name' => $pet?->name,
@@ -610,7 +796,7 @@ class ReportResource extends Resource
                                         // Generate the copy, then VALIDATE it against the fixed
                                         // scaffold so factual fields can never be altered.
                                         $scaffold = $plan->toScaffold($pet?->name);
-                                        $modelOutput = (new OpenAiService())->generatePlanCopy($findings, $scaffold);
+                                        $modelOutput = (new OpenAiService)->generatePlanCopy($findings, $scaffold);
                                         $copy = static::validatePlanCopy($modelOutput, $scaffold);
 
                                         // Instantiate the plan's LOCKED structure (factual fields
@@ -662,7 +848,7 @@ class ReportResource extends Resource
                                         if ($copy['has_copy']) {
                                             Notification::make()
                                                 ->title('Plan applied')
-                                                ->body('Loaded ' . count($steps) . ' steps with generated copy. Structure is locked; edit the copy as needed.')
+                                                ->body('Loaded '.count($steps).' steps with generated copy. Structure is locked; edit the copy as needed.')
                                                 ->success()
                                                 ->send();
                                         } else {
@@ -756,7 +942,7 @@ class ReportResource extends Resource
                                 ->columnSpanFull(),
                         ]),
                 ])
-                    ->submitAction(new \Illuminate\Support\HtmlString('<button type="submit" class="fi-btn fi-btn-size-md relative grid-flow-col items-center justify-center font-semibold outline-none transition duration-75 focus-visible:ring-2 rounded-lg fi-color-custom fi-btn-color-primary fi-color-primary fi-size-md fi-btn-size-md gap-1.5 px-3 py-2 text-sm inline-grid shadow-sm bg-custom-600 text-white hover:bg-custom-500 dark:bg-custom-500 dark:hover:bg-custom-400 focus-visible:ring-custom-500/50 dark:focus-visible:ring-custom-400/50" style="--c-400:var(--primary-400);--c-500:var(--primary-500);--c-600:var(--primary-600);">Create Report</button>'))
+                    ->submitAction(new HtmlString('<button type="submit" class="fi-btn fi-btn-size-md relative grid-flow-col items-center justify-center font-semibold outline-none transition duration-75 focus-visible:ring-2 rounded-lg fi-color-custom fi-btn-color-primary fi-color-primary fi-size-md fi-btn-size-md gap-1.5 px-3 py-2 text-sm inline-grid shadow-sm bg-custom-600 text-white hover:bg-custom-500 dark:bg-custom-500 dark:hover:bg-custom-400 focus-visible:ring-custom-500/50 dark:focus-visible:ring-custom-400/50" style="--c-400:var(--primary-400);--c-500:var(--primary-500);--c-600:var(--primary-600);">Create Report</button>'))
                     ->columnSpanFull(),
 
                 // Klaviyo send status is no longer a persistent bottom-of-form
@@ -799,9 +985,9 @@ class ReportResource extends Resource
             $path = $csv->getRealPath();
             // Persist to the public disk now so the parsed file survives to save
             // even if the user never re-touches the field.
-            $storedPath = $csv->store('csv', 'public');
+            $storedPath = $csv->store('csv', 'local');
         } elseif (is_string($csv)) {
-            $path = Storage::disk('public')->path($csv);
+            $path = Storage::disk('local')->path($csv);
         } else {
             $path = null;
         }
@@ -810,7 +996,7 @@ class ReportResource extends Resource
             return [];
         }
 
-        $results = (new LabResultParser(new CsvParserService()))->fromPath($path)['csv_data'];
+        $results = (new LabResultParser(new CsvParserService))->fromPath($path)['csv_data'];
 
         return [
             'csv_stored_path' => $storedPath,
@@ -856,8 +1042,8 @@ class ReportResource extends Resource
         Notification::make()
             ->title('CSV parsed')
             ->body($parsed['microbiome_classification']
-                . ' · diversity ' . $parsed['diversity_score']
-                . ' · richness ' . $parsed['species_richness'])
+                .' · diversity '.$parsed['diversity_score']
+                .' · richness '.$parsed['species_richness'])
             ->success()
             ->send();
     }
@@ -913,19 +1099,27 @@ class ReportResource extends Resource
             ->get()
             ->mapWithKeys(fn (Test $t): array => [$t->id => trim(
                 $t->order_id
-                . ($t->report_date ? ' · ' . $t->report_date->format('j M Y') : '')
-                . ($t->microbiome_classification ? ' · ' . $t->microbiome_classification : '')
+                .($t->report_date ? ' · '.$t->report_date->format('j M Y') : '')
+                .($t->microbiome_classification ? ' · '.$t->microbiome_classification : '')
             )])
             ->all();
     }
 
-    public static function recommendPlanId(array $triggers): ?int
+    public static function recommendPlanId(array $triggers, ?string $classification = null): ?int
     {
         $plans = static::recommendationPlans();
 
-        // No triggers fired → the configured fallback plan (if any). Modelled as a
-        // flag, never an empty condition set (which would match everything).
+        // No triggers fired. The fallback (maintenance) plan is only a valid
+        // recommendation for a NON-unwell result: a pet classified Imbalanced /
+        // Imbalanced & Depleted that simply matched no rule must NOT be silently
+        // routed to maintenance. Return null so a human selects the plan (and the
+        // quality grader raises unwell_no_plan → needs_review). Unknown/null
+        // classification keeps the original fallback behaviour (back-compatible).
         if (empty($triggers)) {
+            if (\App\Support\ReportContent::isUnwellClassification($classification)) {
+                return null;
+            }
+
             return $plans->firstWhere('is_fallback', true)?->id;
         }
 
@@ -950,7 +1144,7 @@ class ReportResource extends Resource
      * (lower checked first), then id as a deterministic tiebreak when two plans
      * share a priority. Conditions eager-loaded for the matcher/explainer.
      */
-    protected static function recommendationPlans(): \Illuminate\Database\Eloquent\Collection
+    protected static function recommendationPlans(): Collection
     {
         return Plan::enabled()
             ->with('triggerConditions')
@@ -1026,16 +1220,16 @@ class ReportResource extends Resource
             $count = count($set);
 
             if ($count <= 1) {
-                return ($set[0] ?? '?') . ' trigger fires';
+                return ($set[0] ?? '?').' trigger fires';
             }
 
             if ($count === 2) {
-                return $set[0] . ' and ' . $set[1] . ' both fire';
+                return $set[0].' and '.$set[1].' both fire';
             }
 
             $last = array_pop($set);
 
-            return implode(', ', $set) . ' and ' . $last . ' all fire';
+            return implode(', ', $set).' and '.$last.' all fire';
         }, $sets);
 
         return implode(' — or — ', $parts);
@@ -1076,17 +1270,17 @@ class ReportResource extends Resource
         foreach (static::planRecommendationRules() as $rule) {
             $name = $names[$rule['key']] ?? null;
             $target = $name
-                ? e($name) . ' <span style="color:#9ca3af;">(' . e($rule['key']) . ')</span>'
+                ? e($name).' <span style="color:#9ca3af;">('.e($rule['key']).')</span>'
                 : e($rule['key']);
-            $rows .= '<li style="margin:4px 0;"><strong>' . e($rule['condition']) . '</strong> &rarr; ' . $target . '</li>';
+            $rows .= '<li style="margin:4px 0;"><strong>'.e($rule['condition']).'</strong> &rarr; '.$target.'</li>';
         }
 
         return new HtmlString(
             '<div style="font-size:13px; color:#374151; line-height:1.6;">'
-            . '<p style="margin:0 0 8px;">After the product triggers above fire, the report builder selects <strong>one</strong> plan using the rules below, <strong>checked top to bottom — the first match wins</strong>. This order is the recommendation precedence (each plan&rsquo;s <em>match priority</em>); it is <em>not</em> the same as a plan&rsquo;s display position.</p>'
-            . '<ol style="margin:0 0 8px 18px; padding:0;">' . $rows . '</ol>'
-            . '<p style="margin:0; color:#6b7280;">If triggers fire but match none of the condition rules above, <strong>no plan is auto-recommended</strong> — the report is left blank for manual selection. The default (fallback) plan applies only when <strong>no triggers fire at all</strong>.</p>'
-            . '</div>'
+            .'<p style="margin:0 0 8px;">After the product triggers above fire, the report builder selects <strong>one</strong> plan using the rules below, <strong>checked top to bottom — the first match wins</strong>. This order is the recommendation precedence (each plan&rsquo;s <em>match priority</em>); it is <em>not</em> the same as a plan&rsquo;s display position.</p>'
+            .'<ol style="margin:0 0 8px 18px; padding:0;">'.$rows.'</ol>'
+            .'<p style="margin:0; color:#6b7280;">If triggers fire but match none of the condition rules above, <strong>no plan is auto-recommended</strong> — the report is left blank for manual selection. The default (fallback) plan applies only when <strong>no triggers fire at all</strong>.</p>'
+            .'</div>'
         );
     }
 
@@ -1129,6 +1323,7 @@ class ReportResource extends Resource
             if (($mStep['type'] ?? null) !== ($sStep['type'] ?? null)) {
                 Log::warning('Plan copy guardrail: step type drift — step copy discarded.', ['step' => $i]);
                 $out['steps'][$i] = $stepCopy;
+
                 continue;
             }
 
@@ -1149,6 +1344,7 @@ class ReportResource extends Resource
                     $hasCopy = true;
                 }
                 $out['steps'][$i] = $stepCopy;
+
                 continue;
             }
 
@@ -1158,6 +1354,7 @@ class ReportResource extends Resource
             if (count($mProducts) !== count($sProducts)) {
                 Log::warning('Plan copy guardrail: product count drift — step products copy discarded.', ['step' => $i]);
                 $out['steps'][$i] = $stepCopy;
+
                 continue;
             }
 
@@ -1227,6 +1424,13 @@ class ReportResource extends Resource
                     ->badge()
                     ->formatStateUsing(fn (?string $state): string => AdminFormatting::reportLabel($state))
                     ->color(fn (?string $state): string => AdminFormatting::reportColor($state)),
+                // Phase 3: only flagged rows show the amber badge; clean rows are blank.
+                Tables\Columns\TextColumn::make('needs_review')
+                    ->label('Review')
+                    ->badge()
+                    ->color('warning')
+                    ->icon('heroicon-m-flag')
+                    ->formatStateUsing(fn (bool $state): ?string => $state ? 'Needs review' : null),
                 Tables\Columns\TextColumn::make('created_at')
                     ->label('Created')
                     ->date(AdminFormatting::DATE)
@@ -1241,21 +1445,37 @@ class ReportResource extends Resource
                     ->label('Client')
                     ->searchable()
                     ->preload(),
+                // Phase 3: filter to flagged reports (linked from the dashboard
+                // stat + nav badge via ?tableFilters[needs_review][value]=1).
+                Tables\Filters\SelectFilter::make('needs_review')
+                    ->label('Review status')
+                    ->options(['1' => 'Needs review', '0' => 'Reviewed / clean'])
+                    ->query(fn (Builder $query, array $data): Builder => match ($data['value'] ?? null) {
+                        '1' => $query->where('needs_review', true),
+                        '0' => $query->where('needs_review', false),
+                        default => $query,
+                    }),
+                Tables\Filters\TrashedFilter::make(),
             ])
             ->actions([
                 Tables\Actions\Action::make('view_public')
                     ->label('View public')
                     ->icon('heroicon-o-eye')
                     ->color('info')
-                    ->url(fn (Report $record) => route('report.show', $record->slug))
+                    ->url(fn (Report $record) => route('report.show', $record->public_token))
                     ->openUrlInNewTab()
-                    ->visible(fn (Report $record) => $record->status === 'published'),
+                    // A trashed report 404s publicly, so only offer the link for a
+                    // live, published report.
+                    ->visible(fn (Report $record) => $record->status === 'published' && ! $record->trashed()),
                 Tables\Actions\EditAction::make(),
+                // Soft delete + Restore only — no force-delete in the UI (any role).
                 Tables\Actions\DeleteAction::make(),
+                Tables\Actions\RestoreAction::make(),
             ])
             ->bulkActions([
                 Tables\Actions\BulkActionGroup::make([
                     Tables\Actions\DeleteBulkAction::make(),
+                    Tables\Actions\RestoreBulkAction::make(),
                 ]),
             ]);
     }
@@ -1275,5 +1495,4 @@ class ReportResource extends Resource
             'edit' => Pages\EditReport::route('/{record}/edit'),
         ];
     }
-
 }

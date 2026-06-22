@@ -36,8 +36,9 @@ class PetTestsRelationManagerTest extends TestCase
 
     public function test_a_test_can_be_created_under_a_pet_with_parsed_data_and_no_report(): void
     {
-        Storage::fake('public');
-        Storage::disk('public')->put('csv/lab.csv', implode("\n", [
+        // CSVs are PII → private 'local' disk (parseUploadedCsv reads from there).
+        Storage::fake('local');
+        Storage::disk('local')->put('csv/lab.csv', implode("\n", [
             'Phylum,Species,%_hits',
             'Firmicutes,Lactobacillus reuteri,30',
             'Bacteroidetes,Bacteroides fragilis,20',

@@ -5,7 +5,8 @@ module.exports = {
       colors: {
         navy: '#301C47',
         'light-blue': '#E3F0FF',
-        teal: '#4E7BA4',
+        // Brand accent (historically named "teal"); now the brand indigo #4654A4.
+        teal: '#4654A4',
         'light-grey': '#FAF8FF',
       },
     },

@@ -2,6 +2,7 @@
 
 namespace App\Filament\Resources;
 
+use App\Filament\Concerns\SoftDeletableResource;
 use App\Filament\Resources\ClientResource\Pages;
 use App\Filament\Resources\ClientResource\RelationManagers;
 use App\Models\Client;
@@ -14,6 +15,8 @@ use Filament\Tables\Table;
 
 class ClientResource extends Resource
 {
+    use SoftDeletableResource;
+
     protected static ?string $model = Client::class;
 
     protected static ?string $navigationIcon = 'heroicon-o-users';
@@ -71,7 +74,7 @@ class ClientResource extends Resource
             ->emptyStateHeading('No clients yet')
             ->emptyStateDescription('Add your first client to start managing their pets and reports.')
             ->filters([
-                //
+                Tables\Filters\TrashedFilter::make(),
             ])
             ->actions([
                 Tables\Actions\EditAction::make(),
@@ -79,10 +82,15 @@ class ClientResource extends Resource
                     ->label('View Reports')
                     ->icon('heroicon-o-document-text')
                     ->url(fn (Client $record) => ReportResource::getUrl('index', ['tableFilters[client_id][value]' => $record->id])),
+                // Delete is soft (recoverable) + Restore. Force-delete (permanent)
+                // is intentionally NOT exposed in the UI for any role — see the
+                // delete-handling note; permanent removal is a DB-level op only.
+                Tables\Actions\RestoreAction::make(),
             ])
             ->bulkActions([
                 Tables\Actions\BulkActionGroup::make([
                     Tables\Actions\DeleteBulkAction::make(),
+                    Tables\Actions\RestoreBulkAction::make(),
                 ]),
             ]);
     }

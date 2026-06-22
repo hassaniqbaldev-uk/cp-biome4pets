@@ -3,14 +3,26 @@
 namespace App\Services;
 
 use App\Models\ProductRule;
+use App\Support\ReportContent;
 use Illuminate\Support\Facades\Log;
 use RuntimeException;
 
 class CsvParserService
 {
-    public function parse(string $filePath): array
+    /**
+     * Hard ceiling on data rows parsed from a single CSV. A genuine lab export is
+     * one row per detected species — a few thousand at most — so 50,000 is ample
+     * headroom while bounding CPU: without it a crafted (but still <10MB) file of
+     * millions of tiny rows could spin the parse loop in an interactive admin
+     * request. Exceeding the cap is treated as a malformed/hostile file.
+     */
+    public const MAX_DATA_ROWS = 50000;
+
+    public function parse(string $filePath, ?int $maxRows = null): array
     {
-        if (!file_exists($filePath)) {
+        $maxRows ??= self::MAX_DATA_ROWS;
+
+        if (! file_exists($filePath)) {
             throw new RuntimeException("CSV file not found: {$filePath}");
         }
 
@@ -22,7 +34,7 @@ class CsvParserService
 
         $header = fgetcsv($handle);
 
-        if (!is_array($header) || empty($header)) {
+        if (! is_array($header) || empty($header)) {
             fclose($handle);
             throw new RuntimeException("CSV file has no header row: {$filePath}");
         }
@@ -33,9 +45,17 @@ class CsvParserService
         $phylumTotals = [];
         $speciesProportions = [];
         $speciesRichness = 0;
+        $rowCount = 0;
 
         while (($row = fgetcsv($handle)) !== false) {
-            if (!is_array($row)) {
+            // Bound the work regardless of how the rows are shaped — count every
+            // physical data row read, then reject once the cap is passed.
+            if (++$rowCount > $maxRows) {
+                fclose($handle);
+                throw new RuntimeException("CSV exceeds the maximum of {$maxRows} rows.");
+            }
+
+            if (! is_array($row)) {
                 continue;
             }
 
@@ -70,7 +90,7 @@ class CsvParserService
 
         fclose($handle);
 
-        $phylumTotals = array_map(fn($v) => round($v, 2), $phylumTotals);
+        $phylumTotals = array_map(fn ($v) => round($v, 2), $phylumTotals);
 
         $diversityScore = 0.0;
         if (count($speciesProportions) > 0) {
@@ -88,14 +108,15 @@ class CsvParserService
         $bacteroidetes = $phylumTotals['Bacteroidetes'] ?? 0;
         $dysbiosisScore = $bacteroidetes > 0 ? round($firmicutes / $bacteroidetes, 2) : 0;
 
-        // Determine microbiome classification
-        if ($diversityScore >= 3.0 && $dysbiosisScore >= 0.2 && $dysbiosisScore <= 0.5) {
-            $microbiomeClassification = 'Stable';
-        } elseif ($diversityScore < 1.9 || $speciesRichness < 400) {
-            $microbiomeClassification = 'Imbalanced & Depleted';
-        } else {
-            $microbiomeClassification = 'Imbalanced';
-        }
+        // Determine microbiome classification. The thresholds live in ONE place
+        // (ReportContent — the same source the report bands render from) so the
+        // computed badge can never drift from the printed Diversity/Richness/
+        // Dysbiosis bands.
+        $microbiomeClassification = ReportContent::classify(
+            $diversityScore,
+            $speciesRichness,
+            $dysbiosisScore,
+        );
 
         return [
             'phylum_totals' => $phylumTotals,

@@ -63,7 +63,7 @@ class CreateReport extends CreateRecord
         $diversityEmpty = empty($data['diversity_score'] ?? null);
 
         if (($phylumEmpty || $diversityEmpty) && !empty($data['csv_path'])) {
-            $filePath = Storage::disk('public')->path($data['csv_path']);
+            $filePath = Storage::disk('local')->path($data['csv_path']);
 
             if (file_exists($filePath)) {
                 Log::info('CreateReport: Re-parsing CSV to populate missing fields');

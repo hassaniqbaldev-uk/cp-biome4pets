@@ -54,8 +54,11 @@ class TestsRelationManager extends RelationManager
                 Forms\Components\FileUpload::make('csv_path')
                     ->label('Lab data (CSV)')
                     ->acceptedFileTypes(['text/csv', '.csv'])
+                    // Reject anything whose real (finfo) MIME isn't CSV/plain-text.
+                    ->rules(['mimetypes:text/csv,text/plain,application/csv,application/vnd.ms-excel'])
                     ->directory('csv')
-                    ->disk('public')
+                    ->disk('local')
+                    ->visibility('private')
                     ->maxSize(10240)
                     ->live()
                     ->afterStateUpdated(fn ($state, Forms\Set $set) => ReportResource::parseCsvIntoForm($state, $set))
@@ -189,7 +192,7 @@ class TestsRelationManager extends RelationManager
         // Re-parse the stored CSV so the raw fields are persisted regardless of
         // whether "Process CSV" was clicked (mirrors the report create flow).
         if (! empty($data['csv_path'])) {
-            $abs = Storage::disk('public')->path($data['csv_path']);
+            $abs = Storage::disk('local')->path($data['csv_path']);
             if (is_file($abs)) {
                 $data = array_merge($data, (new LabResultParser())->fromPath($abs));
             }
@@ -215,7 +218,12 @@ class TestsRelationManager extends RelationManager
                         ->getStateUsing(fn (Test $record): string => AdminFormatting::testStateLabel($record->hasReport()))
                         ->color(fn (Test $record): string => AdminFormatting::testStateColor($record->hasReport())),
                     Infolists\Components\TextEntry::make('report_date')->label('Test date')->date(AdminFormatting::DATE)->placeholder('—'),
-                    Infolists\Components\TextEntry::make('csv_path')->label('Lab data (CSV)')->placeholder('—'),
+                    Infolists\Components\TextEntry::make('csv_path')
+                        ->label('Lab data (CSV)')
+                        ->placeholder('—')
+                        ->formatStateUsing(fn (?string $state): string => filled($state) ? 'Download CSV' : '—')
+                        ->url(fn (Test $record): ?string => filled($record->csv_path) ? route('admin.tests.csv', $record) : null)
+                        ->openUrlInNewTab(),
                 ]),
             Infolists\Components\Section::make('Parsed metrics')
                 ->columns(4)

@@ -91,7 +91,7 @@ class SendReportActionTest extends TestCase
                 && data_get($body, 'data.attributes.properties.pet_name') === 'Biscuit'
                 && data_get($body, 'data.attributes.properties.client_name') === 'Jane Owner'
                 && data_get($body, 'data.attributes.properties.report_date') === 'June 15, 2026'
-                && str_contains((string) data_get($body, 'data.attributes.properties.report_url'), '/report/'.$report->slug)
+                && str_contains((string) data_get($body, 'data.attributes.properties.report_url'), '/report/'.$report->public_token)
                 // Phase 2 idempotency key, per report.
                 && data_get($body, 'data.attributes.unique_id') === 'report_published_'.$report->id;
         });

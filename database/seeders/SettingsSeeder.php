@@ -18,6 +18,15 @@ class SettingsSeeder extends Seeder
     {
         $defaults = [
             Setting::SIGNS_OF_STABILITY => "As {pet}'s microbiome moves toward balance, there are several signs that indicate things are stabilising. These include consistent, well-formed stools, a steady and healthy appetite, good energy levels, a shiny coat and healthy skin, and settled digestion with minimal gas or discomfort. Improvements are usually gradual rather than sudden, most dogs show noticeable changes over several weeks as the gut environment adjusts. If you notice ongoing digestive upset, low energy, or other concerns, we recommend speaking with your microbiome specialist or veterinarian.",
+            // Review figures shown on the subscribe interstitial (formerly hardcoded
+            // constants in ReportController), now admin-editable in Settings.
+            Setting::REVIEW_RATING => Setting::REVIEW_RATING_DEFAULT,
+            Setting::REVIEW_COUNT => Setting::REVIEW_COUNT_DEFAULT,
+            // Static every-report text blocks (formerly hardcoded in both report
+            // views), now admin-editable so web + PDF stay in lockstep.
+            Setting::REPORT_ABOUT_TEXT => Setting::REPORT_ABOUT_TEXT_DEFAULT,
+            Setting::REPORT_APPROACH_TEXT => Setting::REPORT_APPROACH_TEXT_DEFAULT,
+            Setting::REPORT_SUPPORT_TEXT => Setting::REPORT_SUPPORT_TEXT_DEFAULT,
         ];
 
         foreach ($defaults as $key => $value) {

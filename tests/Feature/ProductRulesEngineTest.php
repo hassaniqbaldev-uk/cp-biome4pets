@@ -257,7 +257,7 @@ class ProductRulesEngineTest extends TestCase
             $table->timestamps();
         });
 
-        $this->actingAs(new User(['name' => 'Admin', 'email' => 'admin@cp.agency']));
+        $this->actingAs(new User(['name' => 'Admin', 'email' => 'admin@cp.agency', 'role' => 'super_admin']));
         Filament::setCurrentPanel(Filament::getPanel('admin'));
 
         // 'between'/'outside' require value2 -> validation error.

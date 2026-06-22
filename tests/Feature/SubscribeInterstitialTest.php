@@ -91,12 +91,12 @@ class SubscribeInterstitialTest extends TestCase
     {
         $report = $this->makeReport($this->makePlan());
 
-        $res = $this->get('/report/' . $report->slug . '/subscribe');
+        $res = $this->get('/report/' . $report->public_token . '/subscribe');
 
         $res->assertOk()
             ->assertSee('Restore & Rebalance')              // plan badge
             ->assertSee('Biscuit')                          // pet name
-            ->assertSee("Start Biscuit's plan", false)      // CTA copy (literal apostrophe)
+            ->assertSee("You'll be redirected automatically", false) // CTA button label
             ->assertSee('PetBiome AMR')                     // first product (the product step)
             ->assertSee('https://img.test/amr.jpg', false)  // its catalog image
             ->assertSee('£29.75 / month')                   // subscription price
@@ -115,7 +115,7 @@ class SubscribeInterstitialTest extends TestCase
     {
         $report = $this->makeReport($this->makePlan(self::LIVE_URL));
 
-        $res = $this->get('/report/' . $report->slug . '/subscribe');
+        $res = $this->get('/report/' . $report->public_token . '/subscribe');
 
         $res->assertSee(self::LIVE_URL, false);            // live plan checkout URL
         $res->assertDontSee(self::SNAPSHOT_URL, false);    // NOT the report's frozen snapshot URL
@@ -125,24 +125,24 @@ class SubscribeInterstitialTest extends TestCase
     {
         $report = $this->makeReport($this->makePlan(url: null));
 
-        $this->get('/report/' . $report->slug . '/subscribe')
-            ->assertRedirect('/report/' . $report->slug);
+        $this->get('/report/' . $report->public_token . '/subscribe')
+            ->assertRedirect('/report/' . $report->public_token);
     }
 
     public function test_redirects_when_no_plan(): void
     {
         $report = $this->makeReport(null);
 
-        $this->get('/report/' . $report->slug . '/subscribe')
-            ->assertRedirect('/report/' . $report->slug);
+        $this->get('/report/' . $report->public_token . '/subscribe')
+            ->assertRedirect('/report/' . $report->public_token);
     }
 
     public function test_redirects_when_plan_disabled(): void
     {
         $report = $this->makeReport($this->makePlan(enabled: false));
 
-        $this->get('/report/' . $report->slug . '/subscribe')
-            ->assertRedirect('/report/' . $report->slug);
+        $this->get('/report/' . $report->public_token . '/subscribe')
+            ->assertRedirect('/report/' . $report->public_token);
     }
 
     public function test_report_subscribe_button_links_to_interstitial(): void
@@ -151,9 +151,9 @@ class SubscribeInterstitialTest extends TestCase
 
         // The report's "Subscribe" button goes to the interstitial, NOT straight
         // to the snapshot's frozen URL.
-        $this->get('/report/' . $report->slug)
+        $this->get('/report/' . $report->public_token)
             ->assertOk()
-            ->assertSee('/report/' . $report->slug . '/subscribe', false)
+            ->assertSee('/report/' . $report->public_token . '/subscribe', false)
             ->assertDontSee('href="' . self::SNAPSHOT_URL . '"', false);
     }
 }

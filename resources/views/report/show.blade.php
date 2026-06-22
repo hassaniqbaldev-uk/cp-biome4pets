@@ -19,13 +19,18 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="robots" content="noindex, nofollow, noarchive">
     <title>{{ $report->petField('name') }} - Petbiome Microbiome Profile</title>
     <link rel="icon" type="image/png" href="/favicon-96x96.png" sizes="96x96">
     <link rel="icon" type="image/svg+xml" href="/favicon.svg">
     <link rel="shortcut icon" href="/favicon.ico">
     <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png">
     <link rel="manifest" href="/site.webmanifest">
-    @include('partials.feedbucket')
+    {{-- Feedbucket is a STAFF feedback widget — only inject it for an authenticated
+         admin previewing the report, never for public/customer report viewers. --}}
+    @auth
+        @include('partials.feedbucket')
+    @endauth
     <link rel="stylesheet" href="{{ asset('css/report.css') }}">
     <style>
         /* Plan ("Recommended Next Steps") product cards — stack the fixed-square
@@ -37,6 +42,50 @@
                 width: 100% !important;
                 height: 180px !important;
             }
+        }
+
+        /* B1 — Subscribe pricing box: below the sm breakpoint, stack both columns
+           full-width. !important overrides the inline `flex:0 1 65/35%` +
+           `min-width:300/240px` that otherwise force horizontal overflow at ~375px
+           and below (the usable width inside the card is only ~295px). */
+        @media (max-width: 639px) {
+            .sub-panel__info,
+            .sub-panel__price {
+                flex: 1 1 100% !important;
+                min-width: 0 !important;
+            }
+        }
+
+        /* D2 — "Your plan at a glance": tidy even 2-col grid on mobile, so a lone
+           last box no longer stretches full-width (from flex:1). */
+        @media (max-width: 600px) {
+            .phase-strip {
+                display: grid !important;
+                grid-template-columns: 1fr 1fr !important;
+            }
+            .phase-strip > div {
+                min-width: 0 !important;
+            }
+        }
+
+        /* D1 — diversity slider band labels: shrink so the three labels
+           (incl. "Medium (1.9–2.5)") don't collide on narrow screens. */
+        @media (max-width: 420px) {
+            .slider-band-labels { font-size: 11px !important; }
+        }
+
+        /* Gut-wall gauge: its 220px canvas + label row would overflow the card on
+           the smallest phones (~320px, card inner ~200px). Cap to the column width
+           and let the canvas scale down (it stays 220px on larger screens via the
+           max-width). The 220×120 buffer just displays scaled, keeping the ratio. */
+        @media (max-width: 380px) {
+            .gauge-wrap {
+                width: 100% !important;
+                max-width: 220px;
+                height: auto !important;
+            }
+            .gauge-wrap canvas { width: 100% !important; height: auto !important; display: block; }
+            .gauge-labels { width: 100% !important; max-width: 220px; }
         }
     </style>
     {{-- Flag JS as available before first paint so scroll-reveal can hide-then-reveal
@@ -62,7 +111,7 @@
                     <img src="/images/biome4pets-logo-white.png" alt="Biome4Pets" style="height:54px; width:auto; display:block;">
                 </div>
                 <a
-                    href="/report/{{ $report->slug }}/pdf"
+                    href="{{ route('report.pdf', $report->public_token) }}"
                     class="inline-flex items-center gap-2 bg-teal hover:bg-teal/90 text-white text-sm font-semibold py-2.5 px-5 rounded-lg shadow-sm hover:shadow-md hover:-translate-y-0.5 transition duration-300 whitespace-nowrap self-start sm:self-auto"
                 >
                     <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -217,20 +266,22 @@
             </div>
             <div class="report-body">
                 @php
+                    // Band cutoffs + labels come from ONE place (App\Support\ReportContent);
+                    // this view only maps the semantic tone to its Tailwind palette.
+                    $toneText = ['bad' => 'text-red-600', 'warn' => 'text-amber-600', 'good' => 'text-green-600'];
+                    $toneBg = ['bad' => 'bg-red-50 border-red-300', 'warn' => 'bg-amber-50 border-amber-300', 'good' => 'bg-green-50 border-green-300'];
+
                     $ds = $report->diversity_score ?? 0;
-                    if ($ds < 1.9) { $dsLabel = 'Low'; $dsColor = 'text-red-600'; $dsBg = 'bg-red-50 border-red-300'; }
-                    elseif ($ds <= 2.5) { $dsLabel = 'Medium'; $dsColor = 'text-amber-600'; $dsBg = 'bg-amber-50 border-amber-300'; }
-                    else { $dsLabel = 'High'; $dsColor = 'text-green-600'; $dsBg = 'bg-green-50 border-green-300'; }
+                    $dsBand = \App\Support\ReportContent::diversityBand($ds);
+                    $dsLabel = $dsBand['label']; $dsColor = $toneText[$dsBand['tone']]; $dsBg = $toneBg[$dsBand['tone']];
 
                     $sr = $report->species_richness ?? 0;
-                    if ($sr < 400) { $srLabel = 'Low'; $srColor = 'text-red-600'; $srBg = 'bg-red-50 border-red-300'; }
-                    elseif ($sr <= 650) { $srLabel = 'Moderate'; $srColor = 'text-amber-600'; $srBg = 'bg-amber-50 border-amber-300'; }
-                    else { $srLabel = 'Healthy'; $srColor = 'text-green-600'; $srBg = 'bg-green-50 border-green-300'; }
+                    $srBand = \App\Support\ReportContent::richnessBand($sr);
+                    $srLabel = $srBand['label']; $srColor = $toneText[$srBand['tone']]; $srBg = $toneBg[$srBand['tone']];
 
                     $dyb = $report->dysbiosis_score ?? 0;
-                    if ($dyb < 0.2) { $dybLabel = 'Low'; $dybColor = 'text-amber-600'; $dybBg = 'bg-amber-50 border-amber-300'; }
-                    elseif ($dyb <= 0.5) { $dybLabel = 'Healthy'; $dybColor = 'text-green-600'; $dybBg = 'bg-green-50 border-green-300'; }
-                    else { $dybLabel = 'High'; $dybColor = 'text-red-600'; $dybBg = 'bg-red-50 border-red-300'; }
+                    $dybBand = \App\Support\ReportContent::dysbiosisBand($dyb);
+                    $dybLabel = $dybBand['label']; $dybColor = $toneText[$dybBand['tone']]; $dybBg = $toneBg[$dybBand['tone']];
                 @endphp
 
                 <div class="grid grid-cols-1 sm:grid-cols-3 gap-4">
@@ -240,9 +291,9 @@
                         <p class="text-4xl font-bold {{ $dsColor }}">{{ $ds }}</p>
                         <p class="text-sm font-semibold mt-1 {{ $dsColor }}">{{ $dsLabel }}</p>
                         <div class="mt-3 text-xs text-gray-500 space-y-0.5">
-                            <p><span class="text-red-600 font-semibold">Low</span> &lt; 1.9</p>
-                            <p><span class="text-amber-600 font-semibold">Medium</span> 1.9 - 2.5</p>
-                            <p><span class="text-green-600 font-semibold">High</span> &gt; 2.5</p>
+                            @foreach(\App\Support\ReportContent::diversityLegend() as $b)
+                                <p><span class="{{ $toneText[$b['tone']] }} font-semibold">{{ $b['label'] }}</span> {{ $b['range'] }}</p>
+                            @endforeach
                         </div>
                     </div>
 
@@ -252,9 +303,9 @@
                         <p class="text-4xl font-bold {{ $srColor }}">{{ $sr }}</p>
                         <p class="text-sm font-semibold mt-1 {{ $srColor }}">{{ $srLabel }}</p>
                         <div class="mt-3 text-xs text-gray-500 space-y-0.5">
-                            <p><span class="text-red-600 font-semibold">Low</span> &lt; 400</p>
-                            <p><span class="text-amber-600 font-semibold">Moderate</span> 400 - 650</p>
-                            <p><span class="text-green-600 font-semibold">Healthy</span> &gt; 650</p>
+                            @foreach(\App\Support\ReportContent::richnessLegend() as $b)
+                                <p><span class="{{ $toneText[$b['tone']] }} font-semibold">{{ $b['label'] }}</span> {{ $b['range'] }}</p>
+                            @endforeach
                         </div>
                     </div>
 
@@ -264,9 +315,9 @@
                         <p class="text-4xl font-bold {{ $dybColor }}">{{ $dyb }}</p>
                         <p class="text-sm font-semibold mt-1 {{ $dybColor }}">{{ $dybLabel }}</p>
                         <div class="mt-3 text-xs text-gray-500 space-y-0.5">
-                            <p><span class="text-amber-600 font-semibold">Low</span> &lt; 0.2</p>
-                            <p><span class="text-green-600 font-semibold">Healthy</span> 0.2 - 0.5</p>
-                            <p><span class="text-red-600 font-semibold">High</span> &gt; 0.5</p>
+                            @foreach(\App\Support\ReportContent::dysbiosisLegend() as $b)
+                                <p><span class="{{ $toneText[$b['tone']] }} font-semibold">{{ $b['label'] }}</span> {{ $b['range'] }}</p>
+                            @endforeach
                         </div>
                     </div>
                 </div>
@@ -295,10 +346,11 @@
                             </div>
                         </div>
                         {{-- Band labels --}}
-                        <div class="flex justify-between mt-2.5 text-sm text-gray-500">
-                            <span class="text-red-600 font-bold">Low (&lt;1.9)</span>
-                            <span class="text-amber-600 font-bold">Medium (1.9–2.5)</span>
-                            <span class="text-green-600 font-bold">High (&gt;2.5)</span>
+                        @php $dLow = \App\Support\ReportContent::num(\App\Support\ReportContent::DIVERSITY_LOW_MAX); $dHigh = \App\Support\ReportContent::num(\App\Support\ReportContent::DIVERSITY_HIGH_MIN); @endphp
+                        <div class="slider-band-labels flex justify-between mt-2.5 text-sm text-gray-500">
+                            <span class="text-red-600 font-bold">Low (&lt;{{ $dLow }})</span>
+                            <span class="text-amber-600 font-bold">Medium ({{ $dLow }}–{{ $dHigh }})</span>
+                            <span class="text-green-600 font-bold">High (&gt;{{ $dHigh }})</span>
                         </div>
                     </div>
                 </div>
@@ -333,7 +385,10 @@
                 <div class="mt-8 border-t border-gray-100 pt-8">
                     <h3 class="font-bold text-navy mb-4 text-center">Phylum Distribution</h3>
                     <div class="chart-frame flex flex-col md:flex-row items-center justify-center gap-8">
-                        <div class="relative" style="width: 280px; height: 280px;">
+                        {{-- Fluid square: caps at 280px but shrinks to fit the column
+                             on narrow screens (no fixed 280px overflow). Chart.js keeps
+                             it square via maintainAspectRatio + the 1/1 aspect-ratio. --}}
+                        <div class="relative mx-auto" style="width: 100%; max-width: 280px; aspect-ratio: 1 / 1;">
                             <canvas id="phylumDonutChart"></canvas>
                         </div>
                         <div id="phylumDonutLegend" class="space-y-2 text-sm"></div>
@@ -422,7 +477,7 @@
             <div class="report-body space-y-8">
                 @php
                     // Shared with the PDF — see app/Support/ReportContent.php.
-                    $microbes = \App\Support\ReportContent::microbes($report);
+                    $microbes = \App\Support\ReportContent::keyMicrobes($report);
                 @endphp
 
                 @foreach($microbes as $index => $microbe)
@@ -503,11 +558,11 @@
                     <h3 class="font-bold text-navy text-center mb-2">Gut Wall Integrity</h3>
                     <p class="text-sm text-gray-500 text-center mb-4">Measures the strength and resilience of the intestinal lining based on key bacterial markers.</p>
                     <div class="flex flex-col items-center">
-                        <div style="width: 220px; height: 120px;">
+                        <div class="gauge-wrap" style="width: 220px; height: 120px;">
                             <canvas id="gutWallGauge" width="220" height="120"></canvas>
                         </div>
                         <p class="text-2xl font-bold text-navy mt-3">{{ $gwScore }}</p>
-                        <div class="flex justify-between w-[220px] mt-2 text-xs font-semibold">
+                        <div class="gauge-labels flex justify-between w-[220px] mt-2 text-xs font-semibold">
                             <span class="text-green-600">Low</span>
                             <span class="text-amber-600">Target</span>
                             <span class="text-red-600">High</span>
@@ -571,7 +626,12 @@
             // use the current Loop link. CTA shows only when the live plan is
             // enabled and has a URL; otherwise "coming soon".
             $subscribeReady = $report->plan && $report->plan->enabled && filled($report->plan->subscription_url);
-            $subscribeHref = $subscribeReady ? route('report.subscribe', ['slug' => $report->slug]) : null;
+            // UTM-tagged link INTO the subscribe interstitial (the final Loop
+            // checkout URL is left clean — see subscribe.blade.php). Token is in the
+            // path, UTMs in the query, so route resolution is unaffected.
+            $subscribeHref = $subscribeReady
+                ? \App\Support\Utm::report(route('report.subscribe', ['token' => $report->public_token]), 'subscribe', 'subscribe_cta')
+                : null;
 
             // Saving message now lives in the billing note. Show a badge ONLY
             // when an explicit saving_label was snapshotted — no computed "Save £X".
@@ -586,15 +646,15 @@
                 {{-- Subscribe panel — only when the plan's subscription is available --}}
                 @if($subAvailable)
                 <div style="border:1px solid #E3F0FF; border-radius:18px; overflow:hidden; background:#FAF8FF; display:flex; flex-wrap:wrap; box-shadow:0 8px 24px rgba(48,28,71,.06);">
-                    <div style="flex:0 1 65%; min-width:300px; padding:26px 28px;">
-                        <span style="display:inline-block; background:#4E7BA4; color:#fff; font-size:11px; font-weight:600; letter-spacing:.06em; text-transform:uppercase; padding:4px 11px; border-radius:999px;">Recommended</span>
+                    <div class="sub-panel__info" style="flex:0 1 65%; min-width:300px; padding:26px 28px;">
+                        <span style="display:inline-block; background:#4654A4; color:#fff; font-size:11px; font-weight:600; letter-spacing:.06em; text-transform:uppercase; padding:4px 11px; border-radius:999px;">Recommended</span>
                         <h3 class="text-navy" style="font-size:22px; font-weight:700; margin:13px 0 8px; line-height:1.2;">Subscribe to the {{ $planName ?: 'plan' }}{{ $planName ? ' plan' : '' }}</h3>
                         <p class="text-sm" style="color:#55505A; margin:0 0 16px;">One subscription runs the whole protocol for {{ $petName }}, and the products change automatically as each phase begins.</p>
                         @if(!empty($subIncludes))
                             <ul style="list-style:none; margin:0; padding:0;">
                                 @foreach($subIncludes as $inc)
                                     <li style="font-size:14px; padding:5px 0 5px 24px; position:relative;">
-                                        <span style="position:absolute; left:0; top:9px; width:12px; height:12px; border-radius:50%; background:#4E7BA4;"></span>
+                                        <span style="position:absolute; left:0; top:9px; width:12px; height:12px; border-radius:50%; background:#4654A4;"></span>
                                         <b class="text-navy">{{ data_get($inc, 'name') }}</b>@if(! is_null(data_get($inc, 'price'))) - £{{ number_format((float) data_get($inc, 'price'), 2) }}@endif
                                     </li>
                                 @endforeach
@@ -602,7 +662,7 @@
                         @endif
                         <p style="font-size:13px; color:#55505A; margin:14px 0 0;">Pause or cancel anytime.</p>
                     </div>
-                    <div class="bg-navy text-white" style="flex:0 1 35%; min-width:240px; padding:28px 26px; display:flex; flex-direction:column; justify-content:center; align-items:center; text-align:center;">
+                    <div class="bg-navy text-white sub-panel__price" style="flex:0 1 35%; min-width:240px; padding:28px 26px; display:flex; flex-direction:column; justify-content:center; align-items:center; text-align:center;">
                         @if(filled($subFullPrice))
                             <div style="font-size:15px; font-weight:600; color:rgba(255,255,255,.5); text-decoration:line-through; line-height:1;">{{ $subFullPrice }}</div>
                         @endif
@@ -613,7 +673,7 @@
                             <div style="font-size:13px; color:rgba(255,255,255,.65); margin:6px 0 14px;">{{ $subBilling }}</div>
                         @endif
                         @if($savingLine)
-                            <div style="background:#4E7BA4; color:#fff; font-size:12px; font-weight:700; padding:3px 12px; border-radius:999px; margin-bottom:14px;">{{ $savingLine }}</div>
+                            <div style="background:#4654A4; color:#fff; font-size:12px; font-weight:700; padding:3px 12px; border-radius:999px; margin-bottom:14px;">{{ $savingLine }}</div>
                         @endif
                         @if(filled($subscribeHref))
                             <a href="{{ $subscribeHref }}" class="bg-teal hover:bg-teal/90 text-white" style="display:block; width:100%; text-align:center; font-weight:600; font-size:15px; text-decoration:none; padding:13px 18px; border-radius:9px;">Subscribe to plan</a>
@@ -628,7 +688,7 @@
                 {{-- Your plan at a glance — phase strip from the steps' stage labels --}}
                 <div>
                     <h3 style="font-size:12px; letter-spacing:.06em; text-transform:uppercase; color:#55505A; font-weight:600; margin:0 0 14px;">Your plan at a glance</h3>
-                    <div style="display:flex; gap:8px; flex-wrap:wrap;">
+                    <div class="phase-strip" style="display:flex; gap:8px; flex-wrap:wrap;">
                         @foreach($report->steps as $step)
                             @php
                                 $stage = $step->stage_label ?? '';
@@ -641,7 +701,7 @@
                                     $phName = trim(preg_replace('/^Step\s*\d+\s*:\s*/i', '', $step->title));
                                 }
                                 $phName = preg_replace('/^PetBiome\s+/i', '', $phName);
-                                $border = '#4E7BA4'; $phBg = '#FAF8FF';
+                                $border = '#4654A4'; $phBg = '#FAF8FF';
                                 if (stripos($stage, 'Checkpoint') !== false || stripos($step->title, 'Retest') !== false) {
                                     $border = '#c98a1f'; $phBg = '#fdf8ef';
                                 } elseif (stripos($phName, 'Maintenance') !== false) {
@@ -678,7 +738,7 @@
                 <div class="space-y-6">
                     @foreach($report->steps as $step)
                         <div>
-                            <div style="background:#FAF8FF; border:1px solid #e3e9ef; border-left:4px solid #4E7BA4; border-radius:10px; padding:13px 18px;">
+                            <div style="background:#FAF8FF; border:1px solid #e3e9ef; border-left:4px solid #4654A4; border-radius:10px; padding:13px 18px;">
                                 <div class="text-navy" style="font-weight:600; font-size:17px;">{{ $step->title }}</div>
                                 @if(filled($step->stage_label))
                                     <div style="font-size:12px; color:#55505A; margin-top:2px; letter-spacing:.03em;">{{ $step->stage_label }}</div>
@@ -700,6 +760,12 @@
                                         @php
                                             $catalog = $product->catalogProduct;
                                             $buyLabel = 'Buy individually' . (! is_null($catalog?->price) ? ' · £' . number_format($catalog->price, 0) : '');
+
+                                            // Optional add-ons with a configured subscription discount show a
+                                            // line DERIVED from the catalog product's OWN price + discount.
+                                            // No discount configured ⇒ no line (the plain price above still
+                                            // shows), so a product can never display a price that isn't its own.
+                                            $subDiscounted = $product->inclusion === 'optional' ? $catalog?->discountedPrice() : null;
                                         @endphp
                                         <div class="lift plan-product" style="display:flex; flex-wrap:wrap; gap:20px; padding:20px; border:1px solid #e3e9ef; border-radius:14px; background:#fff; box-shadow:0 1px 2px rgba(48,28,71,.06),0 8px 24px rgba(48,28,71,.06);">
                                             @if($catalog?->image_path)
@@ -718,8 +784,8 @@
                                                 @if(! is_null($catalog?->price))
                                                     <div style="font-size:14px; color:#55505A; margin:2px 0 12px; font-weight:500;"><b style="color:#55505A;">£{{ number_format($catalog->price, 2) }}</b></div>
                                                 @endif
-                                                @if($product->inclusion === 'optional')
-                                                    <div style="font-size:13px; color:#55505A; margin:0 0 12px; line-height:1.5;">£180, or £126 with the 6-month subscription discount (30% off)</div>
+                                                @if(! is_null($subDiscounted))
+                                                    <div style="font-size:13px; color:#55505A; margin:0 0 12px; line-height:1.5;">£{{ \App\Support\ReportContent::num($catalog->price) }}, or £{{ \App\Support\ReportContent::num($subDiscounted) }} with the 6-month subscription discount ({{ $catalog->subscription_discount_percent }}% off)</div>
                                                 @endif
                                                 @if(filled($product->dose))
                                                     <p class="text-sm" style="margin:5px 0;"><b class="text-navy">Dose:</b> {{ $product->dose }}</p>
@@ -739,11 +805,11 @@
                                                          products show the tag only. --}}
                                                     @if($product->inclusion === 'optional')
                                                         @if($catalog?->url)
-                                                            <a href="{{ $catalog->url }}" target="_blank" rel="noopener noreferrer" style="display:inline-block; background:#fff; color:#38427F; border:1.5px solid #4E7BA4; font-weight:600; font-size:14px; text-decoration:none; padding:9px 20px; border-radius:8px;">{{ $buyLabel }}</a>
+                                                            <a href="{{ $catalog->url }}" target="_blank" rel="noopener noreferrer" style="display:inline-block; background:#fff; color:#38427F; border:1.5px solid #4654A4; font-weight:600; font-size:14px; text-decoration:none; padding:9px 20px; border-radius:8px;">{{ $buyLabel }}</a>
                                                         @endif
                                                         <span style="font-size:12.5px; font-weight:600; color:#a06a14; display:inline-flex; align-items:center; gap:6px;"><span style="width:8px; height:8px; border-radius:50%; background:#d49a2a; display:inline-block;"></span>Optional add-on</span>
                                                     @else
-                                                        <span style="font-size:12.5px; font-weight:600; color:#38427F; display:inline-flex; align-items:center; gap:6px;"><span style="width:8px; height:8px; border-radius:50%; background:#4E7BA4; display:inline-block;"></span>Included in plan</span>
+                                                        <span style="font-size:12.5px; font-weight:600; color:#38427F; display:inline-flex; align-items:center; gap:6px;"><span style="width:8px; height:8px; border-radius:50%; background:#4654A4; display:inline-block;"></span>Included in plan</span>
                                                     @endif
                                                 </div>
                                             </div>
@@ -766,22 +832,22 @@
                     @else
                         <span aria-disabled="true" style="display:inline-block; font-weight:600; font-size:15px; padding:13px 32px; border-radius:9px; background:rgba(255,255,255,.18); color:rgba(255,255,255,.7); cursor:not-allowed;">Subscribe - link coming soon</span>
                     @endif
-                    <p style="font-size:13px; color:rgba(255,255,255,.6); margin:16px 0 0;">Prefer to buy items individually? <a href="https://biome4pets.com/pages/shop" target="_blank" rel="noopener noreferrer" style="color:#816AA1; text-decoration:underline;">Visit our online store</a></p>
+                    <p style="font-size:13px; color:rgba(255,255,255,.6); margin:16px 0 0;">Prefer to buy items individually? <a href="{{ \App\Support\Utm::report('https://biome4pets.com/pages/shop', 'shop', 'shop_link') }}" target="_blank" rel="noopener noreferrer" style="color:#816AA1; text-decoration:underline;">Visit our online store</a></p>
                 </div>
                 @endif
 
                 {{-- Kibble-diet nutritionist CTA. A gentle optimisation nudge (not a
                      warning), shown only when the report's frozen diet is Kibble. --}}
                 @if($report->recommendsNutritionist())
-                <div style="margin-top:22px; background:#F3F8FC; border:1px solid #D9E6F2; border-left:4px solid #4E7BA4; border-radius:14px; padding:22px 24px;">
+                <div style="margin-top:22px; background:#F3F8FC; border:1px solid #D9E6F2; border-left:4px solid #4654A4; border-radius:14px; padding:22px 24px;">
                     <div style="display:flex; align-items:flex-start; gap:14px;">
                         <div style="flex:0 0 auto; width:40px; height:40px; border-radius:9999px; background:#E3F0FF; display:flex; align-items:center; justify-content:center;">
-                            <svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#4E7BA4" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M11 20A7 7 0 0 1 9.8 6.1C15.5 5 17 4.48 19 2c1 2 2 4.18 2 8 0 5.5-4.78 10-10 10Z"/><path d="M2 21c0-3 1.85-5.36 5.08-6"/></svg>
+                            <svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#4654A4" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M11 20A7 7 0 0 1 9.8 6.1C15.5 5 17 4.48 19 2c1 2 2 4.18 2 8 0 5.5-4.78 10-10 10Z"/><path d="M2 21c0-3 1.85-5.36 5.08-6"/></svg>
                         </div>
                         <div>
                             <h3 style="font-size:17px; font-weight:700; color:#301C47; margin:0 0 6px;">We recommend speaking to a nutritionist</h3>
                             <p style="font-size:14px; color:#4b5563; line-height:1.6; margin:0 0 16px; max-width:60ch;">Pets on a kibble diet can benefit from tailored guidance on supporting gut health. Our nutritionists can help you build a plan suited to {{ $petName }}'s individual results.</p>
-                            <a href="https://biome4pets.com/nutritionists" target="_blank" rel="noopener noreferrer" style="display:inline-block; background:#4E7BA4; color:#fff; font-weight:600; font-size:14px; text-decoration:none; padding:11px 22px; border-radius:9px;">View recommendations &rarr;</a>
+                            <a href="{{ \App\Support\Utm::report('https://biome4pets.com/nutritionists', 'nutritionist', 'nutritionist_cta') }}" target="_blank" rel="noopener noreferrer" style="display:inline-block; background:#4654A4; color:#fff; font-weight:600; font-size:14px; text-decoration:none; padding:11px 22px; border-radius:9px;">View recommendations &rarr;</a>
                         </div>
                     </div>
                 </div>
@@ -855,27 +921,25 @@
                 <h2 class="text-lg font-bold tracking-tight">Help and Contacts</h2>
             </div>
             <div class="report-body space-y-6">
+                {{-- Static report-text blocks: admin-editable in Settings → Report Text,
+                     resolved via ReportContent so the PDF shows identical copy. --}}
                 <div>
                     <h3 class="font-bold text-navy text-base mb-2">About This Report</h3>
-                    <p class="text-sm text-gray-700 leading-relaxed">This report is based on advanced analysis of your dog's gut microbiome using 16S rRNA sequencing, one of the most accurate methods available for identifying bacterial populations. Biome4Pets maintains one of the largest canine microbiome data libraries, built from thousands of samples across a wide range of breeds, diets, and health conditions. Using population-based data analysis and artificial intelligence, we are able to identify patterns associated with both health and disease. This report provides a detailed snapshot of your dog's microbiome and highlights key areas of imbalance. While this information is a powerful tool for understanding gut health, it is not intended to diagnose disease. If your dog is unwell, please consult your veterinarian.</p>
+                    <p class="text-sm text-gray-700 leading-relaxed">{!! nl2br(e(\App\Support\ReportContent::reportAboutText())) !!}</p>
                 </div>
 
                 <div>
                     <h3 class="font-bold text-navy text-base mb-2">Our Approach</h3>
                     <ul class="text-sm text-gray-700 space-y-1 list-disc list-inside">
-                        <li>Large-scale canine microbiome database</li>
-                        <li>AI-driven analysis and pattern recognition</li>
-                        <li>Linked to real-world health conditions</li>
-                        <li>Focused on practical, evidence-based support</li>
+                        @foreach(\App\Support\ReportContent::reportApproachLines() as $line)
+                            <li>{{ $line }}</li>
+                        @endforeach
                     </ul>
                 </div>
 
                 <div>
                     <h3 class="font-bold text-navy text-base mb-2">Support &amp; Next Steps</h3>
-                    <p class="text-sm text-gray-700 leading-relaxed">If you would like help interpreting your dog's results or guidance on next steps, we are here to support you.</p>
-                    <p class="text-sm text-gray-700 mt-2">Email: info@biome4pets.com</p>
-                    <p class="text-sm text-gray-700">Website: www.biome4pets.com</p>
-                    <p class="text-sm text-gray-700 mt-2">Consultations are available if you would like to discuss your dog's results in more detail, please book through the website.</p>
+                    <p class="text-sm text-gray-700 leading-relaxed">{!! nl2br(e(\App\Support\ReportContent::reportSupportText())) !!}</p>
                 </div>
             </div>
         </section>
@@ -1082,9 +1146,13 @@
                     labels: ['Target', 'High', 'Low', 'Your Pet'],
                     datasets: [{
                         data: allValues,
-                        backgroundColor: ['#4E7BA4', '#ef4444', '#f59e0b', '#301C47'],
+                        // Brand palette, shade = level (darker = higher, lighter = lower),
+                        // matching the PDF bars: Target / High / Low / Your Pet.
+                        backgroundColor: ['#2D8BBA', '#31356E', '#6CE5E8', '#4168D5'],
                         borderRadius: 4,
-                        barThickness: 40,
+                        // Auto-fit to the available width, capped at 40px — so the
+                        // four bars shrink rather than crowd on narrow phones.
+                        maxBarThickness: 40,
                     }]
                 },
                 options: {
@@ -1102,7 +1170,10 @@
                             grid: { color: 'rgba(0,0,0,0.05)' }
                         },
                         x: {
-                            grid: { display: false }
+                            grid: { display: false },
+                            // Keep the four short labels horizontal + readable, and
+                            // never drop one, even on a narrow phone canvas.
+                            ticks: { font: { size: 11 }, maxRotation: 0, minRotation: 0, autoSkip: false }
                         }
                     }
                 }

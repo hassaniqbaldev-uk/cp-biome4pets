@@ -5,10 +5,13 @@ namespace App\Models;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Database\Eloquent\SoftDeletes;
 use Illuminate\Support\Carbon;
 
 class Pet extends Model
 {
+    use SoftDeletes;
+
     protected $fillable = [
         'client_id',
         'name',
@@ -25,7 +28,9 @@ class Pet extends Model
 
     public function client(): BelongsTo
     {
-        return $this->belongsTo(Client::class);
+        // withTrashed: a pet whose client was soft-deleted (we don't cascade) must
+        // still resolve its client's data for display, rather than appear ownerless.
+        return $this->belongsTo(Client::class)->withTrashed();
     }
 
     public function reports(): HasMany

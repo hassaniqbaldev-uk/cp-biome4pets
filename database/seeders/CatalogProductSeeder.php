@@ -53,6 +53,9 @@ class CatalogProductSeeder extends Seeder
         [
             'name' => 'PetBiome Gut Microbiome Test Kit',
             'price' => 180.00,
+            // The retest kit is offered as an optional add-on at a 30% subscription
+            // discount (£180 → £126), the figure formerly hardcoded into the report.
+            'subscription_discount_percent' => 30,
             'url' => 'https://biome4pets.com/products/petbiome-microbiome-test-kit',
             'image_path' => 'https://biome4pets.com/cdn/shop/files/Advanced_Gut_Microbiome_Test.png?v=1779191848',
         ],
@@ -83,6 +86,9 @@ class CatalogProductSeeder extends Seeder
                 ['name' => $product['name']],
                 [
                     'price' => $product['price'],
+                    // Null for every product except the retest kit; products without
+                    // a configured discount show no discount line on the report.
+                    'subscription_discount_percent' => $product['subscription_discount_percent'] ?? null,
                     'url' => $product['url'],
                     'image_path' => $product['image_path'],
                     'is_active' => true,

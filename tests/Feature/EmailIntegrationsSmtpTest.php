@@ -39,6 +39,7 @@ class EmailIntegrationsSmtpTest extends TestCase
         $user = User::create([
             'name' => 'Admin',
             'email' => 'admin@example.com',
+            'role' => 'super_admin',
             'password' => bcrypt('secret'),
         ]);
         $this->actingAs($user);
