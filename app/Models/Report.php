@@ -46,6 +46,7 @@ class Report extends Model
         'plan_id',
         'plan_intro',
         'subscription_snapshot',
+        'hide_subscribe',
         'pet_snapshot',
         'klaviyo_last_sent_at',
         'klaviyo_last_result',
@@ -63,6 +64,7 @@ class Report extends Model
         // species_richness) now live on the Test and are cast there; the
         // Report→Test proxy returns the already-cast Test value.
         'subscription_snapshot' => 'array',
+        'hide_subscribe' => 'boolean',
         'pet_snapshot' => 'array',
         'klaviyo_last_sent_at' => 'datetime',
         'klaviyo_last_result' => 'array',

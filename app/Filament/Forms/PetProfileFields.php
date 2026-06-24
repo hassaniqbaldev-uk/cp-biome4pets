@@ -2,9 +2,11 @@
 
 namespace App\Filament\Forms;
 
+use App\Models\Pet;
 use Closure;
 use Filament\Forms;
 use Filament\Forms\Set;
+use Illuminate\Support\Carbon;
 
 /**
  * The shared "is_sensitive" / "is_large_breed" pet-profile fields, so every pet
@@ -19,6 +21,52 @@ class PetProfileFields
 {
     /** The large-breed threshold, in KILOGRAMS (weight is stored as weight_kg). */
     public const LARGE_BREED_THRESHOLD_KG = 35.0;
+
+    /** How far back the year-of-birth dropdown reaches from the current year. */
+    public const BIRTH_YEAR_RANGE = 30;
+
+    /**
+     * Year-of-birth dropdown — shared across every pet form. Owners often don't
+     * know the exact date, so we collect the YEAR only. It writes to the EXISTING
+     * date_of_birth column (no schema change) as the 1st of January of that year
+     * (YYYY-01-01), and on edit it shows the year of whatever full date is stored,
+     * so existing dated pets display + round-trip cleanly.
+     *
+     * The option list always includes the record's stored year even if it predates
+     * the normal range, so editing+saving an old pet can never wipe its DOB.
+     */
+    public static function yearOfBirth(): Forms\Components\Select
+    {
+        return Forms\Components\Select::make('date_of_birth')
+            ->label('Year of birth')
+            ->placeholder('Select year')
+            ->native(false)
+            ->options(function (?Pet $record): array {
+                $current = (int) Carbon::now()->year;
+                $min = $current - self::BIRTH_YEAR_RANGE;
+
+                // Never drop an existing (possibly older) stored year from the list.
+                if ($record?->date_of_birth) {
+                    $min = min($min, (int) $record->date_of_birth->year);
+                }
+
+                $years = [];
+                for ($y = $current; $y >= $min; $y--) {
+                    $years[(string) $y] = (string) $y;
+                }
+
+                return $years;
+            })
+            // Stored date (or null) -> the year, so the select reflects existing data.
+            ->formatStateUsing(fn ($state): ?string => filled($state)
+                ? (string) Carbon::parse($state)->year
+                : null)
+            // Selected year -> the 1st of January of that year, so the column stays
+            // a real date and the type is unchanged.
+            ->dehydrateStateUsing(fn ($state): ?string => filled($state)
+                ? $state.'-01-01'
+                : null);
+    }
 
     /**
      * The two profile flag fields — identical across every pet form.

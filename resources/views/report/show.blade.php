@@ -468,11 +468,11 @@
         </section>
 
         {{-- ============================================================ --}}
-        {{-- 6. 5 KEY MICROBES --}}
+        {{-- 6. KEY MICROBES --}}
         {{-- ============================================================ --}}
         <section data-reveal class="report-card">
             <div class="report-head">
-                <h2 class="text-lg font-bold tracking-tight">5 Key Microbes</h2>
+                <h2 class="text-lg font-bold tracking-tight">Key Microbes</h2>
             </div>
             <div class="report-body space-y-8">
                 @php
@@ -598,8 +598,12 @@
 
         {{-- ============================================================ --}}
         {{-- 8. RECOMMENDED NEXT STEPS (phased plan) --}}
+        {{-- The whole commercial plan/subscribe pitch (subscribe box, phase strip,
+             plan intro, product cards, closing nudge, nutritionist CTA). Staff can
+             hide it per report via hide_subscribe (retests / already-on-programme).
+             The clinical FINDINGS live in the sections ABOVE and are never hidden. --}}
         {{-- ============================================================ --}}
-        @if($report->plan_id && $report->steps->isNotEmpty())
+        @if(! $report->hide_subscribe && $report->plan_id && $report->steps->isNotEmpty())
         @php
             // Existing accessor reused from the hero card; fallback keeps the
             // templated sentences readable when no pet name is set.
@@ -877,9 +881,10 @@
         {{-- 8b. MICROBIOME RESTORATION (legacy flat list) --}}
         {{-- Fallback: shown only when the plan layout above is NOT rendered --}}
         {{-- (no plan applied, or no steps), so older reports still render. --}}
-        {{-- Remove in a later cleanup slice. --}}
+        {{-- Remove in a later cleanup slice. Also hidden by hide_subscribe — it's --}}
+        {{-- the same commercial "products to buy" pitch. --}}
         {{-- ============================================================ --}}
-        @if((! $report->plan_id || $report->steps->isEmpty()) && $report->catalogProducts->count() > 0)
+        @if(! $report->hide_subscribe && (! $report->plan_id || $report->steps->isEmpty()) && $report->catalogProducts->count() > 0)
         <section data-reveal class="report-card">
             <div class="report-head">
                 <h2 class="text-lg font-bold tracking-tight">Microbiome Restoration</h2>
@@ -1135,7 +1140,7 @@
         })();
         @endif
 
-        // 5 Key Microbes bar charts
+        // Key Microbes bar charts
         @php
             $microbeConfigsData = collect($microbes)->values()->map(function($m, $i) {
                 return [

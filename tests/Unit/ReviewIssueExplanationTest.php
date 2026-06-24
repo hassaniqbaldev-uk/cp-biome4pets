@@ -16,7 +16,7 @@ class ReviewIssueExplanationTest extends TestCase
     {
         return array_map(fn ($c) => [$c], [
             'generation_failed', 'json_parse_failed', 'empty_output', 'bad_score_enum',
-            'plan_unmatched', 'unwell_no_plan', 'panel_contradiction',
+            'plan_unmatched', 'unwell_no_plan', 'panel_contradiction', 'band_contradiction',
             'number_contradiction', 'unknown_taxon', 'banned_phrase',
         ]);
     }

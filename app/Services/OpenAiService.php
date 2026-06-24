@@ -264,6 +264,26 @@ PROMPT;
         }
         $deterministicBlock = $detLines === [] ? '' : implode("\n", $detLines)."\n";
 
+        // Per-phylum band verdicts are now DETERMINED IN CODE (arithmetic vs the
+        // reference bands), never decided by the model. We hand the model the
+        // verdict as a fixed fact; it explains it but must not re-judge it. Plus the
+        // diversity band (also deterministic). This closes the bug where the AI
+        // called a low value "within the normal range".
+        $bandLines = [];
+        foreach ($phylumTotals as $name => $pct) {
+            $sentence = \App\Support\ReportContent::phylumBandSentence((string) $name, (float) $pct);
+            if ($sentence !== null) {
+                $bandLines[] = '- '.$sentence;
+            }
+        }
+        $diversityBand = \App\Support\ReportContent::diversityBand($diversityScore)['label']; // Low | Medium | High
+        $bandLines[] = '- The Shannon diversity score '.$diversityScore.' is '.strtoupper($diversityBand)
+            .' (diversity bands: Low below '.\App\Support\ReportContent::num(\App\Support\ReportContent::DIVERSITY_LOW_MAX)
+            .', Medium up to '.\App\Support\ReportContent::num(\App\Support\ReportContent::DIVERSITY_HIGH_MIN)
+            .', High above that).';
+        $bandBlock = "Level assessment (these band verdicts are FIXED — already computed from the exact figures; state each one EXACTLY as given and never re-judge it):\n"
+            .implode("\n", $bandLines)."\n";
+
         // When a classification is supplied, require the prose to stay consistent
         // with it — without changing tone, scale, or thresholds.
         $coherenceRule = $classification !== ''
@@ -325,14 +345,15 @@ Phylum percentages:
 {$phylumList}
 Shannon Diversity Index: {$diversityScore}
 {$deterministicBlock}
+{$bandBlock}
 Respond in valid JSON with exactly these keys:
 - "summary": A 4-5 sentence overall summary of the pet's microbiome health, written warmly for the owner, referencing the pet by name when provided and touching on the overall balance and what it means for this pet.{$summarySuffix}
 - "goal": A warm, encouraging goal statement of 2 to 3 sentences (no em dashes) that sets out one clear, concrete goal for this pet based on the diagnostics, such as bringing an out-of-range phylum back toward its healthy range and/or improving diversity over a sensible timeframe like "the coming weeks" or "8 to 12 weeks". Give a little context on what we are aiming for and why it matters for this pet, keeping it focused and not padded. It MUST reference the pet by name when a name is provided.
-- "bacteroidetes_interpretation": A 4-5 sentence plain-English explanation of the Bacteroidetes level for this pet: state the level, whether it's within/above/below the healthy range, what Bacteroidetes does, what this particular level means for the pet by name, and a brief reassuring or forward-looking note.{$phylaSuffix}
-- "firmicutes_interpretation": A 4-5 sentence plain-English explanation of the Firmicutes level for this pet: state the level, whether it's within/above/below the healthy range, what Firmicutes does, what this particular level means for the pet by name, and a brief reassuring or forward-looking note.{$phylaSuffix}
-- "fusobacteria_interpretation": A 4-5 sentence plain-English explanation of the Fusobacteria level for this pet: state the level, whether it's within/above/below the healthy range, what Fusobacteria does, what this particular level means for the pet by name, and a brief reassuring or forward-looking note.{$phylaSuffix}
-- "proteobacteria_interpretation": A 4-5 sentence plain-English explanation of the Proteobacteria level for this pet: state the level, whether it's within/above/below the healthy range, what Proteobacteria does, what this particular level means for the pet by name, and a brief reassuring or forward-looking note.{$phylaSuffix}
-- "diversity_interpretation": A 4-5 sentence plain-English explanation of the Shannon diversity score for this pet: state the score, what diversity means for gut health, whether this score is low/moderate/healthy, what it means for the pet by name, and a forward-looking note.{$phylaSuffix}
+- "bacteroidetes_interpretation": A 4-5 sentence plain-English explanation of the Bacteroidetes level for this pet: state the level and its band EXACTLY as given in the Level assessment above (low / within the typical range / high — do NOT re-judge or contradict it), what Bacteroidetes does, what this particular band means for the pet by name, and a brief forward-looking note.{$phylaSuffix}
+- "firmicutes_interpretation": A 4-5 sentence plain-English explanation of the Firmicutes level for this pet: state the level and its band EXACTLY as given in the Level assessment above (low / within the typical range / high — do NOT re-judge or contradict it), what Firmicutes does, what this particular band means for the pet by name, and a brief forward-looking note.{$phylaSuffix}
+- "fusobacteria_interpretation": A 4-5 sentence plain-English explanation of the Fusobacteria level for this pet: state the level and its band EXACTLY as given in the Level assessment above (low / within the typical range / high — do NOT re-judge or contradict it), what Fusobacteria does, what this particular band means for the pet by name, and a brief forward-looking note.{$phylaSuffix}
+- "proteobacteria_interpretation": A 4-5 sentence plain-English explanation of the Proteobacteria level for this pet: state the level and its band EXACTLY as given in the Level assessment above (low / within the typical range / high — do NOT re-judge or contradict it), what Proteobacteria does, what this particular band means for the pet by name, and a brief forward-looking note.{$phylaSuffix}
+- "diversity_interpretation": A 4-5 sentence plain-English explanation of the Shannon diversity score for this pet: state the score and its band EXACTLY as given in the Level assessment above (low / medium / high — do NOT re-judge it), what diversity means for gut health, what this band means for the pet by name, and a forward-looking note.{$phylaSuffix}
 - "vet_summary": A detailed 4-5 sentence personal summary about this pet's specific microbiome findings. Reference the dominant phyla, the key imbalance(s) versus healthy ranges, what this means specifically for THIS pet (addressing the pet by name when a name is provided), and end with a forward-looking note. Keep it warm and readable for a pet owner — avoid clinical jargon. It MUST address the pet by name when a name is provided.{$vetSummarySuffix}
 - "recommended_actions": 4 to 5 distinct, practical recommendations grounded in this pet's specific findings, separated by newlines. Each recommendation must be a full sentence stating the action together with a brief reason explaining why it helps this pet (the action plus why it helps). Make them substantial and genuinely useful, not padded or repetitive, and avoid em dashes.
 For the following 6 health insight scores, use exactly one of these values: "Very High", "High", "Medium", or "Low".
@@ -355,7 +376,8 @@ Grounding rules (these are critical and override any temptation to embellish):
 - Only reference the phyla provided in the data above. Do not name specific bacteria, species, or any additional taxa beyond those given to you. This applies especially to the open-prose fields (summary, vet_summary, recommended_actions), where you must not introduce an organism that is not in the data.
 - Each score_* value must be EXACTLY one of: Very High, High, Medium, Low, with no other text, punctuation, or explanation inside the score field.
 - If you cannot ground a statement in the provided data, omit it rather than inventing or speculating.
-- You must still state the actual figures where a field asks for them: the phylum and diversity fields should state the level/score as instructed. State them accurately using the exact numbers above; do not drop the numbers, just never change them.{$coherenceRule}
+- You must still state the actual figures where a field asks for them: the phylum and diversity fields should state the level/score as instructed. State them accurately using the exact numbers above; do not drop the numbers, just never change them.
+- The band verdicts in the Level assessment above (low / within the typical range / high; and low / medium / high for diversity) are FIXED and already computed from the figures. State each level EXACTLY as given and keep the prose consistent with it. NEVER describe a value given as LOW as normal, within range, healthy, or elevated; NEVER describe a value given as HIGH as low, normal, or within range; only a value given as WITHIN the range may be called normal or within the typical range. Do not invent specific clinical consequences of a level; keep the explanation to accurate general statements.{$coherenceRule}
 
 Style: Write in warm, natural, plain British English as if a knowledgeable person were explaining to a pet owner. Vary sentence length and structure. Avoid AI-cliché phrasing (e.g. 'it's important to note', 'plays a crucial role', 'in conclusion', 'delve', 'tapestry', 'navigating'). Do NOT use em dashes (—) or en dashes (–) anywhere; use commas, full stops, or the word 'to' for ranges. Keep it concrete and specific to this pet's findings, not generic. Do not overuse lists.
 

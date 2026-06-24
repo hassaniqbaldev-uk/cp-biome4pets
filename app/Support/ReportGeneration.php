@@ -256,4 +256,71 @@ class ReportGeneration
             return $report;
         });
     }
+
+    /**
+     * Re-run AI generation on an EXISTING report so it picks up generation fixes
+     * (e.g. the deterministic band verdict + band_contradiction validator). Reuses
+     * the SAME path as creation — interpretationColumns() (the OpenAiService call,
+     * now band-aware) + gradeAndLog() (the validator) — and OVERWRITES the report's
+     * stored AI content (ai_*, score_*) plus re-applies needs_review / review_flags.
+     *
+     * It does NOT touch the plan, products, subscription snapshot, pet snapshot or
+     * status — only the AI interpretation is regenerated. Raw lab data is read from
+     * the linked Test (the report's source of truth), grounded AS OF the original
+     * report date so the copy is consistent with how it was first generated.
+     *
+     * SAFETY: if the AI call errors or returns an all-empty result, the existing
+     * stored content is KEPT (never wiped by a transient API failure) and the
+     * method reports the failure instead.
+     *
+     * @return array{ok:bool, needs_review:bool, reason:?string}
+     */
+    public static function regenerateReport(Report $report): array
+    {
+        $test = $report->test;
+        if (! $test) {
+            return ['ok' => false, 'needs_review' => (bool) $report->needs_review, 'reason' => 'no_linked_test'];
+        }
+
+        $phylumData = $test->phylum_data ?? [];
+        if (empty($phylumData)) {
+            return ['ok' => false, 'needs_review' => (bool) $report->needs_review, 'reason' => 'no_lab_data'];
+        }
+
+        $pet = $report->pet;
+        // Ground notes AS OF the report's date, mirroring createReportFromTest.
+        $asOf = $test->report_date ?? $test->collected_at;
+        $deterministic = [
+            'species_richness' => $test->species_richness,
+            'dysbiosis_score' => $test->dysbiosis_score,
+            'microbiome_classification' => $test->microbiome_classification,
+        ];
+
+        $genError = null;
+        $interp = self::interpretationColumns($phylumData, $test->diversity_score, $pet, $asOf, $genError, $deterministic);
+
+        // Never overwrite good content with a transient failure / empty result.
+        $allEmpty = collect($interp)->every(fn ($v) => $v === '' || $v === null);
+        if ($genError !== null || $allEmpty) {
+            return ['ok' => false, 'needs_review' => (bool) $report->needs_review, 'reason' => $genError ?? 'empty_output'];
+        }
+
+        // Re-grade with the SAME validator (band_contradiction etc. re-apply).
+        // Plan/triggers are unchanged here, so reuse the report's existing selection.
+        $selection = ['triggered' => [], 'plan_id' => $report->plan_id];
+        $verdict = self::gradeAndLog($interp, [
+            'phylum_totals' => $phylumData,
+            'diversity_score' => $test->diversity_score,
+            'species_richness' => $test->species_richness,
+            'dysbiosis_score' => $test->dysbiosis_score,
+            'microbiome_classification' => $test->microbiome_classification,
+        ], $selection, $genError, ['path' => 'bulk_regenerate', 'report_id' => $report->getKey()]);
+
+        $report->update(array_merge($interp, [
+            'needs_review' => $verdict['needs_review'],
+            'review_flags' => self::reviewFlagsFromVerdict($verdict),
+        ]));
+
+        return ['ok' => true, 'needs_review' => $verdict['needs_review'], 'reason' => null];
+    }
 }

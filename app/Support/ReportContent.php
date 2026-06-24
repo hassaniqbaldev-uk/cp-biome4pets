@@ -271,6 +271,69 @@ class ReportContent
         return rtrim(rtrim(number_format((float) $value, 2, '.', ''), '0'), '.');
     }
 
+    /*
+    |---------------------------------------------------------------------------
+    | Per-phylum reference bands (SINGLE SOURCE) + deterministic band verdict
+    |---------------------------------------------------------------------------
+    | The low/target/high reference numbers for the Key Microbes — the SAME
+    | numbers the bar chart plots and the AI prose now explains. They live here
+    | once so the prompt, the validator and the chart can't disagree. Where a
+    | pet's value sits relative to its band is decided HERE in arithmetic, never
+    | by the AI: value < low → low; value > high → high; otherwise within range.
+    | (These are DISPLAY interpretation bands — NOT the plan-routing/AMR clinical
+    | thresholds, which the client owns separately.)
+    */
+    public const PHYLUM_BANDS = [
+        'Fusobacteria'   => ['low' => 10, 'target' => 18,  'high' => 25],
+        'Bacteroidetes'  => ['low' => 10, 'target' => 20,  'high' => 40],
+        'Firmicutes'     => ['low' => 13, 'target' => 26,  'high' => 45],
+        'Proteobacteria' => ['low' => 5,  'target' => 9,   'high' => 18],
+        'Prevotella'     => ['low' => 1,  'target' => 2.5, 'high' => 5],
+    ];
+
+    /**
+     * Deterministic band verdict for a phylum value vs its reference band, or null
+     * when the phylum has no defined band. band: 'low' (< low) | 'high' (> high) |
+     * 'within' (between, inclusive). Arithmetic only — the AI never decides this.
+     *
+     * @return array{band:string, low:float, high:float, target:float, value:float}|null
+     */
+    public static function phylumBandVerdict(string $name, float $value): ?array
+    {
+        $bands = self::PHYLUM_BANDS[$name] ?? null;
+        if ($bands === null) {
+            return null;
+        }
+
+        $low = (float) $bands['low'];
+        $high = (float) $bands['high'];
+        $band = $value < $low ? 'low' : ($value > $high ? 'high' : 'within');
+
+        return ['band' => $band, 'low' => $low, 'high' => $high, 'target' => (float) $bands['target'], 'value' => $value];
+    }
+
+    /**
+     * The fixed-fact sentence handed to the AI for a phylum: states the value, the
+     * DETERMINED band, and the typical range — so the model explains it, never
+     * re-judges it. Null when the phylum has no band.
+     */
+    public static function phylumBandSentence(string $name, float $value): ?string
+    {
+        $v = self::phylumBandVerdict($name, $value);
+        if ($v === null) {
+            return null;
+        }
+
+        $range = self::num($v['low']).'% to '.self::num($v['high']).'%';
+        $word = match ($v['band']) {
+            'low' => 'LOW (below the typical range of '.$range.')',
+            'high' => 'HIGH (above the typical range of '.$range.')',
+            default => 'WITHIN the typical range of '.$range,
+        };
+
+        return $name.' is '.self::num($value).'%, which is '.$word.'.';
+    }
+
     /**
      * The pet's phyla reduced to the top 6 by value, with everything else
      * grouped into a single "Other" slice. Mirrors the web JS that feeds the
@@ -289,7 +352,7 @@ class ReportContent
     }
 
     /**
-     * The 5 key microbes: static educational copy (functions, considerations,
+     * The key microbes: static educational copy (functions, considerations,
      * healthy ranges) plus this report's per-phylum AI interpretation and value.
      */
     public static function microbes(Report $report): array
@@ -300,7 +363,7 @@ class ReportContent
             [
                 'name' => 'Fusobacteria',
                 'interpretation' => $report->ai_fusobacteria_interpretation,
-                'target' => 18, 'high' => 25, 'low' => 10,
+                ...self::PHYLUM_BANDS['Fusobacteria'],
                 'value' => $phylumData['Fusobacteria'] ?? 0,
                 'functions' => [
                     'Protein breakdown – supports digestion of dietary protein and amino acid utilisation',
@@ -317,7 +380,7 @@ class ReportContent
             [
                 'name' => 'Bacteroidetes',
                 'interpretation' => $report->ai_bacteroidetes_interpretation,
-                'target' => 20, 'high' => 40, 'low' => 10,
+                ...self::PHYLUM_BANDS['Bacteroidetes'],
                 'value' => $phylumData['Bacteroidetes'] ?? 0,
                 'functions' => [
                     'Carbohydrate digestion – supports breakdown of plant-based fibres',
@@ -333,7 +396,7 @@ class ReportContent
             [
                 'name' => 'Firmicutes',
                 'interpretation' => $report->ai_firmicutes_interpretation,
-                'target' => 26, 'high' => 45, 'low' => 13,
+                ...self::PHYLUM_BANDS['Firmicutes'],
                 'value' => $phylumData['Firmicutes'] ?? 0,
                 'functions' => [
                     'Immune regulation – supports gut barrier integrity and defence against harmful bacteria',
@@ -351,7 +414,7 @@ class ReportContent
             [
                 'name' => 'Proteobacteria',
                 'interpretation' => $report->ai_proteobacteria_interpretation,
-                'target' => 9, 'high' => 18, 'low' => 5,
+                ...self::PHYLUM_BANDS['Proteobacteria'],
                 'value' => $phylumData['Proteobacteria'] ?? 0,
                 'functions' => [
                     'Protein metabolism – associated with digestion of protein-rich diets',
@@ -368,7 +431,7 @@ class ReportContent
             [
                 'name' => 'Prevotella',
                 'interpretation' => null,
-                'target' => 2.5, 'high' => 5, 'low' => 1,
+                ...self::PHYLUM_BANDS['Prevotella'],
                 'value' => $phylumData['Prevotella'] ?? 0,
                 'functions' => [
                     'Fibre and carbohydrate breakdown – supports energy production from plant-based substrates',

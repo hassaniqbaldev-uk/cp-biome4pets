@@ -27,8 +27,7 @@ class PetsRelationManager extends RelationManager
                     ->maxLength(255),
                 Forms\Components\TextInput::make('breed')
                     ->maxLength(255),
-                Forms\Components\DatePicker::make('date_of_birth')
-                    ->label('Date of Birth'),
+                \App\Filament\Forms\PetProfileFields::yearOfBirth(),
                 Forms\Components\Select::make('sex')
                     ->options([
                         'Male' => 'Male',
@@ -40,6 +39,7 @@ class PetsRelationManager extends RelationManager
                         'Raw' => 'Raw',
                         'Kibble' => 'Kibble',
                         'Mixed' => 'Mixed',
+                        'Home Cooked' => 'Home Cooked',
                         'Other' => 'Other',
                     ]),
                 ...\App\Filament\Forms\PetProfileFields::flags(),
@@ -82,8 +82,11 @@ class PetsRelationManager extends RelationManager
                 Tables\Columns\TextColumn::make('breed')
                     ->searchable(),
                 Tables\Columns\TextColumn::make('date_of_birth')
-                    ->label('Date of Birth')
-                    ->date(\App\Support\AdminFormatting::DATE)
+                    ->label('Year of Birth')
+                    // Year-only display; existing dated pets show their year.
+                    ->formatStateUsing(fn ($state): ?string => filled($state)
+                        ? (string) \Illuminate\Support\Carbon::parse($state)->year
+                        : null)
                     ->sortable(),
                 Tables\Columns\TextColumn::make('sex'),
                 Tables\Columns\TextColumn::make('shopify_pet_id')

@@ -72,6 +72,42 @@ class Pet extends Model
     }
 
     /**
+     * The pet's year of birth (we now collect year-only; date_of_birth is stored as
+     * the 1st of January of that year). Returns the year of whatever date is stored,
+     * so existing full-date pets show their year too. Null when no DOB is on file.
+     */
+    public function birthYear(): ?int
+    {
+        return $this->date_of_birth?->year;
+    }
+
+    /**
+     * Approximate age in WHOLE years from the year of birth. Approximate by design
+     * (we only know the year), e.g. "~3 years old". Null when no DOB is on file.
+     */
+    public function approxAgeYears(): ?int
+    {
+        if (blank($this->date_of_birth)) {
+            return null;
+        }
+
+        return (int) $this->date_of_birth->diffInYears(Carbon::now());
+    }
+
+    /** "2023 · ~3 years old" for the pet hub — year first, then an approximate age. */
+    public function birthYearLabel(): ?string
+    {
+        if (blank($this->date_of_birth)) {
+            return null;
+        }
+
+        $age = $this->approxAgeYears();
+
+        return $this->birthYear()
+            .($age !== null ? ' · ~'.$age.' year'.($age === 1 ? '' : 's').' old' : '');
+    }
+
+    /**
      * The most recent weight on record — the latest health-note entry that has a
      * weight (notes are date-desc). Null when no weight has ever been logged.
      */

@@ -57,8 +57,7 @@ class PetResource extends Resource
                             ->maxLength(255),
                         Forms\Components\TextInput::make('breed')
                             ->maxLength(255),
-                        Forms\Components\DatePicker::make('date_of_birth')
-                            ->label('Date of Birth'),
+                        \App\Filament\Forms\PetProfileFields::yearOfBirth(),
                         Forms\Components\Select::make('sex')
                             ->options([
                                 'Male' => 'Male',
@@ -70,6 +69,7 @@ class PetResource extends Resource
                                 'Raw' => 'Raw',
                                 'Kibble' => 'Kibble',
                                 'Mixed' => 'Mixed',
+                                'Home Cooked' => 'Home Cooked',
                                 'Other' => 'Other',
                             ]),
                         ...\App\Filament\Forms\PetProfileFields::flags(),

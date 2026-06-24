@@ -195,6 +195,16 @@ class ReportQualityValidator
             $issues[] = self::issue('panel_contradiction', self::SEVERITY_WARNING, self::TIER_DETERMINISTIC, 'Classified Imbalanced & Depleted but the diversity panel reads High — inconsistent signals.');
         }
 
+        // 8. Microbe BAND contradiction (DETERMINISTIC — exact arithmetic, drives
+        //    needs_review). The band a value sits in (low / within / high) is now
+        //    computed in code; if the prose ASSERTS a different band (e.g. calls a
+        //    low value "within the normal range"), the report tells the customer
+        //    something the arithmetic contradicts — flag it. This is the
+        //    Fusobacteria-2.97%-called-"normal" bug, caught even if the AI slips.
+        if (! $allEmpty) {
+            $issues = array_merge($issues, self::checkBandContradictions($interp, $context));
+        }
+
         // ───────────────────────── HEURISTIC (log-only) ─────────────────────────
         // Skipped entirely on empty output (nothing to scan).
         if (self::HEURISTICS_ENABLED && ! $allEmpty) {
@@ -213,6 +223,98 @@ class ReportQualityValidator
     }
 
     // ───────────────────────── heuristic checks ─────────────────────────
+
+    /**
+     * Present-tense claim phrases used by the deterministic band check. Kept to
+     * CURRENT-STATE assertions ("is within", "is low") so a forward-looking goal
+     * sentence ("bring it back within the typical range") does NOT false-positive.
+     */
+    public const BAND_NORMAL_CLAIMS = [
+        'is within', 'are within', 'sits within', 'remains within', 'well within',
+        'is in the normal', 'are in the normal', 'is in the typical', 'are in the typical',
+        'is in the healthy', 'are in the healthy', 'is normal', 'are normal',
+        'looks normal', 'appears normal', 'at a normal level', 'at a healthy level',
+        'at normal levels', 'at healthy levels',
+    ];
+
+    public const BAND_LOW_CLAIMS = [
+        'is low', 'are low', 'a low level', 'low levels', 'too low', 'on the low side',
+        'is depleted', 'are depleted', 'is deficient', 'are deficient',
+        'is below', 'are below', 'falls below', 'sits below',
+    ];
+
+    public const BAND_HIGH_CLAIMS = [
+        'is high', 'are high', 'a high level', 'high levels', 'too high', 'on the high side',
+        'is elevated', 'are elevated', 'elevated levels', 'overgrowth', 'in excess',
+        'is above', 'are above', 'rises above', 'sits above',
+    ];
+
+    /**
+     * DETERMINISTIC band-vs-prose check. For each per-phylum interpretation, the
+     * value's band (low/within/high) is computed in code (ReportContent), then the
+     * prose is scanned for a present-tense claim that contradicts it:
+     *   low   → flagged if prose claims normal/within-range OR high
+     *   high  → flagged if prose claims normal/within-range OR low
+     *   within→ flagged if prose claims low OR high
+     * High-precision (current-state phrases only) so it can drive needs_review.
+     */
+    protected static function checkBandContradictions(array $interp, array $context): array
+    {
+        $issues = [];
+        $phylumTotals = $context['phylum_totals'] ?? [];
+
+        foreach (self::PHYLUM_FIELD_MAP as $field => $phylum) {
+            if (! array_key_exists($phylum, $phylumTotals)) {
+                continue;
+            }
+            $verdict = ReportContent::phylumBandVerdict($phylum, (float) $phylumTotals[$phylum]);
+            if ($verdict === null) {
+                continue; // no defined band for this phylum
+            }
+
+            $prose = strtolower((string) ($interp[$field] ?? ''));
+            if ($prose === '') {
+                continue;
+            }
+
+            // Which claim sets contradict THIS computed band.
+            $contradicting = match ($verdict['band']) {
+                'low' => [...self::BAND_NORMAL_CLAIMS, ...self::BAND_HIGH_CLAIMS],
+                'high' => [...self::BAND_NORMAL_CLAIMS, ...self::BAND_LOW_CLAIMS],
+                default => [...self::BAND_LOW_CLAIMS, ...self::BAND_HIGH_CLAIMS], // within
+            };
+
+            $stated = null;
+            foreach ($contradicting as $phrase) {
+                if (str_contains($prose, $phrase)) {
+                    $stated = $phrase;
+                    break;
+                }
+            }
+            if ($stated === null) {
+                continue;
+            }
+
+            $computed = $verdict['band'] === 'within'
+                ? 'within the typical range'
+                : $verdict['band'].' relative to the typical range';
+
+            $issues[] = self::issue(
+                'band_contradiction',
+                self::SEVERITY_WARNING,
+                self::TIER_DETERMINISTIC,
+                sprintf(
+                    'The report describes %s as "%s" but its level %s%% is %s — please review.',
+                    $phylum,
+                    $stated,
+                    self::num((float) $phylumTotals[$phylum]),
+                    $computed,
+                ),
+            );
+        }
+
+        return $issues;
+    }
 
     /**
      * Compare percentages stated in the per-phylum prose, and the score stated in

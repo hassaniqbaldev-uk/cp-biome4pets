@@ -132,10 +132,26 @@
     // <img> data-URIs — DomPDF renders SVG ONLY via <img>, never inline).
 @endphp
 
-{{-- Fixed footer on every page --}}
-<div style="background-color: #301C47; color: #ffffff; padding: 6px 20px; text-align: center; font-family: Arial, sans-serif; font-size: 10px; position: fixed; bottom: 0; left: 0; right: 0;">
-    <img src="{{ $logoPath }}" style="height: 16px; vertical-align: middle; margin-right: 6px;" />
-    Biome4Pets Ltd &nbsp;&bull;&nbsp; info@biome4pets.com &nbsp;&bull;&nbsp; www.biome4pets.com
+{{-- Fixed footer bar on every page. DomPDF positions fixed elements relative to
+     the content box (inside the @page margins), so to sit FLUSH at the physical
+     page bottom and span FULL width we push out past the margins with negative
+     offsets: bottom:-20mm = the 20mm bottom margin (→ page edge), left/right:-11mm
+     = the 11mm side margins (→ edge to edge). The 14mm bar fits inside the 20mm
+     bottom margin (~6mm clearance), so body content never collides. Left group
+     (logo + Biome4Pets Ltd) and right group (email + URL) via a 2-cell table,
+     vertically centred. --}}
+<div style="background-color: #301C47; color: #ffffff; position: fixed; bottom: -20mm; left: -11mm; right: -11mm; height: 14mm;">
+    <table width="100%" cellpadding="0" cellspacing="0" style="height: 14mm; border-collapse: collapse;">
+        <tr>
+            <td style="vertical-align: middle; height: 14mm; padding-left: 24px; white-space: nowrap; font-family: Arial, sans-serif;">
+                <img src="{{ public_path('images/biome4pets-logo-white.png') }}" style="height: 30px; vertical-align: middle; margin-right: 10px;" />
+                <span style="vertical-align: middle; font-size: 11px; font-weight: bold; color: #ffffff;">Biome4Pets Ltd</span>
+            </td>
+            <td style="vertical-align: middle; height: 14mm; padding-right: 24px; text-align: right; white-space: nowrap; font-family: Arial, sans-serif; font-size: 11px; color: #ffffff;">
+                info@biome4pets.com &nbsp;&nbsp;&bull;&nbsp;&nbsp; www.biome4pets.com
+            </td>
+        </tr>
+    </table>
 </div>
 
 {{-- Fixed running header: DARK logo (inner pages are white), top-left, on every
@@ -192,7 +208,11 @@
             $toc = [
                 'Veterinary Summary', 'Your Dog\'s Personal Summary', 'Microbiome Overview',
                 'Your Dog vs Healthy Microbiome', 'Microbiome Classification',
-                'Key Microbes', 'Microbiome-Driven Health Insights', 'Recommended Next Steps', 'Help and Contacts',
+                'Key Microbes', 'Microbiome-Driven Health Insights',
+                // The plan/subscribe section is omitted from the contents when staff
+                // have hidden it, so the TOC never lists a section that isn't rendered.
+                ...(! $report->hide_subscribe ? ['Recommended Next Steps'] : []),
+                'Help and Contacts',
             ];
         @endphp
         @foreach($toc as $i => $item)
@@ -581,8 +601,11 @@
 {{-- ================================================================ --}}
 {{-- SECTION 12: RECOMMENDED NEXT STEPS (phased plan) --}}
 {{-- Mirrors the web view's plan section; legacy flat list is the fallback. --}}
+{{-- Hidden (both this and the legacy fallback below) when hide_subscribe is set, --}}
+{{-- consistent with the web report — the commercial plan/subscribe pitch is the --}}
+{{-- only thing suppressed; the clinical findings above remain. --}}
 {{-- ================================================================ --}}
-@if($report->plan_id && $report->steps->isNotEmpty())
+@if(! $report->hide_subscribe && $report->plan_id && $report->steps->isNotEmpty())
 @php
     // PDF shows only a COMPACT summary + a "view online" block. The full
     // step-by-step protocol, product cards and subscription checkout live on the
@@ -664,7 +687,7 @@
 {{-- SECTION 12b: MICROBIOME RESTORATION (legacy flat list) --}}
 {{-- Fallback only when the phased plan above is NOT rendered. --}}
 {{-- ================================================================ --}}
-@elseif($report->catalogProducts->count() > 0)
+@elseif(! $report->hide_subscribe && $report->catalogProducts->count() > 0)
 <div style="page-break-before: always;"></div>
 <div class="section">
     <div class="section-bar">Microbiome Restoration</div>

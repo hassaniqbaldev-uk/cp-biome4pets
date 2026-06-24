@@ -78,14 +78,13 @@ class SendReportViaAppTest extends TestCase
         $this->assertStringContainsString('OK', $fresh->appLastSentSummary());
     }
 
-    public function test_app_send_with_no_client_email_shows_error_and_sends_nothing(): void
+    public function test_app_send_with_no_client_email_is_disabled_and_sends_nothing(): void
     {
         Mail::fake();
-        $report = $this->makeReport('');   // client with no email
+        $report = $this->makeReport('');   // published, but client has no email
 
         Livewire::test(EditReport::class, ['record' => $report->getRouteKey()])
-            ->callAction('send_via_app')
-            ->assertNotified('Cannot send');
+            ->assertActionDisabled('send_via_app');
 
         Mail::assertNothingSent();
         $this->assertNull($report->fresh()->app_last_sent_at);   // not recorded as sent

@@ -32,7 +32,10 @@ class ReportController extends Controller
 
         $plan = $report->plan;
 
-        if (! $plan || ! $plan->enabled || blank($plan->subscription_url)) {
+        // Degrade gracefully back to the report when there's nothing to subscribe to
+        // OR when staff have hidden the subscribe pitch on this report — so a stale
+        // /subscribe link can never drive a hidden-subscribe customer into checkout.
+        if ($report->hide_subscribe || ! $plan || ! $plan->enabled || blank($plan->subscription_url)) {
             return redirect()->route('report.show', ['token' => $report->public_token]);
         }
 

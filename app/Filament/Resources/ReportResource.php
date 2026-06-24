@@ -249,8 +249,7 @@ class ReportResource extends Resource
                                         ->maxLength(255),
                                     Forms\Components\TextInput::make('breed')
                                         ->maxLength(255),
-                                    Forms\Components\DatePicker::make('date_of_birth')
-                                        ->label('Date of Birth'),
+                                    \App\Filament\Forms\PetProfileFields::yearOfBirth(),
                                     Forms\Components\Select::make('sex')
                                         ->options([
                                             'Male' => 'Male',
@@ -262,6 +261,7 @@ class ReportResource extends Resource
                                             'Raw' => 'Raw',
                                             'Kibble' => 'Kibble',
                                             'Mixed' => 'Mixed',
+                                            'Home Cooked' => 'Home Cooked',
                                             'Other' => 'Other',
                                         ]),
                                     ...\App\Filament\Forms\PetProfileFields::flags(),
@@ -751,6 +751,10 @@ class ReportResource extends Resource
                                 ->getOptionLabelUsing(fn ($value): ?string => Plan::find($value)?->name)
                                 ->live()
                                 ->helperText('Pick the plan for this pet, then click "Apply plan" to load its steps. A recommendation is pre-selected from the fired triggers when a CSV has been processed. (Species filtering is inactive — the app is dog-only.)'),
+
+                            Forms\Components\Toggle::make('hide_subscribe')
+                                ->label('Hide subscribe section')
+                                ->helperText('Hide the subscription / recommended-next-steps section on this report (e.g. for retests or customers already on the programme). The report\'s findings (metrics, charts, classification, insights, summaries) always stay visible.'),
 
                             Forms\Components\Actions::make([
                                 Forms\Components\Actions\Action::make('apply_plan')

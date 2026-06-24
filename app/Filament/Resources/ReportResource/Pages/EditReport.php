@@ -161,7 +161,9 @@ class EditReport extends EditRecord
                 Actions\Action::make('send_via_app')
                     ->label('Send via App')
                     ->icon('heroicon-o-envelope')
-                    ->tooltip(fn (): string => 'Via email (our SMTP) · last sent: '.$this->record->appLastSentSummary())
+                    ->tooltip(fn (): string => $this->appSendBlockedReason()
+                        ?? ('Via email (our SMTP) · last sent: '.$this->record->appLastSentSummary()))
+                    ->disabled(fn (): bool => $this->appSendBlockedReason() !== null)
                     ->requiresConfirmation()
                     ->modalHeading('Send Report via App')
                     ->modalDescription(fn (): HtmlString => new HtmlString(
@@ -178,18 +180,18 @@ class EditReport extends EditRecord
                         }
 
                         $report = $this->record;
-                        $email = $report->petClient?->email;
 
-                        // No recipient → don't send; clear error toast (not a crash).
-                        if (blank($email)) {
-                            Notification::make()
-                                ->title('Cannot send')
-                                ->body('This client has no email address')
-                                ->danger()
-                                ->send();
+                        // Re-check the guards at click time (publish-first, then
+                        // recipient) — never email a draft or send with no address,
+                        // even on a race or programmatic invoke.
+                        $reason = $this->appSendBlockedReason();
+                        if ($reason !== null) {
+                            Notification::make()->title('Cannot send')->body($reason)->danger()->send();
 
                             return;
                         }
+
+                        $email = $report->petClient->email;
 
                         // Wrap the transport in try/catch so an SMTP error surfaces
                         // as a toast and is recorded — never a silent fail or 500.
@@ -242,11 +244,30 @@ class EditReport extends EditRecord
     }
 
     /**
-     * Why the "Send Report" action is blocked, or null when it may fire.
-     * Covers all three guards: integration off, no API key, no client email.
+     * The most FUNDAMENTAL send guard, shared by BOTH channels: an unpublished
+     * report must never be emailed — the public link serves a draft/unfinished
+     * report to the customer (and historically bounced them), so block sending
+     * until it's published. Checked first everywhere, ahead of channel-specific
+     * reasons, so "publish first" is always the single clearest message.
+     */
+    private function unpublishedSendReason(): ?string
+    {
+        return $this->record->status !== 'published'
+            ? "Publish this report before sending it — the link won't work for the customer until it's published."
+            : null;
+    }
+
+    /**
+     * Why the Klaviyo "Send" channel is blocked, or null when it may fire. Order:
+     * publish-first (most fundamental), then integration off / no key, then no
+     * client email.
      */
     private function sendReportBlockedReason(): ?string
     {
+        if ($reason = $this->unpublishedSendReason()) {
+            return $reason;
+        }
+
         $enabled = filter_var(Setting::get(Setting::KLAVIYO_ENABLED), FILTER_VALIDATE_BOOLEAN);
 
         if (! $enabled || blank(Setting::get(Setting::KLAVIYO_API_KEY))) {
@@ -255,6 +276,24 @@ class EditReport extends EditRecord
 
         if (blank($this->record->petClient?->email)) {
             return 'No client email on this report';
+        }
+
+        return null;
+    }
+
+    /**
+     * Why the App (SMTP) "Send" channel is blocked, or null when it may fire.
+     * Order: publish-first (most fundamental), then no client email. (Independent
+     * of Klaviyo settings — the App channel uses our own SMTP.)
+     */
+    private function appSendBlockedReason(): ?string
+    {
+        if ($reason = $this->unpublishedSendReason()) {
+            return $reason;
+        }
+
+        if (blank($this->record->petClient?->email)) {
+            return 'This client has no email address';
         }
 
         return null;

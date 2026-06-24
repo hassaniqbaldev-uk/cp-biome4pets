@@ -5,7 +5,6 @@ namespace App\Filament\Resources\PetResource\Pages;
 use App\Filament\Resources\ClientResource;
 use App\Filament\Resources\PetResource;
 use App\Models\Pet;
-use App\Support\AdminFormatting;
 use Filament\Actions;
 use Filament\Infolists\Components\Grid;
 use Filament\Infolists\Components\Section;
@@ -88,12 +87,11 @@ class EditPet extends EditRecord implements HasInfolists
                             TextEntry::make('sex')
                                 ->placeholder('—'),
                             TextEntry::make('date_of_birth')
-                                ->label('Date of birth')
+                                ->label('Year of birth')
                                 ->placeholder('—')
-                                ->state(fn (Pet $record): ?string => $record->date_of_birth
-                                    ? $record->date_of_birth->format(AdminFormatting::DATE)
-                                        . ($record->ageLabel() ? ' · ' . $record->ageLabel() : '')
-                                    : null),
+                                // Year-only now (owners often don't know the exact
+                                // date); existing dated pets still show their year.
+                                ->state(fn (Pet $record): ?string => $record->birthYearLabel()),
                             TextEntry::make('diet')
                                 ->placeholder('—'),
                             TextEntry::make('latest_weight')
