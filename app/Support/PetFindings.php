@@ -20,6 +20,7 @@ class PetFindings
     {
         return self::build([
             'pet_name' => $report->pet?->name,
+            'sex' => $report->pet?->sex,
             'owner_name' => $report->petClient?->name,
             // Part 2: the notes history AS OF this report's date (report_date is
             // proxied from the linked test; collected_at backs it up).
@@ -45,6 +46,15 @@ class PetFindings
 
         // The app is dog-only today.
         $findings['species'] = 'dog';
+
+        // Pet sex + an explicit pronoun instruction. The plan-copy generator (the
+        // recommendation/tips text) runs as a SEPARATE OpenAI call from the report
+        // interpretations, so it must carry its own pronoun guidance or the tips
+        // drift to the wrong gender. Emitting pronoun_guidance INTO the findings
+        // means it reaches the model even if the system prompt is admin-overridden.
+        // Unknown/blank sex ⇒ guidance says use the name or they/their, never guess.
+        $findings['sex'] = PetPronouns::normalise($data['sex'] ?? null) ?? 'unknown';
+        $findings['pronoun_guidance'] = PetPronouns::instruction($data['sex'] ?? null);
 
         if (filled($data['owner_name'] ?? null)) {
             $findings['owner_name'] = $data['owner_name'];

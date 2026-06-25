@@ -78,10 +78,14 @@ class OptionalProductDiscountTest extends TestCase
 
         $web = view('report.show', ['report' => $this->makeReportWithOptionalProduct($kit)])->render();
 
-        $this->assertStringContainsString(
-            '£180, or £126 with the 6-month subscription discount (30% off)',
-            $web,
-        );
+        // Discounted price (£126) shown prominently; full price (£180) as the
+        // struck-through "normally" was-price. Both derived from price + discount.
+        $this->assertStringContainsString('£126', $web);
+        $this->assertStringContainsString('normally £180', $web);
+        $this->assertStringContainsString('with the 6-month subscription discount (30% off)', $web);
+        // £126 must be the prominent figure (large/bold span), £180 the struck one.
+        $this->assertMatchesRegularExpression('/font-size:22px;[^>]*font-weight:800;">£126</', $web);
+        $this->assertMatchesRegularExpression('/text-decoration:line-through;[^>]*">normally £180</', $web);
     }
 
     public function test_discount_derives_from_each_products_own_price_not_a_fixed_string(): void
@@ -94,11 +98,11 @@ class OptionalProductDiscountTest extends TestCase
 
         $web = view('report.show', ['report' => $this->makeReportWithOptionalProduct($product)])->render();
 
-        $this->assertStringContainsString(
-            '£50, or £40 with the 6-month subscription discount (20% off)',
-            $web,
-        );
-        // The old hardcoded figures must NOT appear for a non-retest product.
+        // £40 prominent, £50 as the "normally" was-price, 20% derived — not hardcoded.
+        $this->assertStringContainsString('£40', $web);
+        $this->assertStringContainsString('normally £50', $web);
+        $this->assertStringContainsString('with the 6-month subscription discount (20% off)', $web);
+        // The retest kit's figures must NOT appear for a non-retest product.
         $this->assertStringNotContainsString('£126', $web);
         $this->assertStringNotContainsString('30% off', $web);
     }

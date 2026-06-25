@@ -2,6 +2,7 @@
 
 namespace App\Filament\Forms;
 
+use App\Filament\Forms\Components\BreedAutocomplete;
 use App\Models\Pet;
 use Closure;
 use Filament\Forms;
@@ -24,6 +25,24 @@ class PetProfileFields
 
     /** How far back the year-of-birth dropdown reaches from the current year. */
     public const BIRTH_YEAR_RANGE = 30;
+
+    /**
+     * Breed field — shared across every pet form. A custom type-or-pick combobox
+     * (App\Filament\Forms\Components\BreedAutocomplete): focus shows ALL managed
+     * breeds, typing filters them, and the user can either pick an existing breed or
+     * keep typing a brand-new one in the SAME field — no popup, no "+", no separate
+     * create step. Full control over focus/filter, unlike the browser datalist.
+     *
+     * The value is a plain breed STRING bound to the form like any field, so it
+     * saves to pets.breed and pre-fills on edit. New breeds are folded into the
+     * lookup table case-insensitively by the Pet "saved" hook (findOrCreateByName).
+     */
+    public static function breed(): BreedAutocomplete
+    {
+        return BreedAutocomplete::make('breed')
+            ->label('Breed')
+            ->helperText('Start typing to pick an existing breed, or just type a new one.');
+    }
 
     /**
      * Year-of-birth dropdown — shared across every pet form. Owners often don't

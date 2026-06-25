@@ -111,6 +111,24 @@ class SubscribeInterstitialTest extends TestCase
         $res->assertDontSee('Dietary changes');
     }
 
+    public function test_social_proof_shows_customer_count_not_a_star_rating(): void
+    {
+        $report = $this->makeReport($this->makePlan());
+
+        $res = $this->get('/report/' . $report->public_token . '/subscribe');
+
+        // Customer-count framing (count falls back to the "1,000+" default).
+        $res->assertOk()
+            ->assertSee('Join', false)
+            ->assertSee('1,000+')
+            ->assertSee('Happy Pet Owners');
+
+        // No star-rating / review-score framing.
+        $res->assertDontSee('★', false)
+            ->assertDontSee('reviews')
+            ->assertDontSee('4.9');
+    }
+
     public function test_cta_uses_live_url_not_the_frozen_snapshot(): void
     {
         $report = $this->makeReport($this->makePlan(self::LIVE_URL));

@@ -247,8 +247,7 @@ class ReportResource extends Resource
                                     Forms\Components\TextInput::make('name')
                                         ->required()
                                         ->maxLength(255),
-                                    Forms\Components\TextInput::make('breed')
-                                        ->maxLength(255),
+                                    \App\Filament\Forms\PetProfileFields::breed(),
                                     \App\Filament\Forms\PetProfileFields::yearOfBirth(),
                                     Forms\Components\Select::make('sex')
                                         ->options([
@@ -370,6 +369,11 @@ class ReportResource extends Resource
                                             'species_richness' => $test->species_richness,
                                             'dysbiosis_score' => $test->dysbiosis_score,
                                             'microbiome_classification' => $test->microbiome_classification,
+                                            // The pet's specific bacteria (Stage 1 retention). Fed to the
+                                            // prompt as fixed facts; also the validator's allowed-taxa
+                                            // whitelist. Matches createReportFromTest/regenerateReport so
+                                            // all generation paths behave identically.
+                                            'top_taxa' => $test->csv_data['top_taxa'] ?? [],
                                         ];
                                         $genError = null;
                                         $interp = ReportGeneration::interpretationColumns(
@@ -402,6 +406,8 @@ class ReportResource extends Resource
                                             'species_richness' => $test->species_richness,
                                             'dysbiosis_score' => $test->dysbiosis_score,
                                             'microbiome_classification' => $test->microbiome_classification,
+                                            // Allowed-taxa whitelist for the unknown-taxon guardrail.
+                                            'species' => ReportGeneration::taxaNames($deterministic['top_taxa']),
                                         ], $selection, $genError, ['path' => 'wizard_existing_test', 'test_id' => $test->getKey()]);
                                         $set('needs_review', $verdict['needs_review']);
                                         $set('review_flags', ReportGeneration::reviewFlagsFromVerdict($verdict));
@@ -578,6 +584,9 @@ class ReportResource extends Resource
                                             'species_richness' => $results['species_richness'] ?? null,
                                             'dysbiosis_score' => $results['dysbiosis_score'] ?? null,
                                             'microbiome_classification' => $results['microbiome_classification'] ?? null,
+                                            // Specific bacteria from the freshly-parsed CSV ($results
+                                            // carries top_taxa now). Same wiring as the other three paths.
+                                            'top_taxa' => $results['top_taxa'] ?? [],
                                         ];
                                         $genError = null;
                                         $interpretations = ReportGeneration::interpretationColumns(
@@ -610,6 +619,8 @@ class ReportResource extends Resource
                                             'species_richness' => $results['species_richness'] ?? null,
                                             'dysbiosis_score' => $results['dysbiosis_score'] ?? null,
                                             'microbiome_classification' => $results['microbiome_classification'] ?? null,
+                                            // Allowed-taxa whitelist for the unknown-taxon guardrail.
+                                            'species' => ReportGeneration::taxaNames($deterministic['top_taxa']),
                                         ], $selection, $genError, ['path' => 'wizard_new_csv', 'pet_id' => $get('pet_id')]);
                                         $set('needs_review', $verdict['needs_review']);
                                         $set('review_flags', ReportGeneration::reviewFlagsFromVerdict($verdict));
@@ -1430,8 +1441,12 @@ class ReportResource extends Resource
                     ->sortable(),
                 Tables\Columns\TextColumn::make('status')
                     ->badge()
-                    ->formatStateUsing(fn (?string $state): string => AdminFormatting::reportLabel($state))
-                    ->color(fn (?string $state): string => AdminFormatting::reportColor($state)),
+                    // Derived display status: Draft → Published → Sent. "Sent" is
+                    // computed from the send timestamps (never stored), so it can't
+                    // drift; it supersedes "Published" once delivered to the customer.
+                    ->state(fn (Report $record): string => $record->displayStatus())
+                    ->formatStateUsing(fn (string $state): string => AdminFormatting::reportLabel($state))
+                    ->color(fn (string $state): string => AdminFormatting::reportColor($state)),
                 // Phase 3: only flagged rows show the amber badge; clean rows are blank.
                 Tables\Columns\TextColumn::make('needs_review')
                     ->label('Review')

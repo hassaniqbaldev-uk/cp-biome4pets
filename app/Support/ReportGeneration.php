@@ -85,6 +85,22 @@ class ReportGeneration
     }
 
     /**
+     * Flatten a top_taxa list to just its display names — the allowed-taxa
+     * whitelist for the unknown-taxon guardrail. Tolerates absent/old data
+     * (returns []) so pre-Stage-1 reports behave exactly as before.
+     *
+     * @param  array<int,array{name?:string}>  $topTaxa
+     * @return array<int,string>
+     */
+    public static function taxaNames(array $topTaxa): array
+    {
+        return array_values(array_filter(array_map(
+            fn ($t): string => is_array($t) ? (string) ($t['name'] ?? '') : '',
+            $topTaxa,
+        ), fn (string $n): bool => $n !== ''));
+    }
+
+    /**
      * Fire the product rules for the raw inputs and return the matched catalog
      * product ids + the recommended plan id (both derived from the same triggers).
      *
@@ -193,10 +209,149 @@ class ReportGeneration
             return null;
         }
 
-        return [
+        $flags = [
             'detected_at' => now()->toIso8601String(),
             'issues' => $verdict['issues'],
         ];
+
+        // Durable record of the auto-match outcome: if generation produced a
+        // "no plan auto-matched" flag, remember WHICH one. This is the signal the
+        // live recompute uses to distinguish a later MANUAL plan selection (which
+        // becomes a Super-Admin sanity check) from a normal auto-match. Survives
+        // the flag being rewritten as the admin selects/deselects a plan.
+        if ($origin = self::planOriginFromIssues($verdict['issues'])) {
+            $flags['plan_origin'] = $origin;
+        }
+
+        return $flags;
+    }
+
+    /** The generation-time "no plan auto-matched" code, or null. */
+    protected static function planOriginFromIssues(array $issues): ?string
+    {
+        foreach ($issues as $issue) {
+            if (in_array($issue['code'] ?? '', ['unwell_no_plan', 'plan_unmatched'], true)) {
+                return $issue['code'];
+            }
+        }
+
+        return null;
+    }
+
+    /** Review-flag codes whose condition an ADMIN EDIT can resolve (plan picked,
+     *  score corrected), so they are re-derived live on save. Everything else
+     *  (band/number/taxon/banned/generation/empty) depends on the AI prose or a
+     *  transient generation event and is preserved — refreshed only by regenerate. */
+    public const LIVE_REFRESH_CODES = [
+        'bad_score_enum',
+        'unwell_no_plan',
+        'plan_unmatched',
+        'manual_plan_review',
+    ];
+
+    /**
+     * Re-evaluate the edit-resolvable review flags against the report's CURRENT
+     * state, so the "needs review" surfaces never go stale after an admin edit.
+     * Fixes the reported bug: the "no plan selected" nag persisted after a plan was
+     * chosen. Two flag families are refreshed; all other recorded issues are kept.
+     *
+     *   PLAN: a report whose results did NOT auto-match a plan (plan_origin marker)
+     *     shows — depending on the CURRENT plan_id —
+     *       • no plan selected  → the original "choose a plan" flag (correct here),
+     *       • plan selected      → "manual plan selected, needs Super Admin review"
+     *         (any plan chosen on a no-auto-match report is, by definition, manual).
+     *     A report that auto-matched normally is never in this family → no flag.
+     *
+     *   SCORES: bad_score_enum is re-checked against the current score_* columns, so
+     *     correcting a bad score in the editor clears it (and introducing one flags).
+     *
+     * needs_review is recomputed from the resulting deterministic issues, but a
+     * report explicitly "Marked as reviewed" stays cleared while its issue set is
+     * unchanged — only a real change (resolve/introduce/transition) re-surfaces it.
+     */
+    public static function recomputeReviewState(Report $report): void
+    {
+        $flags = is_array($report->review_flags) ? $report->review_flags : [];
+        $issues = $flags['issues'] ?? [];
+        $prevCodes = array_column($issues, 'code');
+        sort($prevCodes);
+
+        // Preserve every issue that isn't one of the live-refreshable families.
+        $kept = array_values(array_filter(
+            $issues,
+            fn (array $i): bool => ! in_array($i['code'] ?? '', self::LIVE_REFRESH_CODES, true),
+        ));
+
+        // SCORES — re-derive bad_score_enum from the CURRENT score columns.
+        foreach (ReportQualityValidator::SCORE_FIELDS as $field) {
+            $value = trim((string) ($report->{$field} ?? ''));
+            if (! in_array($value, ReportQualityValidator::VALID_SCORES, true)) {
+                $shown = $value === '' ? '(empty)' : $value;
+                $kept[] = self::issueRow('bad_score_enum', "{$field} = {$shown}");
+            }
+        }
+
+        // PLAN — only for reports that did NOT auto-match a plan (have a plan_origin,
+        // inferred from legacy issues if the marker predates this feature).
+        $origin = $flags['plan_origin'] ?? self::planOriginFromIssues($issues)
+            ?? (in_array('manual_plan_review', $prevCodes, true) ? 'unwell_no_plan' : null);
+
+        if ($origin !== null) {
+            $kept[] = $report->plan_id === null
+                ? self::issueRow($origin, self::planFlagDetail($origin))
+                : self::issueRow('manual_plan_review', self::planFlagDetail('manual_plan_review'));
+        }
+
+        // Rebuild. needs_review respects a prior "Mark as reviewed": keep the stored
+        // value when the issue set is unchanged; otherwise recompute from current
+        // deterministic issues.
+        $newCodes = array_column($kept, 'code');
+        sort($newCodes);
+        $changed = $newCodes !== $prevCodes;
+
+        $deterministic = count(array_filter(
+            $kept,
+            fn (array $i): bool => ($i['tier'] ?? '') === ReportQualityValidator::TIER_DETERMINISTIC,
+        ));
+
+        $newFlags = null;
+        if ($kept !== []) {
+            $newFlags = [
+                'detected_at' => $flags['detected_at'] ?? now()->toIso8601String(),
+                'issues' => $kept,
+            ];
+            if ($origin !== null) {
+                $newFlags['plan_origin'] = $origin;
+            }
+        }
+
+        $update = ['review_flags' => $newFlags];
+        if ($changed) {
+            $update['needs_review'] = $deterministic > 0;
+        }
+
+        $report->update($update);
+    }
+
+    /** A deterministic-warning issue row in the stored review_flags shape. */
+    protected static function issueRow(string $code, string $detail): array
+    {
+        return [
+            'code' => $code,
+            'severity' => ReportQualityValidator::SEVERITY_WARNING,
+            'tier' => ReportQualityValidator::TIER_DETERMINISTIC,
+            'detail' => $detail,
+        ];
+    }
+
+    /** Current-state detail text for a plan flag. */
+    protected static function planFlagDetail(string $code): string
+    {
+        return match ($code) {
+            'manual_plan_review' => 'A plan was selected manually after no plan auto-matched — a Super Admin should review the manual selection.',
+            'plan_unmatched' => 'Product rules fired but no plan is selected — choose one manually before publishing.',
+            default => 'The pet looks imbalanced but no plan is selected — choose one manually before publishing.',
+        };
     }
 
     /**
@@ -219,6 +374,9 @@ class ReportGeneration
                 'species_richness' => $test->species_richness,
                 'dysbiosis_score' => $test->dysbiosis_score,
                 'microbiome_classification' => $test->microbiome_classification,
+                // The pet's specific bacteria (Stage 1 retention). Fed to the prompt
+                // as fixed facts and used as the validator's allowed-taxa whitelist.
+                'top_taxa' => $test->csv_data['top_taxa'] ?? [],
             ];
             $genError = null;
             $interp = self::interpretationColumns($test->phylum_data ?? [], $test->diversity_score, $pet, $asOf, $genError, $deterministic);
@@ -232,6 +390,8 @@ class ReportGeneration
                 'species_richness' => $test->species_richness,
                 'dysbiosis_score' => $test->dysbiosis_score,
                 'microbiome_classification' => $test->microbiome_classification,
+                // Allowed-taxa whitelist for the unknown-taxon guardrail.
+                'species' => self::taxaNames($deterministic['top_taxa'] ?? []),
             ], $selection, $genError, ['path' => 'generate_from_test', 'test_id' => $test->getKey()]);
 
             $report = Report::create(array_merge($interp, [
@@ -294,6 +454,7 @@ class ReportGeneration
             'species_richness' => $test->species_richness,
             'dysbiosis_score' => $test->dysbiosis_score,
             'microbiome_classification' => $test->microbiome_classification,
+            'top_taxa' => $test->csv_data['top_taxa'] ?? [],
         ];
 
         $genError = null;
@@ -314,6 +475,7 @@ class ReportGeneration
             'species_richness' => $test->species_richness,
             'dysbiosis_score' => $test->dysbiosis_score,
             'microbiome_classification' => $test->microbiome_classification,
+            'species' => self::taxaNames($deterministic['top_taxa'] ?? []),
         ], $selection, $genError, ['path' => 'bulk_regenerate', 'report_id' => $report->getKey()]);
 
         $report->update(array_merge($interp, [

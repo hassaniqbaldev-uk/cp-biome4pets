@@ -30,6 +30,20 @@ class Pet extends Model
         'is_large_breed' => 'boolean',
     ];
 
+    protected static function booted(): void
+    {
+        // Keep the breed suggestion list comprehensive: whenever a pet is saved
+        // with a breed, make sure it's in the breeds lookup table (case-insensitive,
+        // so it dedups). This is purely additive — it never changes the pet's own
+        // breed string — and covers every entry path, not just the autocomplete's
+        // "add new" button. firstOrCreate makes it idempotent and cheap.
+        static::saved(function (Pet $pet): void {
+            if (filled($pet->breed)) {
+                Breed::findOrCreateByName($pet->breed);
+            }
+        });
+    }
+
     public function client(): BelongsTo
     {
         // withTrashed: a pet whose client was soft-deleted (we don't cascade) must

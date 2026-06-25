@@ -152,10 +152,11 @@
                 <span class="sub-chip">✓ Secure checkout</span>
             </div>
 
-            {{-- Reviews (admin-editable in Settings → Plans / Generation → Reviews) --}}
-            <div style="display:flex; align-items:center; gap:10px; margin-bottom:18px;">
-                <span style="color:#F5A623; font-size:18px; letter-spacing:2px;">★★★★★</span>
-                <span style="font-size:14px; color:#55505A;"><b class="text-navy">{{ $reviewRating }}</b> · from {{ $reviewCount }} reviews</span>
+            {{-- Social proof: the customer COUNT, not a star rating (client asked to
+                 show how many pet owners, not a review score). The count is
+                 admin-editable in Settings → Plans / Generation → Reviews. --}}
+            <div style="display:flex; align-items:center; gap:8px; margin-bottom:18px;">
+                <span style="font-size:14px; color:#55505A;">Join <b class="text-navy">{{ $reviewCount }}</b> Happy Pet Owners</span>
             </div>
 
             {{-- CTA — same tab (this is the checkout); clicking goes immediately,

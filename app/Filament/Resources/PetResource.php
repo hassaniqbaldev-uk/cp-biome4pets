@@ -55,8 +55,7 @@ class PetResource extends Resource
                         Forms\Components\TextInput::make('name')
                             ->required()
                             ->maxLength(255),
-                        Forms\Components\TextInput::make('breed')
-                            ->maxLength(255),
+                        \App\Filament\Forms\PetProfileFields::breed(),
                         \App\Filament\Forms\PetProfileFields::yearOfBirth(),
                         Forms\Components\Select::make('sex')
                             ->options([

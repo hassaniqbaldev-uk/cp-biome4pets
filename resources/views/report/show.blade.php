@@ -801,12 +801,20 @@
                                                 @if(! is_null($catalog?->price))
                                                     @if($isPlanIncluded && $subAvailable && filled($subPrice))
                                                         <div style="font-size:14px; color:#55505A; margin:2px 0 12px; line-height:1.5;"><b style="color:#55505A;">£{{ number_format($catalog->price, 2) }}</b> individually <span style="color:#4654A4; font-weight:600;">· {{ $subPrice }} on the plan{{ $savingLine ? ' ('.$savingLine.')' : '' }}</span></div>
+                                                    @elseif(! is_null($subDiscounted))
+                                                        {{-- Optional add-on with a subscription discount (e.g. the retest
+                                                             kit): show the DISCOUNTED price prominently with the full price
+                                                             as the struck-through "normally" was-price. Both DERIVED from
+                                                             the catalog price + subscription_discount_percent — never
+                                                             hardcoded, so they stay correct if the price/discount changes. --}}
+                                                        <div style="margin:2px 0 12px; line-height:1.4;">
+                                                            <span class="text-navy" style="font-size:22px; font-weight:800;">£{{ \App\Support\ReportContent::num($subDiscounted) }}</span>
+                                                            <span style="font-size:14px; color:#9aa3ad; text-decoration:line-through; margin-left:8px;">normally £{{ \App\Support\ReportContent::num($catalog->price) }}</span>
+                                                            <div style="font-size:13px; color:#4654A4; font-weight:600; margin-top:3px;">with the 6-month subscription discount ({{ $catalog->subscription_discount_percent }}% off)</div>
+                                                        </div>
                                                     @else
                                                         <div style="font-size:14px; color:#55505A; margin:2px 0 12px; font-weight:500;"><b style="color:#55505A;">£{{ number_format($catalog->price, 2) }}</b></div>
                                                     @endif
-                                                @endif
-                                                @if(! is_null($subDiscounted))
-                                                    <div style="font-size:13px; color:#55505A; margin:0 0 12px; line-height:1.5;">£{{ \App\Support\ReportContent::num($catalog->price) }}, or £{{ \App\Support\ReportContent::num($subDiscounted) }} with the 6-month subscription discount ({{ $catalog->subscription_discount_percent }}% off)</div>
                                                 @endif
                                                 @if(filled($product->dose))
                                                     <p class="text-sm" style="margin:5px 0;"><b class="text-navy">Dose:</b> {{ $product->dose }}</p>

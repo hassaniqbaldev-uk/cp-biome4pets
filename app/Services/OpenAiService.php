@@ -30,6 +30,11 @@ Rules for the copy you write:
   - British English spelling (e.g. "fibre", "colonise", "faecal").
   - Warm, clear, plain language for a pet owner. Not clinical, not salesy.
   - Use the pet's name naturally; refer to the owner as "you".
+  - PRONOUNS: follow the input's "pronoun_guidance" field exactly and use the same
+    pronouns CONSISTENTLY across every copy field, including how_it_helps and every
+    tip. If "sex" is female use she/her; if male use he/him; if the sex is unknown
+    or not provided, use the pet's name or neutral they/their and NEVER guess a
+    gender. Never switch a pet's pronouns partway through.
   - Ground how_it_helps in the pet's actual findings passed in input. Reference the
     specific elevated/low taxa or scores this product addresses. If a product's role
     doesn't map to any finding, describe its general benefit for this pet instead.
@@ -284,6 +289,36 @@ PROMPT;
         $bandBlock = "Level assessment (these band verdicts are FIXED — already computed from the exact figures; state each one EXACTLY as given and never re-judge it):\n"
             .implode("\n", $bandLines)."\n";
 
+        // Stage 3: the pet's specific bacteria, retained from THIS pet's CSV (top
+        // taxa by %). These are the ONLY organisms the model may name. Names +
+        // percentages are FIXED FACTS the model may state factually, but it must
+        // NOT judge their level — we hold no reference ranges for them, so any
+        // high/low/overgrowth language is forbidden (the same band-determinism rule
+        // that governs the phyla, applied one rank down). Empty/absent ⇒ no block,
+        // so prompts for pre-retention data are byte-for-byte unchanged.
+        $topTaxa = $deterministic['top_taxa'] ?? [];
+        $taxaBlock = '';
+        if (is_array($topTaxa) && $topTaxa !== []) {
+            $taxaLines = [];
+            foreach ($topTaxa as $t) {
+                if (! is_array($t)) {
+                    continue;
+                }
+                $name = trim((string) ($t['name'] ?? ''));
+                if ($name === '') {
+                    continue;
+                }
+                $rank = trim((string) ($t['rank'] ?? ''));
+                $pct = $t['pct'] ?? null;
+                $taxaLines[] = '- '.$name.($rank !== '' ? ' ('.$rank.')' : '').($pct !== null ? ': '.$pct.'%' : '');
+            }
+            if ($taxaLines !== []) {
+                $taxaBlock = "Notable taxa detected in THIS pet's sample (these are the ONLY specific bacteria you may name; state the names EXACTLY as written and use the percentages as given):\n"
+                    .implode("\n", $taxaLines)."\n"
+                    ."You SHOULD reference the most notable of these taxa BY NAME where it is natural and relevant, especially in the summary and vet_summary, so the report names the specific bacteria actually present in this pet's sample. Mention a meaningful few (the most abundant or noteworthy), not an exhaustive list of all of them, and weave them in naturally rather than dumping a list. Describe them factually (e.g. \"one of the more abundant genera here is Bacteroides, at 12.4%\"). Do NOT characterise any taxon as high, low, elevated, raised, reduced, depleted, overgrown, deficient, abnormal, or normal — you have not been given reference ranges for them, so any such judgement is forbidden.\n";
+            }
+        }
+
         // When a classification is supplied, require the prose to stay consistent
         // with it — without changing tone, scale, or thresholds.
         $coherenceRule = $classification !== ''
@@ -327,6 +362,11 @@ PROMPT;
             ? "Refer to the pet by name (\"{$petName}\") where natural."
             : 'No name was provided, so refer to the pet as "your pet".';
 
+        // Fixed pronoun instruction from the pet's recorded sex — applied to EVERY
+        // field so the prose can't drift gender (e.g. "she" in the summary, "he" in
+        // the tips). Unknown/blank sex ⇒ name or neutral they/their, never guessed.
+        $pronounInstruction = \App\Support\PetPronouns::instruction($petContext['sex'] ?? null);
+
         // Per-section directive suffixes. Each is blank (empty string) unless an
         // admin has set the matching Setting, in which case it becomes a short
         // " Admin guidance for this field: ..." clause appended INLINE to the
@@ -339,13 +379,14 @@ PROMPT;
         $prompt = <<<PROMPT
 You are a veterinary microbiome expert writing for pet owners. Given the following gut microbiome results, provide plain-English interpretations in a friendly, accessible tone.
 
-{$petBlock}{$notesBlock}{$nameInstruction}
+{$petBlock}{$notesBlock}{$nameInstruction} {$pronounInstruction}
 
 Phylum percentages:
 {$phylumList}
 Shannon Diversity Index: {$diversityScore}
 {$deterministicBlock}
 {$bandBlock}
+{$taxaBlock}
 Respond in valid JSON with exactly these keys:
 - "summary": A 4-5 sentence overall summary of the pet's microbiome health, written warmly for the owner, referencing the pet by name when provided and touching on the overall balance and what it means for this pet.{$summarySuffix}
 - "goal": A warm, encouraging goal statement of 2 to 3 sentences (no em dashes) that sets out one clear, concrete goal for this pet based on the diagnostics, such as bringing an out-of-range phylum back toward its healthy range and/or improving diversity over a sensible timeframe like "the coming weeks" or "8 to 12 weeks". Give a little context on what we are aiming for and why it matters for this pet, keeping it focused and not padded. It MUST reference the pet by name when a name is provided.
@@ -371,9 +412,10 @@ Scale meaning:
 - "score_stress_resilience": Assess environmental stress resilience based on the microbiome composition.{$scoresSuffix}
 
 Grounding rules (these are critical and override any temptation to embellish):
+- PRONOUNS: {$pronounInstruction} This applies to EVERY field without exception — the summary, vet_summary, goal, recommended_actions, every per-phylum interpretation and the diversity interpretation. Do not switch pronouns partway through the report.
 - The findings and metrics provided above are FIXED facts. Restate them faithfully and never contradict, embellish, or "improve" them.
 - Do not invent or alter any numbers. When you state a percentage or the diversity score, use exactly the figures provided in the data above; do not round them differently, estimate, or infer values that were not given.
-- Only reference the phyla provided in the data above. Do not name specific bacteria, species, or any additional taxa beyond those given to you. This applies especially to the open-prose fields (summary, vet_summary, recommended_actions), where you must not introduce an organism that is not in the data.
+- You may name the phyla provided above and the specific taxa listed in the "Notable taxa detected" section (when that section is present). Do NOT name, invent, or infer ANY organism that is not in those lists — this applies especially to the open-prose fields (summary, vet_summary, recommended_actions). If there is no "Notable taxa detected" section, name only the phyla. Never introduce a bacterium, genus, or species you were not given.
 - Each score_* value must be EXACTLY one of: Very High, High, Medium, Low, with no other text, punctuation, or explanation inside the score field.
 - If you cannot ground a statement in the provided data, omit it rather than inventing or speculating.
 - You must still state the actual figures where a field asks for them: the phylum and diversity fields should state the level/score as instructed. State them accurately using the exact numbers above; do not drop the numbers, just never change them.

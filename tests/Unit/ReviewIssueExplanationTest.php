@@ -16,8 +16,8 @@ class ReviewIssueExplanationTest extends TestCase
     {
         return array_map(fn ($c) => [$c], [
             'generation_failed', 'json_parse_failed', 'empty_output', 'bad_score_enum',
-            'plan_unmatched', 'unwell_no_plan', 'panel_contradiction', 'band_contradiction',
-            'number_contradiction', 'unknown_taxon', 'banned_phrase',
+            'plan_unmatched', 'unwell_no_plan', 'manual_plan_review', 'panel_contradiction',
+            'band_contradiction', 'number_contradiction', 'unknown_taxon', 'banned_phrase',
         ]);
     }
 
@@ -37,9 +37,19 @@ class ReviewIssueExplanationTest extends TestCase
     {
         $text = AdminFormatting::reviewIssueExplanation('unwell_no_plan');
 
-        $this->assertStringContainsString('imbalance', $text);          // what happened
-        $this->assertStringContainsString('no plan was auto-selected', $text); // why
-        $this->assertStringContainsString('choose an appropriate plan', $text); // what to do
+        $this->assertStringContainsString('imbalance', $text);                 // what happened
+        $this->assertStringContainsString('no plan is currently selected', $text); // current-state why
+        $this->assertStringContainsString('Choose an appropriate plan', $text);    // what to do
+        $this->assertStringContainsString('Selecting a plan clears this flag', $text); // it self-resolves
+    }
+
+    public function test_manual_plan_review_explanation_frames_the_super_admin_check(): void
+    {
+        $text = AdminFormatting::reviewIssueExplanation('manual_plan_review');
+
+        $this->assertStringContainsString('did not auto-match', $text);
+        $this->assertStringContainsString('manually selected a plan', $text);
+        $this->assertStringContainsString('Super Admin', $text);
     }
 
     public function test_unknown_code_has_no_explanation(): void

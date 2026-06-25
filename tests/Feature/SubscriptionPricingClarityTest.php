@@ -102,9 +102,11 @@ class SubscriptionPricingClarityTest extends TestCase
 
         $web = view('report.show', ['report' => $report])->render();
 
-        // Keeps its own pricing exactly as-is...
-        $this->assertStringContainsString('£180.00', $web);
-        $this->assertStringContainsString('£180, or £126 with the 6-month subscription discount (30% off)', $web);
+        // Keeps its own pricing: discounted £126 prominent, full £180 as the
+        // struck-through "normally" was-price, the 30% derived from its own discount.
+        $this->assertStringContainsString('£126', $web);
+        $this->assertStringContainsString('normally £180', $web);
+        $this->assertStringContainsString('with the 6-month subscription discount (30% off)', $web);
 
         // ...and must NEVER carry the £29.75/mo plan line (no product is plan-included here).
         $this->assertStringNotContainsString('on the plan', $web);

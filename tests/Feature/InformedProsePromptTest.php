@@ -61,5 +61,46 @@ class InformedProsePromptTest extends TestCase
         $this->assertStringNotContainsString('Dysbiosis pattern score', $bare);
         $this->assertStringNotContainsString('Overall microbiome classification', $bare);
         $this->assertStringNotContainsString('Keep the WHOLE interpretation consistent with it', $bare);
+        // Stage 3: no retained taxa ⇒ no taxa block at all. (The whitelist lock
+        // line still names the section generically; the BLOCK heading does not appear.)
+        $this->assertStringNotContainsString("Notable taxa detected in THIS pet's sample", $bare);
+        $this->assertStringNotContainsString('Describe these taxa factually', $bare);
+    }
+
+    public function test_prompt_feeds_top_taxa_and_relaxes_lock_to_a_whitelist(): void
+    {
+        $prompt = (new OpenAiService())->buildInterpretationsPrompt(
+            ['Fusobacteria' => 54.4, 'Firmicutes' => 26.2],
+            2.89,
+            ['name' => 'Biscuit'],
+            ['top_taxa' => [
+                ['name' => 'Fusobacterium', 'rank' => 'genus', 'pct' => 53.78],
+                ['name' => 'Fusobacterium perfoetens', 'rank' => 'species', 'pct' => 8.47],
+            ]],
+        );
+
+        // (a) The pet's specific taxa are fed as fixed facts: names + percentages.
+        $this->assertStringContainsString("Notable taxa detected in THIS pet's sample", $prompt);
+        $this->assertStringContainsString('Fusobacterium perfoetens (species): 8.47%', $prompt);
+        $this->assertStringContainsString('Fusobacterium (genus): 53.78%', $prompt);
+
+        // (b) The lock is now a WHITELIST (name only what you were given), not a ban.
+        $this->assertStringContainsString('the specific taxa listed in the "Notable taxa detected" section', $prompt);
+        $this->assertStringContainsString('Do NOT name, invent, or infer ANY organism that is not in those lists', $prompt);
+        // The old blanket ban wording is gone.
+        $this->assertStringNotContainsString('Do not name specific bacteria, species, or any additional taxa', $prompt);
+
+        // (c) The prose is now ACTIVELY asked to reference the notable taxa by name
+        //     (strengthened from "may name" → "should reference"), so names reliably appear.
+        $this->assertStringContainsString('You SHOULD reference the most notable of these taxa BY NAME', $prompt);
+        $this->assertStringContainsString('especially in the summary and vet_summary', $prompt);
+
+        // (d) CRITICAL: factual only — no verdict words for taxa (no reference ranges).
+        $this->assertStringContainsString('Describe them factually', $prompt);
+        $this->assertStringContainsString('Do NOT characterise any taxon as high, low, elevated', $prompt);
+
+        // The phylum band determinism is UNCHANGED — its fixed verdict still appears.
+        $this->assertStringContainsString('which is HIGH', $prompt); // Fusobacteria 54.4% > high band 25
+        $this->assertStringContainsString('state each one EXACTLY as given and never re-judge it', $prompt);
     }
 }

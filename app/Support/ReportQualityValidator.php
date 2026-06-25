@@ -205,14 +205,22 @@ class ReportQualityValidator
             $issues = array_merge($issues, self::checkBandContradictions($interp, $context));
         }
 
+        // 9. Unknown-taxon guardrail (DETERMINISTIC — drives needs_review). The
+        //    safety net for the relaxed prompt lock: the AI may name ONLY the
+        //    phyla + the specific taxa it was handed (this pet's top_taxa). A
+        //    taxa-like token in the prose that is NOT in that whitelist is treated
+        //    as an invented/hallucinated organism and flags the report for review.
+        //    Runs in the deterministic tier so it fires regardless of the heuristic
+        //    master toggle.
+        if (self::ENABLE_UNKNOWN_TAXON && ! $allEmpty) {
+            $issues = array_merge($issues, self::checkUnknownTaxa($interp, $context));
+        }
+
         // ───────────────────────── HEURISTIC (log-only) ─────────────────────────
         // Skipped entirely on empty output (nothing to scan).
         if (self::HEURISTICS_ENABLED && ! $allEmpty) {
             if (self::ENABLE_NUMBER_CONTRADICTION) {
                 $issues = array_merge($issues, self::checkNumberContradictions($interp, $context));
-            }
-            if (self::ENABLE_UNKNOWN_TAXON) {
-                $issues = array_merge($issues, self::checkUnknownTaxa($interp, $context));
             }
             if (self::ENABLE_BANNED_PHRASE) {
                 $issues = array_merge($issues, self::checkBannedPhrases($interp));
@@ -369,10 +377,30 @@ class ReportQualityValidator
     }
 
     /**
-     * Spot taxa-like tokens in the open-prose fields that aren't in the known set
-     * (phylum keys + any provided species). NOTE: species are not retained in
-     * csv_data today, so the known set is usually just the phyla — this is
-     * expected to over-flag and is precisely why the check is log-only.
+     * The prose fields where the AI may now name specific bacteria. Scanned by the
+     * unknown-taxon guardrail for organisms outside this pet's whitelist.
+     */
+    public const TAXON_SCAN_FIELDS = [
+        'ai_summary',
+        'vet_summary',
+        'recommended_actions',
+        'ai_bacteroidetes_interpretation',
+        'ai_firmicutes_interpretation',
+        'ai_fusobacteria_interpretation',
+        'ai_proteobacteria_interpretation',
+        'ai_diversity_interpretation',
+    ];
+
+    /**
+     * DETERMINISTIC guardrail for the relaxed prompt lock. Builds the pet's
+     * allowed-taxa whitelist (phylum keys + the names of the top_taxa the AI was
+     * handed, passed in via context['species']), then scans the prose fields for
+     * taxa-like tokens (capitalised words with a microbial suffix). Any such token
+     * NOT in the whitelist is an organism the AI was never given — i.e. invented —
+     * so it flags the report for review.
+     *
+     * The suffix-based detector (TAXON_SUFFIXES) is deliberately narrow so ordinary
+     * pet names (e.g. "Bella", generic -ella/-ium endings excluded) never match.
      */
     protected static function checkUnknownTaxa(array $interp, array $context): array
     {
@@ -380,6 +408,9 @@ class ReportQualityValidator
         foreach (array_keys($context['phylum_totals'] ?? []) as $phylum) {
             $known[strtolower((string) $phylum)] = true;
         }
+        // context['species'] now carries this pet's retained top_taxa NAMES (genus
+        // rollups + species). Whitelist each word so a multi-word name like
+        // "Fusobacterium perfoetens" clears on either token.
         foreach ($context['species'] ?? [] as $species) {
             foreach (preg_split('/\s+/', strtolower((string) $species)) as $word) {
                 if ($word !== '') {
@@ -392,7 +423,7 @@ class ReportQualityValidator
         $pattern = '/\b([A-Z][a-z]+(?:'.$suffixAlt.'))\b/';
 
         $candidates = [];
-        foreach (['vet_summary', 'recommended_actions'] as $field) {
+        foreach (self::TAXON_SCAN_FIELDS as $field) {
             if (preg_match_all($pattern, (string) ($interp[$field] ?? ''), $m)) {
                 foreach ($m[1] as $token) {
                     if (! isset($known[strtolower($token)])) {
@@ -406,11 +437,16 @@ class ReportQualityValidator
             return [];
         }
 
+        $names = array_keys($candidates);
+        $detail = count($names) === 1
+            ? "The report names \"{$names[0]}\", which was not in this pet's lab data — please verify it wasn't invented."
+            : 'The report names organisms not in this pet\'s lab data: '.implode(', ', $names).' — please verify they were not invented.';
+
         return [self::issue(
             'unknown_taxon',
-            self::SEVERITY_INFO,
-            self::TIER_HEURISTIC,
-            'candidates: '.implode(', ', array_keys($candidates)),
+            self::SEVERITY_WARNING,
+            self::TIER_DETERMINISTIC,
+            $detail,
         )];
     }
 

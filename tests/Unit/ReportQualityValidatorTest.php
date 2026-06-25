@@ -188,16 +188,41 @@ class ReportQualityValidatorTest extends TestCase
         $this->assertFalse($v['needs_review']);
     }
 
-    public function test_unknown_taxon_is_flagged_as_heuristic_only(): void
+    public function test_invented_taxon_is_flagged_deterministically_and_drives_review(): void
     {
+        // Lactobacillus was NOT in this pet's data (ground species == []) → it's an
+        // organism the AI was never given, i.e. invented. The guardrail (now
+        // deterministic) must flag it AND set needs_review.
         $interp = $this->cleanInterp();
         $interp['recommended_actions'] = 'Consider a course that addresses Lactobacillus levels.';
 
         $v = ReportQualityValidator::validate($this->ground(['interpretations' => $interp]));
 
         $this->assertContains('unknown_taxon', $this->codes($v));
+        $this->assertTrue($v['needs_review']);
+        $this->assertGreaterThan(0, $v['deterministic_count']);
+
+        $flag = collect($v['issues'])->firstWhere('code', 'unknown_taxon');
+        $this->assertSame(ReportQualityValidator::TIER_DETERMINISTIC, $flag['tier']);
+        $this->assertSame(ReportQualityValidator::SEVERITY_WARNING, $flag['severity']);
+        $this->assertStringContainsString('Lactobacillus', $flag['detail']);
+        $this->assertStringContainsString('not in this pet', $flag['detail']);
+    }
+
+    public function test_named_taxon_in_the_whitelist_is_not_flagged(): void
+    {
+        // Lactobacillus IS in this pet's retained taxa (passed via species) → the AI
+        // was given it, so naming it must be clean (no flag, no review).
+        $interp = $this->cleanInterp();
+        $interp['vet_summary'] = 'Lactobacillus is one of the more abundant genera here for this pet.';
+
+        $v = ReportQualityValidator::validate($this->ground([
+            'interpretations' => $interp,
+            'species' => ['Lactobacillus acidophilus', 'Fusobacterium perfoetens'],
+        ]));
+
+        $this->assertNotContains('unknown_taxon', $this->codes($v));
         $this->assertFalse($v['needs_review']);
-        $this->assertSame(0, $v['deterministic_count']);
     }
 
     public function test_known_phylum_in_prose_is_not_flagged_as_unknown_taxon(): void
@@ -208,6 +233,20 @@ class ReportQualityValidatorTest extends TestCase
 
         $v = ReportQualityValidator::validate($this->ground(['interpretations' => $interp]));
         $this->assertNotContains('unknown_taxon', $this->codes($v));
+    }
+
+    public function test_pet_name_is_not_mistaken_for_a_taxon(): void
+    {
+        // False-positive guard: a pet named "Bella" (generic -ella ending is
+        // deliberately excluded from the suffix set) must never trip the detector.
+        $interp = $this->cleanInterp();
+        $interp['ai_summary'] = 'Bella has a broadly balanced gut and is doing well.';
+        $interp['vet_summary'] = 'We are pleased with how Bella is progressing.';
+
+        $v = ReportQualityValidator::validate($this->ground(['interpretations' => $interp]));
+
+        $this->assertNotContains('unknown_taxon', $this->codes($v));
+        $this->assertFalse($v['needs_review']);
     }
 
     public function test_banned_phrase_is_flagged_as_heuristic_only(): void

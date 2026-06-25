@@ -423,6 +423,13 @@ class EditReport extends EditRecord
         $this->record->catalogProducts()->sync($syncData);
 
         $this->persistPlanSteps($this->planSteps);
+
+        // Re-evaluate the edit-resolvable review flags against the now-saved state
+        // (plan_id / scores), so the "needs review" surfaces reflect CURRENT state.
+        // Fixes the stale "no plan selected" nag after a plan is chosen, and raises
+        // the "manual plan selected — needs Super Admin review" sanity check.
+        \App\Support\ReportGeneration::recomputeReviewState($this->record->refresh());
+        $this->fillForm();
     }
 
     /**

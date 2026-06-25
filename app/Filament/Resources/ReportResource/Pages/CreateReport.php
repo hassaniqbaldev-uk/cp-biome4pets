@@ -156,6 +156,11 @@ class CreateReport extends CreateRecord
         }
 
         $this->persistPlanSteps($this->planSteps);
+
+        // Keep the review flags consistent with the saved plan/scores — e.g. if the
+        // admin picked a plan in the wizard for a pet that didn't auto-match, raise
+        // the "manual plan selected — needs Super Admin review" flag from the start.
+        \App\Support\ReportGeneration::recomputeReviewState($this->record->refresh());
     }
 
     /**

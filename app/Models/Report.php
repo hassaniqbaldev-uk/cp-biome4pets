@@ -269,6 +269,35 @@ class Report extends Model
             .($message !== '' ? ': '.$message : '');
     }
 
+    /**
+     * Has this report been successfully delivered to the customer via EITHER
+     * channel — Klaviyo or the App (direct SMTP)? A send is only counted when its
+     * recorded result is OK; a failed attempt still stamps the *_last_sent_at
+     * timestamp but must NOT read as "sent".
+     */
+    public function hasBeenSent(): bool
+    {
+        $klaviyoOk = $this->klaviyo_last_sent_at !== null && ! empty($this->klaviyo_last_result['ok']);
+        $appOk = $this->app_last_sent_at !== null && ! empty($this->app_last_result['ok']);
+
+        return $klaviyoOk || $appOk;
+    }
+
+    /**
+     * The status shown to admins: Draft → Published → Sent. "Sent" is DERIVED from
+     * the send timestamps (never stored), so it can't drift from reality — a report
+     * can only be sent once published, so a successful send supersedes "Published"
+     * in the single status column. Returns 'draft' | 'published' | 'sent'.
+     */
+    public function displayStatus(): string
+    {
+        if ($this->hasBeenSent()) {
+            return 'sent';
+        }
+
+        return $this->status === 'published' ? 'published' : 'draft';
+    }
+
     public function client()
     {
         return $this->belongsTo(Client::class)->withTrashed();
