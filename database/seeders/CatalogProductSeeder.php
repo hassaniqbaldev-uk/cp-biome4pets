@@ -8,7 +8,7 @@ use Illuminate\Database\Seeder;
 class CatalogProductSeeder extends Seeder
 {
     /**
-     * The six live shop products the Plans feature references. Plans reference
+     * The live shop products the Plans feature references. Plans reference
      * these by id (the catalogue is the single source of truth for name/price/
      * image), so they must exist before PlanSeeder runs.
      *
@@ -59,6 +59,20 @@ class CatalogProductSeeder extends Seeder
             'url' => 'https://biome4pets.com/products/petbiome-microbiome-test-kit',
             'image_path' => 'https://biome4pets.com/cdn/shop/files/Advanced_Gut_Microbiome_Test.png?v=1779191848',
         ],
+        [
+            // Rosemary-free AMR, used only by the three sensitive plan VARIANTS
+            // (swapped in for the standard 'PetBiome AMR' via the builder UI). It
+            // carries NO trigger below, so it never auto-matches into a report.
+            'name' => 'PetBiome AMR (Rosemary Free)',
+            'price' => 35.00,
+            'url' => 'https://biome4pets.com/products/petbiome-amr-rosemary-free',
+            'image_path' => 'https://biome4pets.com/cdn/shop/files/New_shopify_amr_RF.png',
+            'description' => 'It is a combination of the anti-microbial bioactive polyphenols found in oregano, '
+                .'thyme, berberine, and a soil-based probiotic. Bacillus subtilis, Bacillus coagulins, Bacillus '
+                .'clausii. Lactobacillus, Bifidobacteria. Its use and reasons for supplementing can be found on '
+                .'the veterinary summary page of your report. Feed for two months, it is also possible to feed '
+                .'AMR continuously.',
+        ],
     ];
 
     /**
@@ -91,6 +105,9 @@ class CatalogProductSeeder extends Seeder
                     'subscription_discount_percent' => $product['subscription_discount_percent'] ?? null,
                     'url' => $product['url'],
                     'image_path' => $product['image_path'],
+                    // Only the AMR (Rosemary Free) product carries a description; the
+                    // others are null (unchanged from before).
+                    'description' => $product['description'] ?? null,
                     'is_active' => true,
                 ],
             );

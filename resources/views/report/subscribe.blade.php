@@ -1,9 +1,10 @@
 {{--
-    Subscribe interstitial. Server-rendered, fully dynamic from the LIVE plan
-    (ReportController@subscribe). Frames the wait as "preparing your plan" with a
-    progress bar, then AUTO-REDIRECTS to the plan's Loop checkout
-    (plan->subscription_url) after 15s. The CTA still hands off immediately on
-    click. Compacted for mobile (no header bar, thumbnail-beside-text layout).
+    Subscribe interstitial. Server-rendered from the LIVE plan for its display
+    details (ReportController@subscribe). Frames the wait as "preparing your plan"
+    with a progress bar, then AUTO-REDIRECTS to the report's resolved Loop checkout
+    ($checkoutUrl = the variant-or-base url frozen on the report, with the live plan
+    url as fallback) after 15s. The CTA still hands off immediately on click.
+    Compacted for mobile (no header bar, thumbnail-beside-text layout).
 --}}
 <!DOCTYPE html>
 <html lang="en">
@@ -165,7 +166,7 @@
                  NOTE: the Loop checkout URL is left CLEAN (no UTMs) so nothing can
                  interfere with Loop/Shopify checkout. The report→interstitial link
                  carries the UTM attribution instead (see show.blade.php subscribeHref). --}}
-            <a href="{{ $plan->subscription_url }}" id="sub-cta" class="sub-cta bg-teal text-white" style="background:#4654A4;">You'll be redirected automatically &rarr;</a>
+            <a href="{{ $checkoutUrl }}" id="sub-cta" class="sub-cta bg-teal text-white" style="background:#4654A4;">You'll be redirected automatically &rarr;</a>
 
             {{-- Loop-match honesty --}}
             <p style="font-size:12px; color:#9aa3ad; text-align:center; margin:10px 0 0;">Your exact basket and total are confirmed at checkout.</p>
@@ -184,7 +185,7 @@
          Reduced-motion users skip the animation but are still redirected. --}}
     <script>
         (function () {
-            var target = @json($plan->subscription_url);
+            var target = @json($checkoutUrl);
             if (!target) return; // Guard: no checkout URL → never auto-redirect.
 
             var DURATION = 15000;

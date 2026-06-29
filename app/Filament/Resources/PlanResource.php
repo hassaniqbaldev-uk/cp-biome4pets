@@ -5,6 +5,7 @@ namespace App\Filament\Resources;
 use App\Filament\Resources\PlanResource\Pages;
 use App\Models\CatalogProduct;
 use App\Models\Plan;
+use App\Models\PlanVariant;
 use App\Models\ProductRule;
 use App\Models\Setting;
 use Filament\Forms;
@@ -12,6 +13,7 @@ use Filament\Forms\Form;
 use Filament\Resources\Resource;
 use Filament\Tables;
 use Filament\Tables\Table;
+use Illuminate\Support\HtmlString;
 
 class PlanResource extends Resource
 {
@@ -194,8 +196,8 @@ class PlanResource extends Resource
                                             ->maxLength(255),
                                         Forms\Components\TextInput::make('quantity')
                                             ->label('Quantity')
-                                            // Text, not numeric: holds "3 (one tub per month)".
-                                            ->placeholder('e.g. 3 (one tub per month)')
+                                            // Text, not numeric: holds "3 (one pouch per month)".
+                                            ->placeholder('e.g. 3 (one pouch per month)')
                                             ->maxLength(255),
                                         Forms\Components\TextInput::make('dose')
                                             ->label('Dose')
@@ -225,7 +227,178 @@ class PlanResource extends Resource
                             ->defaultItems(0)
                             ->columnSpanFull(),
                     ]),
+
+                static::conditionVariantsSection(),
             ]);
+    }
+
+    /**
+     * The "Condition Variants" section: per-plan overrides keyed by a pet condition
+     * (sensitive / large / both). Each variant can override the checkout link and
+     * the bundle-price display, and swap individual plan products (e.g. AMR → AMR
+     * Rosemary-Free) with optional dose/quantity/duration overrides. A plan with no
+     * variants behaves exactly as before — this section is simply left empty.
+     * Persistence + validation live in the ManagesPlanVariants trait on the pages.
+     */
+    public static function conditionVariantsSection(): Forms\Components\Section
+    {
+        return Forms\Components\Section::make('Condition Variants')
+            ->description('Optional. Override this plan for a flagged pet: swap products, point to a different Loop checkout, and/or adjust the displayed price. A pet with no flags (or a plan with no variants) always gets the base plan above.')
+            ->schema([
+                Forms\Components\Repeater::make('variants')
+                    ->label('Variants')
+                    ->schema([
+                        Forms\Components\Select::make('condition')
+                            ->label('Condition')
+                            ->options(PlanVariant::CONDITION_LABELS)
+                            ->required()
+                            ->native(false)
+                            ->helperText('One variant per condition per plan. "Sensitive + Large" is the dedicated combined variant (a both-flagged pet needs its own link/dosage).'),
+                        Forms\Components\Toggle::make('enabled')
+                            ->label('Enabled')
+                            ->default(true)
+                            ->helperText('Disabled variants are ignored during resolution (treated as not defined).'),
+                        Forms\Components\TextInput::make('subscription_url')
+                            ->label('Checkout link override')
+                            ->url()
+                            ->maxLength(500)
+                            ->columnSpanFull()
+                            ->helperText('The pre-built Loop checkout link for this variant. Leave blank to inherit the base plan\'s link. Combined conditions need their own dedicated Loop link.'),
+
+                        // Product swaps — the core of a variant.
+                        Forms\Components\Repeater::make('product_overrides')
+                            ->label('Product swaps')
+                            ->schema([
+                                Forms\Components\Select::make('from_catalog_product_id')
+                                    ->label('Replace (a product used in this plan)')
+                                    ->options(fn (Forms\Get $get): array => static::planStepProductOptions($get))
+                                    ->searchable()
+                                    ->required()
+                                    ->native(false),
+                                Forms\Components\Select::make('to_catalog_product_id')
+                                    ->label('With')
+                                    ->options(fn (): array => CatalogProduct::active()->orderBy('name')->pluck('name', 'id')->all())
+                                    ->searchable()
+                                    ->required()
+                                    ->native(false),
+                                Forms\Components\TextInput::make('dose')
+                                    ->label('Dose override')
+                                    ->maxLength(255)
+                                    ->placeholder('Blank = inherit base'),
+                                Forms\Components\TextInput::make('quantity')
+                                    ->label('Quantity override')
+                                    ->maxLength(255)
+                                    ->placeholder('Blank = inherit base'),
+                                Forms\Components\TextInput::make('duration')
+                                    ->label('Duration override')
+                                    ->maxLength(255)
+                                    ->placeholder('Blank = inherit base'),
+                            ])
+                            ->itemLabel(fn (array $state): ?string => filled($state['from_catalog_product_id'] ?? null)
+                                ? (CatalogProduct::find($state['from_catalog_product_id'])?->name ?? 'Product')
+                                    .' → '.(CatalogProduct::find($state['to_catalog_product_id'] ?? null)?->name ?? '…')
+                                : 'New swap')
+                            ->addActionLabel('Add product swap')
+                            ->defaultItems(0)
+                            ->reorderable(false)
+                            ->columnSpanFull()
+                            ->helperText('Swap a plan product for a variant-specific one. Dose / quantity / duration are optional overrides — blank inherits the base step\'s value.'),
+
+                        // Advanced: bundle-price display overrides (collapsed — the
+                        // common variant is just a link + swap).
+                        Forms\Components\Section::make('Price overrides (optional)')
+                            ->description('Only if this variant\'s bundle price differs. Blank = inherit the base plan.')
+                            ->collapsed()
+                            ->columns(2)
+                            ->schema([
+                                Forms\Components\TextInput::make('subscription_price')->label('Subscription Price')->maxLength(255),
+                                Forms\Components\TextInput::make('subscription_full_price')->label('Full Price (struck)')->maxLength(255),
+                                Forms\Components\TextInput::make('subscription_billing_note')->label('Billing Note')->maxLength(255),
+                                Forms\Components\TextInput::make('subscription_saving_label')->label('Saving Label')->maxLength(255),
+                            ]),
+
+                        // Read-only "effective result" preview.
+                        Forms\Components\Placeholder::make('variant_preview')
+                            ->label('Effective result for this variant')
+                            ->columnSpanFull()
+                            ->content(fn (Forms\Get $get): HtmlString => static::variantPreviewHtml($get)),
+                    ])
+                    ->itemLabel(fn (array $state): ?string => PlanVariant::CONDITION_LABELS[$state['condition'] ?? null] ?? 'New variant')
+                    ->addActionLabel('Add variant')
+                    ->defaultItems(0)
+                    ->reorderable(false)
+                    ->columnSpanFull(),
+            ]);
+    }
+
+    /**
+     * Options for a swap's "from" select: the catalogue products actually used in
+     * this plan's steps (read from the live form state), so admins swap real plan
+     * products. Falls back to all active products when no steps are present yet (so
+     * the field is never empty/unusable); a swap for a non-plan product is caught by
+     * save-time validation.
+     *
+     * @return array<int,string>
+     */
+    public static function planStepProductOptions(Forms\Get $get): array
+    {
+        // Up out of: product_overrides item → product_overrides → variants item →
+        // variants → (root). Four levels to reach the plan-level `steps`.
+        $steps = (array) ($get('../../../../steps') ?? []);
+
+        $ids = collect($steps)
+            ->flatMap(fn ($step): array => collect($step['products'] ?? [])->pluck('catalog_product_id')->all())
+            ->filter()
+            ->map(fn ($id): int => (int) $id)
+            ->unique()
+            ->values();
+
+        if ($ids->isEmpty()) {
+            return CatalogProduct::active()->orderBy('name')->pluck('name', 'id')->all();
+        }
+
+        return CatalogProduct::whereIn('id', $ids)->orderBy('name')->pluck('name', 'id')->all();
+    }
+
+    /**
+     * The per-row "Effective result" preview: the checkout link that would be used
+     * (variant override or inherited base) and the from→to product swaps, resolved
+     * to catalogue names — so an admin can eyeball it against the intended Loop bundle.
+     */
+    public static function variantPreviewHtml(Forms\Get $get): HtmlString
+    {
+        $variantUrl = $get('subscription_url');
+        $baseUrl = $get('../../subscription_url');
+        $link = filled($variantUrl) ? $variantUrl : ($baseUrl ?: '(no link set)');
+        $linkSource = filled($variantUrl) ? 'variant override' : 'inherits base plan';
+
+        $rows = '';
+        foreach ((array) $get('product_overrides') as $ov) {
+            if (blank($ov['from_catalog_product_id'] ?? null)) {
+                continue;
+            }
+            $from = CatalogProduct::find($ov['from_catalog_product_id'])?->name ?? '—';
+            $to = CatalogProduct::find($ov['to_catalog_product_id'] ?? null)?->name ?? '…';
+            $extra = collect([
+                filled($ov['dose'] ?? null) ? 'dose: '.$ov['dose'] : null,
+                filled($ov['quantity'] ?? null) ? 'qty: '.$ov['quantity'] : null,
+                filled($ov['duration'] ?? null) ? 'duration: '.$ov['duration'] : null,
+            ])->filter()->implode(' · ');
+            $rows .= '<li>'.e($from).' &rarr; <strong>'.e($to).'</strong>'
+                .($extra !== '' ? ' <span style="color:#9ca3af;">('.e($extra).')</span>' : '').'</li>';
+        }
+        if ($rows === '') {
+            $rows = '<li style="color:#9ca3af;">No product swaps — base products used.</li>';
+        }
+
+        return new HtmlString(
+            '<div style="font-size:.8rem;line-height:1.5;">'
+            .'<div><strong>Checkout link:</strong> '.e($link)
+            .' <span style="color:#9ca3af;">('.$linkSource.')</span></div>'
+            .'<div style="margin-top:.4rem;"><strong>Products after swap:</strong></div>'
+            .'<ul style="margin:.2rem 0 0;padding-left:1.1rem;list-style:disc;">'.$rows.'</ul>'
+            .'</div>'
+        );
     }
 
     public static function table(Table $table): Table

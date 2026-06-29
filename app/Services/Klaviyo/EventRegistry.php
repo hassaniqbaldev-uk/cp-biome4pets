@@ -21,7 +21,15 @@ class EventRegistry
     {
         return [
             // A report has been published / shared with the client.
-            // unique_id is stable per report so re-sends dedupe in Klaviyo.
+            //
+            // unique_id is Klaviyo's idempotency key: a repeat event with the same
+            // unique_id is DROPPED (no email re-sent). So it is deliberately keyed on
+            // report_id + the send time, NOT report_id alone — a stable-per-report id
+            // silently swallowed every deliberate re-send. With the send time mixed in,
+            // each re-send is a DISTINCT event Klaviyo will deliver, while two sends in
+            // the SAME second still collapse to one (a backstop against an accidental
+            // double-fire). Falls back to the per-report id when no time is supplied
+            // (e.g. a caller that wants the old dedupe-once behaviour).
             'report_published' => new EventDefinition(
                 metric: 'Report Published',
                 propertiesBuilder: fn (array $data): array => [
@@ -31,7 +39,7 @@ class EventRegistry
                     'client_name' => $data['client_name'] ?? null,
                 ],
                 uniqueIdBuilder: fn (array $data): ?string => isset($data['report_id'])
-                    ? 'report_published_'.$data['report_id']
+                    ? 'report_published_'.$data['report_id'].(isset($data['time']) ? '_'.$data['time'] : '')
                     : null,
             ),
         ];

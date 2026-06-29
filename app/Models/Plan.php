@@ -50,6 +50,16 @@ class Plan extends Model
         return $this->hasMany(PlanTriggerCondition::class)->orderBy('position');
     }
 
+    /**
+     * Conditional variants (override layers keyed by pet condition). A plan with no
+     * variants resolves to base — see PlanVariantResolver. Inert until later stages
+     * wire it into generation/checkout.
+     */
+    public function variants(): HasMany
+    {
+        return $this->hasMany(PlanVariant::class);
+    }
+
     public function scopeEnabled(Builder $query): Builder
     {
         return $query->where('enabled', true);

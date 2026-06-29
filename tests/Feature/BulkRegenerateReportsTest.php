@@ -2,8 +2,8 @@
 
 namespace Tests\Feature;
 
-use App\Filament\Pages\BulkRegenerateReports;
-use App\Models\BulkRegenerateRun;
+use App\Filament\Pages\BulkOperations;
+use App\Models\BulkOperationRun;
 use App\Models\Client;
 use App\Models\Pet;
 use App\Models\Report;
@@ -74,17 +74,17 @@ class BulkRegenerateReportsTest extends TestCase
     {
         $this->actingAs($this->user(User::ROLE_ADMIN));
 
-        $this->get(BulkRegenerateReports::getUrl())->assertForbidden();
-        $this->assertFalse(BulkRegenerateReports::canAccess());
-        $this->assertFalse(BulkRegenerateReports::shouldRegisterNavigation());
+        $this->get(BulkOperations::getUrl())->assertForbidden();
+        $this->assertFalse(BulkOperations::canAccess());
+        $this->assertFalse(BulkOperations::shouldRegisterNavigation());
     }
 
     public function test_super_admin_can_access(): void
     {
         $this->actingAs($this->user(User::ROLE_SUPER_ADMIN));
 
-        $this->get(BulkRegenerateReports::getUrl())->assertOk();
-        $this->assertTrue(BulkRegenerateReports::canAccess());
+        $this->get(BulkOperations::getUrl())->assertOk();
+        $this->assertTrue(BulkOperations::canAccess());
     }
 
     // ── The filter narrows the selectable table ─────────────────────────────
@@ -99,19 +99,19 @@ class BulkRegenerateReportsTest extends TestCase
         $draft = $this->makeReport('2026-03-15', 'draft');
 
         // Date range → only the March rows, not Jan / June.
-        Livewire::test(BulkRegenerateReports::class)
+        Livewire::test(BulkOperations::class)
             ->filterTable('date_range', ['from' => '2026-03-01', 'to' => '2026-03-31'])
             ->assertCanSeeTableRecords([$inRange, $alsoIn, $draft])
             ->assertCanNotSeeTableRecords([$tooEarly, $tooLate]);
 
         // Status filter → published only.
-        Livewire::test(BulkRegenerateReports::class)
+        Livewire::test(BulkOperations::class)
             ->filterTable('status', 'published')
             ->assertCanSeeTableRecords([$inRange])
             ->assertCanNotSeeTableRecords([$draft]);
 
         // Needs-review filter → only the flagged one.
-        Livewire::test(BulkRegenerateReports::class)
+        Livewire::test(BulkOperations::class)
             ->filterTable('needs_review', true)
             ->assertCanSeeTableRecords([$alsoIn])
             ->assertCanNotSeeTableRecords([$inRange, $draft]);
@@ -128,7 +128,7 @@ class BulkRegenerateReportsTest extends TestCase
         $c = $this->makeReport('2026-04-12');
 
         // Tick A and C (NOT B) → run on exactly A and C.
-        Livewire::test(BulkRegenerateReports::class)
+        Livewire::test(BulkOperations::class)
             ->callTableBulkAction('regenerate', [$a->id, $c->id])
             ->assertSet('running', true)
             ->assertSet('total', 2)
@@ -136,7 +136,7 @@ class BulkRegenerateReportsTest extends TestCase
                 && in_array($c->id, $ids) && ! in_array($b->id, $ids));
 
         // Persisted run's batch is exactly the selected ids (order-agnostic).
-        $run = BulkRegenerateRun::firstOrFail();
+        $run = BulkOperationRun::firstOrFail();
         $this->assertEqualsCanonicalizing([$a->id, $c->id], $run->batch_ids);
         $this->assertSame(2, $run->total);
 
@@ -154,7 +154,7 @@ class BulkRegenerateReportsTest extends TestCase
         $other = $this->makeReport('2026-02-01');
 
         // Select the filtered set (the August two) and run.
-        Livewire::test(BulkRegenerateReports::class)
+        Livewire::test(BulkOperations::class)
             ->filterTable('date_range', ['from' => '2026-08-01', 'to' => '2026-08-31'])
             ->callTableBulkAction('regenerate', [$marchA->id, $marchB->id])
             ->assertSet('total', 2)
@@ -168,12 +168,12 @@ class BulkRegenerateReportsTest extends TestCase
         $this->actingAs($this->user(User::ROLE_SUPER_ADMIN));
         $this->makeReport('2026-05-01');
 
-        Livewire::test(BulkRegenerateReports::class)
+        Livewire::test(BulkOperations::class)
             ->call('startRun', [])          // the bulk action with an empty selection
             ->assertSet('running', false)
             ->assertSet('total', 0);
 
-        $this->assertSame(0, BulkRegenerateRun::count());
+        $this->assertSame(0, BulkOperationRun::count());
     }
 
     // ── Chunked processing: up to CHUNK_SIZE per chunk, auto-continue to done ──
@@ -185,9 +185,9 @@ class BulkRegenerateReportsTest extends TestCase
         for ($i = 0; $i < 5; $i++) {
             $ids[] = $this->makeReport('2026-05-'.str_pad((string) ($i + 1), 2, '0', STR_PAD_LEFT))->id;
         }
-        $this->assertSame(3, BulkRegenerateReports::CHUNK_SIZE);
+        $this->assertSame(3, BulkOperations::CHUNK_SIZE);
 
-        $page = Livewire::test(BulkRegenerateReports::class)
+        $page = Livewire::test(BulkOperations::class)
             ->callTableBulkAction('regenerate', $ids)
             ->assertSet('total', 5);
 
@@ -204,7 +204,7 @@ class BulkRegenerateReportsTest extends TestCase
             ->assertSet('succeeded', 0);
 
         // The view auto-continues via a poll while running.
-        Livewire::test(BulkRegenerateReports::class)
+        Livewire::test(BulkOperations::class)
             ->set('running', true)->set('total', 5)
             ->assertSee('wire:poll.800ms="processChunk"', false);
     }
@@ -230,7 +230,7 @@ class BulkRegenerateReportsTest extends TestCase
             $ids[] = $this->makeReport('2026-07-'.str_pad((string) ($i + 1), 2, '0', STR_PAD_LEFT))->id;
         }
 
-        $page = Livewire::test(BulkRegenerateReports::class)
+        $page = Livewire::test(BulkOperations::class)
             ->callTableBulkAction('regenerate', $ids);
 
         $page->call('processChunk')

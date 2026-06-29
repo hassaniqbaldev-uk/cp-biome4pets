@@ -625,11 +625,12 @@
             $subIncludes = data_get($snapshot, 'includes', []);
             $planName = $report->plan?->name;
 
-            // Subscribe now goes through the interstitial, which redirects to the
-            // LIVE plan's checkout URL (not the frozen snapshot) — so old reports
-            // use the current Loop link. CTA shows only when the live plan is
-            // enabled and has a URL; otherwise "coming soon".
-            $subscribeReady = $report->plan && $report->plan->enabled && filled($report->plan->subscription_url);
+            // Subscribe goes through the interstitial, which redirects to the report's
+            // RESOLVED checkout url — the variant-or-base url frozen on the report
+            // (subscription_snapshot['url']), with the live plan url as fallback for
+            // pre-Stage-3 reports (Report::checkoutUrl()). CTA shows only when the
+            // live plan is enabled and a checkout url resolves; otherwise "coming soon".
+            $subscribeReady = $report->plan && $report->plan->enabled && filled($report->checkoutUrl());
             // UTM-tagged link INTO the subscribe interstitial (the final Loop
             // checkout URL is left clean — see subscribe.blade.php). Token is in the
             // path, UTMs in the query, so route resolution is unaffected.

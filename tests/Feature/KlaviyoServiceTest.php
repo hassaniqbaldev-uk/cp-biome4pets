@@ -99,8 +99,9 @@ class KlaviyoServiceTest extends TestCase
                 && data_get($body, 'data.attributes.properties.report_url') === 'https://example.test/report/biscuit-8b3342'
                 && data_get($body, 'data.attributes.properties.report_date') === '2026-06-15'
                 && data_get($body, 'data.attributes.properties.client_name') === 'Jane Owner'
-                // stable idempotency key + time
-                && data_get($body, 'data.attributes.unique_id') === 'report_published_42'
+                // idempotency key = report_id + send time (varies per send so a
+                // deliberate re-send is a distinct, delivered event), plus the time.
+                && data_get($body, 'data.attributes.unique_id') === 'report_published_42_2026-06-15T10:00:00+00:00'
                 && data_get($body, 'data.attributes.time') === '2026-06-15T10:00:00+00:00';
         });
     }

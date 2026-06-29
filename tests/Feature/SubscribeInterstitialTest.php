@@ -14,8 +14,10 @@ use Illuminate\Support\Facades\DB;
 use Tests\TestCase;
 
 /**
- * The subscribe interstitial: server-rendered from the LIVE plan, CTA-only, and
- * redirecting to the live plan's checkout URL (not the report's frozen snapshot).
+ * The subscribe interstitial: server-rendered from the LIVE plan for its display
+ * details, CTA-only, redirecting to the report's RESOLVED checkout URL — the
+ * variant-or-base url frozen on the report (subscription_snapshot['url']), with the
+ * live plan url as a fallback for pre-Stage-3 reports (Report::checkoutUrl()).
  */
 class SubscribeInterstitialTest extends TestCase
 {
@@ -65,7 +67,12 @@ class SubscribeInterstitialTest extends TestCase
         return $plan;
     }
 
-    private function makeReport(?Plan $plan): Report
+    /**
+     * @param  ?string  $snapshotUrl  the url FROZEN into subscription_snapshot. Defaults to
+     *                                SNAPSHOT_URL; pass null to simulate a pre-Stage-3 report
+     *                                that has no frozen url (so checkout falls back to the live plan).
+     */
+    private function makeReport(?Plan $plan, ?string $snapshotUrl = self::SNAPSHOT_URL): Report
     {
         $client = Client::create(['name' => 'Owner', 'email' => 'o' . uniqid() . '@e.com']);
         $pet = Pet::create(['client_id' => $client->id, 'name' => 'Biscuit']);
@@ -79,7 +86,7 @@ class SubscribeInterstitialTest extends TestCase
             'client_id' => $client->id, 'pet_id' => $pet->id, 'test_id' => $test->id,
             'plan_id' => $plan?->id, 'status' => 'published',
             'pet_snapshot' => ['name' => 'Biscuit'],
-            'subscription_snapshot' => ['available' => true, 'price' => '£29.75 / month', 'url' => self::SNAPSHOT_URL, 'includes' => []],
+            'subscription_snapshot' => ['available' => true, 'price' => '£29.75 / month', 'url' => $snapshotUrl, 'includes' => []],
         ]);
         // A report step so the report's plan section (and subscribe panel) renders.
         ReportStep::create(['report_id' => $report->id, 'title' => 'Step', 'type' => 'prose', 'stage_label' => 'Phase 1', 'body' => 'x', 'position' => 0]);
@@ -87,7 +94,7 @@ class SubscribeInterstitialTest extends TestCase
         return $report;
     }
 
-    public function test_interstitial_renders_pet_first_product_price_and_live_cta(): void
+    public function test_interstitial_renders_pet_first_product_price_and_cta(): void
     {
         $report = $this->makeReport($this->makePlan());
 
@@ -105,7 +112,7 @@ class SubscribeInterstitialTest extends TestCase
             ->assertSee('Phase 2 · Months 4–7')             // what comes next
             ->assertSee('PetBiome Prebiotic')               // upcoming product
             ->assertSee('confirmed at checkout')            // Loop-honesty line
-            ->assertSee(self::LIVE_URL, false);             // CTA → live plan URL
+            ->assertSee(self::SNAPSHOT_URL, false);         // CTA → the report's FROZEN checkout url
 
         // Prose steps are not part of the product progression.
         $res->assertDontSee('Dietary changes');
@@ -129,19 +136,33 @@ class SubscribeInterstitialTest extends TestCase
             ->assertDontSee('4.9');
     }
 
-    public function test_cta_uses_live_url_not_the_frozen_snapshot(): void
+    public function test_cta_uses_the_frozen_snapshot_url_over_the_live_plan_url(): void
     {
-        $report = $this->makeReport($this->makePlan(self::LIVE_URL));
+        // Stage 4: the customer is sent to exactly the link FROZEN on their report
+        // (e.g. a variant's Loop checkout), not the live plan url which may differ.
+        $report = $this->makeReport($this->makePlan(self::LIVE_URL), snapshotUrl: self::SNAPSHOT_URL);
 
         $res = $this->get('/report/' . $report->public_token . '/subscribe');
 
-        $res->assertSee(self::LIVE_URL, false);            // live plan checkout URL
-        $res->assertDontSee(self::SNAPSHOT_URL, false);    // NOT the report's frozen snapshot URL
+        $res->assertSee(self::SNAPSHOT_URL, false);        // the report's frozen checkout URL
+        $res->assertDontSee(self::LIVE_URL, false);        // NOT the (different) live plan URL
     }
 
-    public function test_redirects_when_plan_has_no_checkout_url(): void
+    public function test_cta_falls_back_to_live_plan_url_when_no_frozen_url(): void
     {
-        $report = $this->makeReport($this->makePlan(url: null));
+        // Pre-Stage-3 / edge report with no frozen url → fall back to the live plan
+        // url, so old reports are unchanged and never break.
+        $report = $this->makeReport($this->makePlan(self::LIVE_URL), snapshotUrl: null);
+
+        $res = $this->get('/report/' . $report->public_token . '/subscribe');
+
+        $res->assertSee(self::LIVE_URL, false);            // fallback to the live plan url
+    }
+
+    public function test_redirects_when_no_checkout_url_anywhere(): void
+    {
+        // No frozen url AND no live plan url → nothing to subscribe to → degrade.
+        $report = $this->makeReport($this->makePlan(url: null), snapshotUrl: null);
 
         $this->get('/report/' . $report->public_token . '/subscribe')
             ->assertRedirect('/report/' . $report->public_token);

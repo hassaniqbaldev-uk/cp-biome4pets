@@ -277,10 +277,50 @@ class Report extends Model
      */
     public function hasBeenSent(): bool
     {
-        $klaviyoOk = $this->klaviyo_last_sent_at !== null && ! empty($this->klaviyo_last_result['ok']);
-        $appOk = $this->app_last_sent_at !== null && ! empty($this->app_last_result['ok']);
+        return $this->klaviyoHasBeenSent() || $this->appHasBeenSent();
+    }
 
-        return $klaviyoOk || $appOk;
+    /**
+     * Is this report publicly viewable? The single source of truth for the public
+     * publish-gate: the status column is 'published'. (A "sent" report keeps
+     * status 'published' — "sent" is a derived display state, not a stored status —
+     * so it stays viewable.) Drafts and unpublished reports are NOT public.
+     */
+    public function isPublished(): bool
+    {
+        return $this->status === 'published';
+    }
+
+    /**
+     * The checkout/subscribe URL to send THIS report's customer to. The single
+     * source of truth for the public redirect: the variant-or-base url FROZEN into
+     * the report at apply-plan time (subscription_snapshot['url']), with the LIVE
+     * plan's url as a fallback for reports generated before that was frozen (or any
+     * edge case where the snapshot has no url).
+     *
+     * So a variant report goes to its own quoted Loop link, while base reports are
+     * unchanged (the frozen url equals the base plan url) and pre-Stage-3 reports
+     * fall back to the live plan url exactly as before. Null when neither exists.
+     */
+    public function checkoutUrl(): ?string
+    {
+        return data_get($this->subscription_snapshot, 'url') ?: $this->plan?->subscription_url;
+    }
+
+    /**
+     * Has this report been successfully sent to Klaviyo at least once? (A failed
+     * attempt stamps klaviyo_last_sent_at but must NOT count.) Used to surface the
+     * "already sent — send again?" confirmation on a repeat Klaviyo send.
+     */
+    public function klaviyoHasBeenSent(): bool
+    {
+        return $this->klaviyo_last_sent_at !== null && ! empty($this->klaviyo_last_result['ok']);
+    }
+
+    /** Has this report been successfully emailed via the App (SMTP) at least once? */
+    public function appHasBeenSent(): bool
+    {
+        return $this->app_last_sent_at !== null && ! empty($this->app_last_result['ok']);
     }
 
     /**

@@ -66,6 +66,7 @@ class AdminFormatting
             'number_contradiction' => 'A stated figure may not match the computed data',
             'unknown_taxon' => 'Mentions an organism not found in the sample',
             'banned_phrase' => 'Contains diagnosis or cure wording',
+            'variant_combined_gap' => 'Sensitive + large-breed pet — no combined plan variant',
             default => $code,
         };
     }
@@ -91,6 +92,7 @@ class AdminFormatting
             'number_contradiction' => 'A number written in the AI text may not match the figure we calculated for this pet. This is an automated guess and is often a false alarm. Skim the highlighted text and confirm the figure reads correctly.',
             'unknown_taxon' => "The AI text appears to name a bacterium or organism that wasn't in this pet's data. This is an automated guess and is often a false alarm (it can misread ordinary words). Check the wording doesn't mention something we didn't detect.",
             'banned_phrase' => "The text may contain diagnosis or cure wording (for example 'diagnose' or 'cure'), which our reports avoid. This is an automated guess. Re-read the flagged copy and soften any clinical claims.",
+            'variant_combined_gap' => 'This pet is flagged both sensitive and large-breed, but this plan has no dedicated combined variant, so a single-condition variant (or the base plan) was applied. Confirm the checkout link and product dosage are correct for a sensitive AND large-breed dog before publishing — or add a combined variant to the plan.',
             default => '',
         };
     }

@@ -2,9 +2,9 @@
 
 namespace Tests\Feature;
 
-use App\Filament\Pages\BulkRegenerateReports;
+use App\Filament\Pages\BulkOperations;
 use App\Filament\Widgets\BulkRegenerateRunCard;
-use App\Models\BulkRegenerateRun;
+use App\Models\BulkOperationRun;
 use App\Models\Client;
 use App\Models\Pet;
 use App\Models\Report;
@@ -76,11 +76,11 @@ class BulkRegenerateRunPersistenceTest extends TestCase
         }
 
         // Select the reports and run via the inclusive bulk action.
-        $page = Livewire::test(BulkRegenerateReports::class)
+        $page = Livewire::test(BulkOperations::class)
             ->callTableBulkAction('regenerate', $ids);
 
         // A run row was created (running, full batch remaining).
-        $run = BulkRegenerateRun::firstOrFail();
+        $run = BulkOperationRun::firstOrFail();
         $this->assertSame('running', $run->status);
         $this->assertSame(5, $run->total);
         $this->assertCount(5, $run->remaining_ids);
@@ -107,7 +107,7 @@ class BulkRegenerateRunPersistenceTest extends TestCase
     {
         $admin = $this->user(User::ROLE_SUPER_ADMIN);
 
-        $run = BulkRegenerateRun::create([
+        $run = BulkOperationRun::create([
             'started_by' => $admin->id, 'total' => 10, 'batch_ids' => range(1, 10),
             'remaining_ids' => [7, 8, 9, 10], 'regenerated_count' => 5, 'failed_count' => 1,
             'status' => 'running', 'started_at' => now()->subMinutes(10),
@@ -119,7 +119,7 @@ class BulkRegenerateRunPersistenceTest extends TestCase
         $this->assertSame(4, $run->remainingCount());
 
         // dashboardCardFor materialises it to interrupted.
-        $card = BulkRegenerateRun::dashboardCardFor($admin->id);
+        $card = BulkOperationRun::dashboardCardFor($admin->id);
         $this->assertNotNull($card);
         $this->assertSame('interrupted', $card->status);
         $this->assertSame('interrupted', $run->fresh()->status);
@@ -128,13 +128,13 @@ class BulkRegenerateRunPersistenceTest extends TestCase
     public function test_fresh_running_run_is_not_flagged_and_shows_no_card(): void
     {
         $admin = $this->user(User::ROLE_SUPER_ADMIN);
-        $run = BulkRegenerateRun::create([
+        $run = BulkOperationRun::create([
             'started_by' => $admin->id, 'total' => 5, 'batch_ids' => range(1, 5), 'remaining_ids' => [4, 5],
             'status' => 'running', 'started_at' => now(), 'last_progress_at' => now(),
         ]);
 
         $this->assertFalse($run->isStale());
-        $this->assertNull(BulkRegenerateRun::dashboardCardFor($admin->id)); // live in a tab → no card
+        $this->assertNull(BulkOperationRun::dashboardCardFor($admin->id)); // live in a tab → no card
     }
 
     // ── Dashboard card: completed run + dismiss ──────────────────────────────
@@ -143,7 +143,7 @@ class BulkRegenerateRunPersistenceTest extends TestCase
         $admin = $this->user(User::ROLE_SUPER_ADMIN);
         $this->actingAs($admin);
 
-        $run = BulkRegenerateRun::create([
+        $run = BulkOperationRun::create([
             'started_by' => $admin->id, 'total' => 8, 'batch_ids' => range(1, 8), 'remaining_ids' => [],
             'regenerated_count' => 6, 'failed_count' => 2, 'needs_review_count' => 3,
             'status' => 'completed', 'finished_at' => now(), 'last_progress_at' => now(),
@@ -157,7 +157,7 @@ class BulkRegenerateRunPersistenceTest extends TestCase
         // Dismiss → acknowledged → card gone.
         $widget->call('acknowledge');
         $this->assertNotNull($run->fresh()->acknowledged_at);
-        $this->assertNull(BulkRegenerateRun::dashboardCardFor($admin->id));
+        $this->assertNull(BulkOperationRun::dashboardCardFor($admin->id));
     }
 
     // ── Dashboard card: interrupted run + cancel ─────────────────────────────
@@ -166,7 +166,7 @@ class BulkRegenerateRunPersistenceTest extends TestCase
         $admin = $this->user(User::ROLE_SUPER_ADMIN);
         $this->actingAs($admin);
 
-        BulkRegenerateRun::create([
+        BulkOperationRun::create([
             'started_by' => $admin->id, 'total' => 4, 'batch_ids' => range(1, 4), 'remaining_ids' => [3, 4],
             'regenerated_count' => 2, 'status' => 'running',
             'started_at' => now()->subMinutes(10), 'last_progress_at' => now()->subMinutes(5),
@@ -177,8 +177,8 @@ class BulkRegenerateRunPersistenceTest extends TestCase
             ->assertSee('2')   // done of 4
             ->call('cancel');
 
-        $this->assertSame('cancelled', BulkRegenerateRun::firstOrFail()->status);
-        $this->assertNull(BulkRegenerateRun::dashboardCardFor($admin->id));
+        $this->assertSame('cancelled', BulkOperationRun::firstOrFail()->status);
+        $this->assertNull(BulkOperationRun::dashboardCardFor($admin->id));
     }
 
     // ── Access: only Super Admins see the card ───────────────────────────────
@@ -201,7 +201,7 @@ class BulkRegenerateRunPersistenceTest extends TestCase
         $reports = collect(range(1, 5))->map(fn () => $this->makeReport());
         $remaining = [$reports[3]->id, $reports[4]->id];
 
-        $run = BulkRegenerateRun::create([
+        $run = BulkOperationRun::create([
             'started_by' => $admin->id, 'total' => 5, 'batch_ids' => $reports->pluck('id')->all(),
             'remaining_ids' => $remaining, 'regenerated_count' => 2, 'failed_count' => 1,
             'status' => 'interrupted', 'started_at' => now()->subMinutes(10), 'last_progress_at' => now()->subMinutes(5),
@@ -209,7 +209,7 @@ class BulkRegenerateRunPersistenceTest extends TestCase
 
         // Resume via the dashboard's ?resume={id} link.
         $page = Livewire::withQueryParams(['resume' => $run->id])
-            ->test(BulkRegenerateReports::class)
+            ->test(BulkOperations::class)
             ->assertSet('running', true)
             ->assertSet('total', 5)
             ->assertSet('succeeded', 2)   // cumulative from the persisted run

@@ -3,18 +3,15 @@
 namespace App\Filament\Resources\ReportResource\Pages;
 
 use App\Filament\Resources\ReportResource;
-use App\Mail\ReportPublishedMail;
 use App\Models\Pet;
 use App\Models\ReportStep;
 use App\Models\Setting;
-use App\Services\KlaviyoService;
 use App\Support\PaidActionLimiter;
+use App\Support\ReportSender;
 use App\Support\Utm;
 use Filament\Actions;
 use Filament\Notifications\Notification;
 use Filament\Resources\Pages\EditRecord;
-use Illuminate\Support\Carbon;
-use Illuminate\Support\Facades\Mail;
 use Illuminate\Support\HtmlString;
 use Illuminate\Support\Str;
 
@@ -82,6 +79,31 @@ class EditReport extends EditRecord
                         ->persistent()
                         ->send();
                 }),
+            // Revert a published report to draft so staff can edit it, KEEPING the
+            // same public_token / URL. While draft the public link shows the branded
+            // "being finalised" holding page (ReportController::show); re-publishing
+            // serves the updated report again at the unchanged URL. Mirror of Publish:
+            // shown only when published, just as Publish shows only when draft.
+            Actions\Action::make('unpublish')
+                ->label('Unpublish')
+                ->icon('heroicon-o-eye-slash')
+                ->color('warning')
+                ->requiresConfirmation()
+                ->modalHeading('Unpublish Report')
+                ->modalDescription('Unpublish this report? It will revert to draft and won\'t be publicly viewable until re-published. The report link stays the same.')
+                ->modalSubmitActionLabel('Unpublish')
+                ->visible(fn () => $this->record->status === 'published')
+                ->action(function () {
+                    // Status only — public_token is untouched, so the URL is unchanged.
+                    $this->record->update(['status' => 'draft']);
+                    $this->fillForm();
+
+                    Notification::make()
+                        ->title('Report unpublished')
+                        ->body('Reverted to draft. The public link now shows a "being finalised" page until you publish again. The link is unchanged.')
+                        ->success()
+                        ->send();
+                }),
             Actions\Action::make('view_report')
                 ->label('View Report')
                 ->icon('heroicon-o-eye')
@@ -101,15 +123,21 @@ class EditReport extends EditRecord
                     ->tooltip(fn (): string => $this->sendReportBlockedReason()
                         ?? ('Via Klaviyo · last sent: '.($this->record->klaviyoLastSentSummary() ?? 'not yet sent')))
                     ->disabled(fn (): bool => $this->sendReportBlockedReason() !== null)
+                    // Always confirm (so a button double-click opens ONE modal, never
+                    // fires twice); when already sent, the modal makes the repeat an
+                    // explicit, dated choice rather than a silent re-send.
                     ->requiresConfirmation()
-                    ->modalHeading('Send Report via Klaviyo')
+                    ->modalHeading(fn (): string => $this->record->klaviyoHasBeenSent()
+                        ? 'Send to Klaviyo again?'
+                        : 'Send Report via Klaviyo')
                     ->modalDescription(fn (): HtmlString => new HtmlString(
-                        'Send a <strong>report_published</strong> event to <strong>'
+                        $this->resendNoticeHtml($this->klaviyoResendNotice())
+                        .'Send a <strong>report_published</strong> event to <strong>'
                         .e($this->record->petClient?->email ?? '—')
                         .'</strong> via Klaviyo.<br><span style="color:#6b7280;">Last sent: '
                         .e($this->record->klaviyoLastSentSummary()).'</span>'
                     ))
-                    ->modalSubmitActionLabel('Send now')
+                    ->modalSubmitActionLabel(fn (): string => $this->record->klaviyoHasBeenSent() ? 'Send again' : 'Send now')
                     ->action(function () {
                         // L2: Klaviyo send — cap per admin.
                         if (PaidActionLimiter::exceeded('klaviyo-send', 10)) {
@@ -128,24 +156,9 @@ class EditReport extends EditRecord
                         $report = $this->record;
                         $email = $report->petClient->email;
 
-                        $result = app(KlaviyoService::class)->sendEvent('report_published', $email, [
-                            'report_id' => $report->id,
-                            'pet_name' => $report->pet?->name,
-                            // Klaviyo delivers this as an email link → tag for attribution.
-                            'report_url' => Utm::klaviyo($report->report_url, 'report_published', 'email_button'),
-                            // report_date is proxied from the linked Test; for a report
-                            // with no test (legacy/orphan) it is null — send null rather
-                            // than Carbon::parse(null) which would silently emit today.
-                            'report_date' => $report->report_date
-                                ? Carbon::parse($report->report_date)->format('F j, Y')
-                                : null,
-                            'client_name' => $report->petClient?->name,
-                        ]);
-
-                        $report->recordKlaviyoSend(
-                            $result['ok'],
-                            $result['ok'] ? 'Report sent to Klaviyo' : $result['message'],
-                        );
+                        // The send now runs through the shared ReportSender (same
+                        // event/UTM/recording) so single + bulk share one code path.
+                        $result = ReportSender::send($report, ReportSender::CHANNEL_KLAVIYO);
                         $this->fillForm();
 
                         Notification::make()
@@ -164,15 +177,20 @@ class EditReport extends EditRecord
                     ->tooltip(fn (): string => $this->appSendBlockedReason()
                         ?? ('Via email (our SMTP) · last sent: '.$this->record->appLastSentSummary()))
                     ->disabled(fn (): bool => $this->appSendBlockedReason() !== null)
+                    // Same as Klaviyo: confirm always, and make a repeat send an
+                    // explicit, dated choice when this report was already emailed.
                     ->requiresConfirmation()
-                    ->modalHeading('Send Report via App')
+                    ->modalHeading(fn (): string => $this->record->appHasBeenSent()
+                        ? 'Send via App again?'
+                        : 'Send Report via App')
                     ->modalDescription(fn (): HtmlString => new HtmlString(
-                        'Email the branded report directly to <strong>'
+                        $this->resendNoticeHtml($this->appResendNotice())
+                        .'Email the branded report directly to <strong>'
                         .e($this->record->petClient?->email ?? '—')
                         .'</strong> from our mail server.<br><span style="color:#6b7280;">Last sent: '
                         .e($this->record->appLastSentSummary()).'</span>'
                     ))
-                    ->modalSubmitActionLabel('Send now')
+                    ->modalSubmitActionLabel(fn (): string => $this->record->appHasBeenSent() ? 'Send again' : 'Send now')
                     ->action(function () {
                         // Cap per admin (SES send), mirroring the Klaviyo limiter.
                         if (PaidActionLimiter::exceeded('app-send', 10)) {
@@ -193,30 +211,16 @@ class EditReport extends EditRecord
 
                         $email = $report->petClient->email;
 
-                        // Wrap the transport in try/catch so an SMTP error surfaces
-                        // as a toast and is recorded — never a silent fail or 500.
-                        try {
-                            Mail::to($email)->send(new ReportPublishedMail($report));
+                        // Same shared sender as the Klaviyo action (and bulk later);
+                        // the App branch keeps the try/catch + recordAppSend inside it.
+                        $result = ReportSender::send($report, ReportSender::CHANNEL_APP);
+                        $this->fillForm();
 
-                            $report->recordAppSend(true, 'Report emailed to '.$email);
-                            $this->fillForm();
-
-                            Notification::make()
-                                ->title('Report sent')
-                                ->body('Report sent to '.$email)
-                                ->success()
-                                ->send();
-                        } catch (\Throwable $e) {
-                            report($e);
-                            $report->recordAppSend(false, $e->getMessage());
-                            $this->fillForm();
-
-                            Notification::make()
-                                ->title('Send failed')
-                                ->body($e->getMessage())
-                                ->danger()
-                                ->send();
-                        }
+                        Notification::make()
+                            ->title($result['ok'] ? 'Report sent' : 'Send failed')
+                            ->body($result['ok'] ? 'Report sent to '.$email : $result['message'])
+                            ->{$result['ok'] ? 'success' : 'danger'}()
+                            ->send();
                     }),
             ])
                 ->label('Send Report')
@@ -279,6 +283,41 @@ class EditReport extends EditRecord
         }
 
         return null;
+    }
+
+    /**
+     * The "already sent on {date}" warning for the Klaviyo confirm modal, or null
+     * when this report has never been sent to Klaviyo. Re-sends are allowed (the
+     * client wants them) — this just makes a repeat an explicit, dated choice.
+     */
+    private function klaviyoResendNotice(): ?string
+    {
+        return $this->record->klaviyoHasBeenSent()
+            ? 'This report was already sent to Klaviyo on '
+                .$this->record->klaviyo_last_sent_at->format('M j, Y g:ia')
+                .'. Sending again will deliver another email.'
+            : null;
+    }
+
+    /** The App (SMTP) equivalent of klaviyoResendNotice(). */
+    private function appResendNotice(): ?string
+    {
+        return $this->record->appHasBeenSent()
+            ? 'This report was already emailed via the app on '
+                .$this->record->app_last_sent_at->format('M j, Y g:ia')
+                .'. Sending again will deliver another email.'
+            : null;
+    }
+
+    /**
+     * Render a resend notice as a leading, emphasised line for a send modal, or an
+     * empty string when there is nothing to warn about (first send).
+     */
+    private function resendNoticeHtml(?string $notice): string
+    {
+        return $notice === null
+            ? ''
+            : '<strong style="color:#b91c1c;">'.e($notice).'</strong><br><br>';
     }
 
     /**

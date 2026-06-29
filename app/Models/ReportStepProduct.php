@@ -19,7 +19,7 @@ class ReportStepProduct extends Model
     ];
 
     protected $casts = [
-        // quantity is now a string (e.g. "3 (one tub per month)").
+        // quantity is now a string (e.g. "3 (one pouch per month)").
         'position' => 'integer',
     ];
 

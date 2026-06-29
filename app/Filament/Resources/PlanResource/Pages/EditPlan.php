@@ -3,6 +3,7 @@
 namespace App\Filament\Resources\PlanResource\Pages;
 
 use App\Filament\Resources\PlanResource;
+use App\Filament\Resources\PlanResource\Concerns\ManagesPlanVariants;
 use App\Models\Plan;
 use App\Models\PlanStep;
 use Filament\Actions;
@@ -10,6 +11,8 @@ use Filament\Resources\Pages\EditRecord;
 
 class EditPlan extends EditRecord
 {
+    use ManagesPlanVariants;
+
     protected static string $resource = PlanResource::class;
 
     protected array $planSteps = [];
@@ -48,18 +51,27 @@ class EditPlan extends EditRecord
             ->map(fn ($condition) => ['required_triggers' => $condition->required_triggers ?? []])
             ->all();
 
+        // Hydrate the condition variants + their product swaps.
+        $data['variants'] = $this->variantFormRows();
+
         return $data;
     }
 
     protected function mutateFormDataBeforeSave(array $data): array
     {
-        // Hold the raw plan steps + trigger conditions aside; persisted via
+        // Validate variants BEFORE the plan is written (dup condition / no-op swap).
+        $this->guardVariants($data);
+
+        // Hold the raw plan steps + trigger conditions + variants aside; persisted via
         // relations in afterSave (kept out of the core Plan mass-assignment).
         $this->planSteps = $data['steps'] ?? [];
         unset($data['steps']);
 
         $this->planTriggerConditions = $data['trigger_conditions'] ?? [];
         unset($data['trigger_conditions']);
+
+        $this->planVariants = $data['variants'] ?? [];
+        unset($data['variants']);
 
         return $data;
     }
@@ -68,6 +80,7 @@ class EditPlan extends EditRecord
     {
         $this->persistPlanSteps($this->planSteps);
         $this->persistTriggerConditions($this->planTriggerConditions);
+        $this->persistVariants($this->planVariants);
         $this->enforceSingleFallback();
         $this->syncSubscriptionIncludes();
     }

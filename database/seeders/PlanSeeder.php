@@ -205,7 +205,7 @@ class PlanSeeder extends Seeder
                         'products' => [[
                             'catalog_product_id' => $idFor('PetBiome AMR'),
                             'duration' => '3 months (12 weeks)',
-                            'quantity' => '3 (one tub per month)',
+                            'quantity' => '3 (one pouch per month)',
                             'inclusion' => 'included',
                         ]],
                     ],
@@ -223,7 +223,7 @@ class PlanSeeder extends Seeder
                         'products' => [[
                             'catalog_product_id' => $idFor('PetBiome Prebiotic'),
                             'duration' => '4 months',
-                            'quantity' => '4 (one tub per month)',
+                            'quantity' => '4 (one pouch per month)',
                             'inclusion' => 'included',
                         ]],
                     ],
@@ -254,7 +254,7 @@ class PlanSeeder extends Seeder
                         'products' => [[
                             'catalog_product_id' => $idFor('PetBiome AMR'),
                             'duration' => '3 months (12 weeks)',
-                            'quantity' => '3 (one tub per month)',
+                            'quantity' => '3 (one pouch per month)',
                             'inclusion' => 'included',
                         ]],
                     ],
@@ -272,7 +272,7 @@ class PlanSeeder extends Seeder
                         'products' => [[
                             'catalog_product_id' => $idFor('Antimicrobic'),
                             'duration' => '4 months',
-                            'quantity' => '4 (one tub per month)',
+                            'quantity' => '4 (one pouch per month)',
                             'inclusion' => 'included',
                         ]],
                     ],
@@ -328,7 +328,7 @@ class PlanSeeder extends Seeder
                             [
                                 'catalog_product_id' => $idFor('PetBiome AMR'),
                                 'duration' => '3 months',
-                                'quantity' => '3 (one tub per month)',
+                                'quantity' => '3 (one pouch per month)',
                                 'inclusion' => 'included',
                             ],
                             [

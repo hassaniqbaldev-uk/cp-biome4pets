@@ -1,7 +1,7 @@
 @php($run = $this->getRun())
 
 <div>
-    @if ($run && $run->status === \App\Models\BulkRegenerateRun::STATUS_COMPLETED)
+    @if ($run && $run->status === \App\Models\BulkOperationRun::STATUS_COMPLETED)
         {{-- Completed (unacknowledged) → success card --}}
         <x-filament::section>
             <div style="display:flex; align-items:flex-start; gap:14px; flex-wrap:wrap;">
@@ -9,7 +9,7 @@
                     <x-filament::icon icon="heroicon-o-check-circle" class="h-6 w-6" style="color:#16a34a;" />
                 </div>
                 <div style="flex:1; min-width:240px;">
-                    <h3 style="font-weight:700; color:#301C47; margin:0 0 4px;">Bulk regeneration completed</h3>
+                    <h3 style="font-weight:700; color:#301C47; margin:0 0 4px;">{{ ucfirst($run->operationLabel()) }} completed</h3>
                     <p style="margin:0; color:#374151; font-size:14px;">
                         <strong>{{ $run->regenerated_count }}</strong> regenerated,
                         <strong>{{ $run->failed_count }}</strong> failed,
@@ -30,7 +30,7 @@
             </div>
         </x-filament::section>
 
-    @elseif ($run && $run->status === \App\Models\BulkRegenerateRun::STATUS_INTERRUPTED)
+    @elseif ($run && $run->status === \App\Models\BulkOperationRun::STATUS_INTERRUPTED)
         {{-- Interrupted (running + stale heartbeat) → warning card --}}
         <x-filament::section>
             <div style="display:flex; align-items:flex-start; gap:14px; flex-wrap:wrap;">
@@ -38,7 +38,7 @@
                     <x-filament::icon icon="heroicon-o-exclamation-triangle" class="h-6 w-6" style="color:#b45309;" />
                 </div>
                 <div style="flex:1; min-width:240px;">
-                    <h3 style="font-weight:700; color:#301C47; margin:0 0 4px;">A bulk regeneration was interrupted</h3>
+                    <h3 style="font-weight:700; color:#301C47; margin:0 0 4px;">A {{ $run->operationLabel() }} was interrupted</h3>
                     <p style="margin:0; color:#374151; font-size:14px;">
                         <strong>{{ $run->doneCount() }}</strong> of <strong>{{ $run->total }}</strong> completed,
                         <strong>{{ $run->remainingCount() }}</strong> remaining. The tab was closed before it finished.

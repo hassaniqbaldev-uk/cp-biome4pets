@@ -3,12 +3,15 @@
 namespace App\Filament\Resources\PlanResource\Pages;
 
 use App\Filament\Resources\PlanResource;
+use App\Filament\Resources\PlanResource\Concerns\ManagesPlanVariants;
 use App\Models\Plan;
 use App\Models\PlanStep;
 use Filament\Resources\Pages\CreateRecord;
 
 class CreatePlan extends CreateRecord
 {
+    use ManagesPlanVariants;
+
     protected static string $resource = PlanResource::class;
 
     protected array $planSteps = [];
@@ -17,13 +20,20 @@ class CreatePlan extends CreateRecord
 
     protected function mutateFormDataBeforeCreate(array $data): array
     {
-        // Hold the nested steps + trigger conditions aside; persisted via
+        // Validate variants BEFORE the plan is written (halts cleanly on a dup
+        // condition / no-op swap, against the same form data).
+        $this->guardVariants($data);
+
+        // Hold the nested steps + trigger conditions + variants aside; persisted via
         // relations after create (kept out of the core Plan mass-assignment).
         $this->planSteps = $data['steps'] ?? [];
         unset($data['steps']);
 
         $this->planTriggerConditions = $data['trigger_conditions'] ?? [];
         unset($data['trigger_conditions']);
+
+        $this->planVariants = $data['variants'] ?? [];
+        unset($data['variants']);
 
         return $data;
     }
@@ -32,6 +42,7 @@ class CreatePlan extends CreateRecord
     {
         $this->persistPlanSteps($this->planSteps);
         $this->persistTriggerConditions($this->planTriggerConditions);
+        $this->persistVariants($this->planVariants);
         $this->enforceSingleFallback();
         $this->syncSubscriptionIncludes();
     }

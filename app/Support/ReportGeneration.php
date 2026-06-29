@@ -333,6 +333,42 @@ class ReportGeneration
         $report->update($update);
     }
 
+    /**
+     * Review-flag code for the plan-variant combined-gap: a sensitive+large pet that
+     * resolved to a single-axis variant or base because no dedicated 'sensitive_large'
+     * variant exists. Deterministic warning — a human must confirm the link/dosage.
+     */
+    public const VARIANT_GAP_CODE = 'variant_combined_gap';
+
+    /**
+     * Merge the plan-variant combined-gap reason into a review_flags array, returning
+     * the updated flags (or the input unchanged when there is no reason). Idempotent:
+     * re-applying replaces the prior variant-gap issue rather than stacking it, so a
+     * re-apply of the plan never duplicates the flag. needs_review is driven separately
+     * by the caller / recomputeReviewState (the code is a deterministic-tier issue).
+     */
+    public static function withVariantReviewFlag(?array $flags, ?string $reason): ?array
+    {
+        if ($reason === null) {
+            return $flags;
+        }
+
+        $flags = is_array($flags) ? $flags : [];
+        $issues = $flags['issues'] ?? [];
+
+        // Drop any existing variant-gap row first (idempotent re-apply).
+        $issues = array_values(array_filter(
+            $issues,
+            fn (array $i): bool => ($i['code'] ?? '') !== self::VARIANT_GAP_CODE,
+        ));
+        $issues[] = self::issueRow(self::VARIANT_GAP_CODE, $reason);
+
+        $flags['issues'] = $issues;
+        $flags['detected_at'] = $flags['detected_at'] ?? now()->toIso8601String();
+
+        return $flags;
+    }
+
     /** A deterministic-warning issue row in the stored review_flags shape. */
     protected static function issueRow(string $code, string $detail): array
     {

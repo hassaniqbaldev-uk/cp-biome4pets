@@ -30,7 +30,7 @@ class KlaviyoService
      * @param  string  $eventKey  registry key (e.g. 'report_published')
      * @param  string  $profileEmail  recipient profile identifier
      * @param  array  $payloadData  raw values for the registry's property / unique_id builders
-     * @return array{ok: bool, status: int, message: string}
+     * @return array{ok: bool, status: int, retryable: bool, message: string}
      */
     public function sendEvent(string $eventKey, string $profileEmail, array $payloadData = []): array
     {
@@ -40,7 +40,7 @@ class KlaviyoService
         if ($definition === null) {
             Log::warning('Klaviyo: unknown event key — nothing sent.', ['event' => $eventKey]);
 
-            return ['ok' => false, 'status' => 0, 'message' => "Unknown Klaviyo event key [{$eventKey}]"];
+            return ['ok' => false, 'status' => 0, 'retryable' => false, 'message' => "Unknown Klaviyo event key [{$eventKey}]"];
         }
 
         // Config gate — graceful NO-OP with no HTTP call when disabled or unconfigured.
@@ -51,7 +51,7 @@ class KlaviyoService
                 'has_key' => filled($this->apiKey()),
             ]);
 
-            return ['ok' => false, 'status' => 0, 'message' => 'Klaviyo disabled or not configured'];
+            return ['ok' => false, 'status' => 0, 'retryable' => false, 'message' => 'Klaviyo disabled or not configured'];
         }
 
         $body = $this->buildEventBody($definition, $profileEmail, $payloadData);
@@ -65,7 +65,20 @@ class KlaviyoService
             if ($response->status() === 202) {
                 Log::info('Klaviyo: event accepted.', ['event' => $eventKey, 'status' => 202]);
 
-                return ['ok' => true, 'status' => 202, 'message' => 'Accepted'];
+                return ['ok' => true, 'status' => 202, 'retryable' => false, 'message' => 'Accepted'];
+            }
+
+            // 429 Too Many Requests — RETRYABLE. The send didn't happen because we
+            // were throttled, not because the request was bad. Flag it so a caller
+            // (bulk send) can leave the report for a later retry rather than burning
+            // it as a permanent failure. Single-send just surfaces the failure.
+            if ($response->status() === 429) {
+                Log::warning('Klaviyo: rate limited (429) — retryable.', [
+                    'event' => $eventKey,
+                    'status' => 429,
+                ]);
+
+                return ['ok' => false, 'status' => 429, 'retryable' => true, 'message' => 'Rate limited by Klaviyo (429) — retry later.'];
             }
 
             Log::error('Klaviyo: event rejected.', [
@@ -74,14 +87,14 @@ class KlaviyoService
                 'body' => $response->body(),
             ]);
 
-            return ['ok' => false, 'status' => $response->status(), 'message' => $response->body()];
+            return ['ok' => false, 'status' => $response->status(), 'retryable' => false, 'message' => $response->body()];
         } catch (\Throwable $e) {
             Log::error('Klaviyo: event request failed.', [
                 'event' => $eventKey,
                 'error' => $e->getMessage(),
             ]);
 
-            return ['ok' => false, 'status' => 0, 'message' => $e->getMessage()];
+            return ['ok' => false, 'status' => 0, 'retryable' => false, 'message' => $e->getMessage()];
         }
     }
 

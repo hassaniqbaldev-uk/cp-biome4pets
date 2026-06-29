@@ -17,6 +17,7 @@ use App\Services\OpenAiService;
 use App\Support\AdminFormatting;
 use App\Support\PaidActionLimiter;
 use App\Support\PetFindings;
+use App\Support\PlanInstantiation;
 use App\Support\ReportGeneration;
 use Filament\Forms;
 use Filament\Forms\Form;
@@ -171,7 +172,11 @@ class ReportResource extends Resource
                                 ->modalDescription('This will make the report publicly accessible. Continue?')
                                 ->action(function (?Report $record, $livewire): void {
                                     $record->update(['status' => 'published']);
-                                    $livewire->fillForm();
+                                    // refreshFormData() is the PUBLIC form-refresh API; fillForm() is
+                                    // protected and calling it via $livewire-> from this (ReportResource)
+                                    // scope threw "fillForm does not exist" in production. Refresh just
+                                    // the changed attribute so the form reflects the new status.
+                                    $livewire->refreshFormData(['status']);
                                     Notification::make()->title('Report published')->success()->send();
                                 }),
                             Forms\Components\Actions\Action::make('done_edit_report')
@@ -179,7 +184,7 @@ class ReportResource extends Resource
                                 ->icon('heroicon-o-pencil-square')
                                 ->color('gray')
                                 ->action(fn ($livewire): bool => $livewire->justCreated = false),
-                        ]),
+                        ])->key('report_created_actions'),
                     ]),
 
                 // Phase 3: advisory "needs review" banner. Shown only when the
@@ -815,59 +820,36 @@ class ReportResource extends Resource
                                         // Generate the copy, then VALIDATE it against the fixed
                                         // scaffold so factual fields can never be altered.
                                         $scaffold = $plan->toScaffold($pet?->name);
-                                        $modelOutput = (new OpenAiService)->generatePlanCopy($findings, $scaffold);
+                                        $modelOutput = app(OpenAiService::class)->generatePlanCopy($findings, $scaffold);
                                         $copy = static::validatePlanCopy($modelOutput, $scaffold);
 
                                         // Instantiate the plan's LOCKED structure (factual fields
-                                        // straight from the plan) and overlay the validated copy.
-                                        // Falls back to placeholders for any field not generated.
-                                        $steps = $plan->steps->values()->map(function ($step, $i) use ($copy) {
-                                            $isProse = $step->type === 'prose';
-                                            $stepCopy = $copy['steps'][$i] ?? null;
+                                        // straight from the plan) and overlay the validated copy —
+                                        // through the SINGLE variant-aware seam, so a flagged pet's
+                                        // product swaps + dosage + checkout link + includes are applied
+                                        // here (and nowhere can silently skip them). Base for an
+                                        // unflagged pet / variant-less plan, exactly as before.
+                                        $instantiation = PlanInstantiation::build($plan, $pet, $copy);
 
-                                            return [
-                                                'type' => $step->type,
-                                                'title' => $step->step_title,
-                                                'stage_label' => $step->stage_label,
-                                                'body' => $isProse ? ($stepCopy['body'] ?? $step->body) : null,
-                                                'tip' => $isProse ? ($stepCopy['tip'] ?? $step->tip) : null,
-                                                'products' => $isProse ? [] : $step->products->values()->map(function ($p, $j) use ($stepCopy) {
-                                                    $how = $stepCopy['products'][$j] ?? '';
-
-                                                    return [
-                                                        'catalog_product_id' => $p->catalog_product_id,
-                                                        'duration' => $p->duration,
-                                                        'quantity' => $p->quantity,
-                                                        'dose' => $p->dose,
-                                                        'inclusion' => $p->inclusion,
-                                                        'how_it_helps' => $how !== '' ? $how : '[copy to be generated]',
-                                                    ];
-                                                })->all(),
-                                            ];
-                                        })->all();
-
-                                        $set('steps', $steps);
+                                        $set('steps', $instantiation['steps']);
                                         $set('plan_intro', $copy['intro'] !== '' ? $copy['intro'] : '[intro to be generated]');
+                                        $set('subscription_snapshot', $instantiation['subscription_snapshot']);
 
-                                        // Freeze the subscribe panel with product prices as-now.
-                                        $set('subscription_snapshot', [
-                                            'available' => (bool) $plan->subscription_available,
-                                            'price' => $plan->subscription_price,
-                                            'full_price' => $plan->subscription_full_price,
-                                            'billing_note' => $plan->subscription_billing_note,
-                                            'saving_label' => $plan->subscription_saving_label,
-                                            'url' => $plan->subscription_url,
-                                            'includes' => collect($plan->subscription_includes ?? [])
-                                                ->map(fn ($name) => [
-                                                    'name' => $name,
-                                                    'price' => optional(CatalogProduct::where('name', $name)->first())->price,
-                                                ])->all(),
-                                        ]);
+                                        // Combined-gap (sensitive+large pet, no dedicated variant):
+                                        // flag for human confirmation of the link/dosage. Merged into
+                                        // the existing review flags; persists through save.
+                                        if ($instantiation['needs_review_reason'] !== null) {
+                                            $set('review_flags', ReportGeneration::withVariantReviewFlag(
+                                                $get('review_flags'),
+                                                $instantiation['needs_review_reason'],
+                                            ));
+                                            $set('needs_review', true);
+                                        }
 
                                         if ($copy['has_copy']) {
                                             Notification::make()
                                                 ->title('Plan applied')
-                                                ->body('Loaded '.count($steps).' steps with generated copy. Structure is locked; edit the copy as needed.')
+                                                ->body('Loaded '.count($instantiation['steps']).' steps with generated copy. Structure is locked; edit the copy as needed.')
                                                 ->success()
                                                 ->send();
                                         } else {
