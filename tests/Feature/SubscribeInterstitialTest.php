@@ -14,10 +14,12 @@ use Illuminate\Support\Facades\DB;
 use Tests\TestCase;
 
 /**
- * The subscribe interstitial: server-rendered from the LIVE plan for its display
- * details, CTA-only, redirecting to the report's RESOLVED checkout URL — the
- * variant-or-base url frozen on the report (subscription_snapshot['url']), with the
- * live plan url as a fallback for pre-Stage-3 reports (Report::checkoutUrl()).
+ * The subscribe interstitial: its product progression comes from the REPORT's OWN
+ * instantiated steps (report_step_products, variant-swapped) — falling back to the
+ * live plan only when the report was never instantiated — with the live plan
+ * supplying name/pricing. CTA-only, redirecting to the report's RESOLVED checkout
+ * URL: the variant-or-base url frozen on the report (subscription_snapshot['url']),
+ * with the live plan url as a fallback for pre-Stage-3 reports (Report::checkoutUrl()).
  */
 class SubscribeInterstitialTest extends TestCase
 {
@@ -92,6 +94,21 @@ class SubscribeInterstitialTest extends TestCase
         ReportStep::create(['report_id' => $report->id, 'title' => 'Step', 'type' => 'prose', 'stage_label' => 'Phase 1', 'body' => 'x', 'position' => 0]);
 
         return $report;
+    }
+
+    /**
+     * Give the report its OWN instantiated product steps (report_step_products) — the
+     * variant-aware source the interstitial must read. $first is the "first delivery"
+     * product (the swapped one for a variant report); $upcoming is the "what comes
+     * next" product. Mirrors a real apply_plan instantiation; a prose step is kept
+     * first to prove prose is skipped on the report-step path too.
+     */
+    private function instantiateSteps(Report $report, CatalogProduct $first, CatalogProduct $upcoming): void
+    {
+        $p1 = ReportStep::create(['report_id' => $report->id, 'title' => 'Step 1: Microbiome Reset', 'type' => 'product', 'stage_label' => 'Phase 1 · Months 1–3', 'position' => 1]);
+        $p1->products()->create(['catalog_product_id' => $first->id, 'duration' => '3 months (12 weeks)', 'quantity' => '3 (one pouch per month)', 'inclusion' => 'included', 'position' => 0]);
+        $p2 = ReportStep::create(['report_id' => $report->id, 'title' => 'Step 3: Rebuild', 'type' => 'product', 'stage_label' => 'Phase 2 · Months 4–7', 'position' => 2]);
+        $p2->products()->create(['catalog_product_id' => $upcoming->id, 'duration' => '4 months', 'inclusion' => 'included', 'position' => 0]);
     }
 
     public function test_interstitial_renders_pet_first_product_price_and_cta(): void
@@ -194,5 +211,90 @@ class SubscribeInterstitialTest extends TestCase
             ->assertOk()
             ->assertSee('/report/' . $report->public_token . '/subscribe', false)
             ->assertDontSee('href="' . self::SNAPSHOT_URL . '"', false);
+    }
+
+    /**
+     * THE BUG: a sensitive-pet variant report (plan swapped AMR → AMR Rosemary-Free)
+     * showed the standard "PetBiome AMR" on the interstitial. It must now show the
+     * report's OWN swapped product (name + image), read from report_step_products —
+     * not the live plan's base product.
+     */
+    public function test_variant_report_shows_the_swapped_product_on_the_interstitial(): void
+    {
+        $plan = $this->makePlan();                 // live plan: standard AMR (amr.jpg) + Prebiotic
+        $rosemaryFree = CatalogProduct::create([
+            'name' => 'PetBiome AMR (Rosemary Free)', 'price' => 35, 'is_active' => true,
+            'image_path' => 'https://img.test/amr-rf.png',
+        ]);
+        $prebiotic = CatalogProduct::where('name', 'PetBiome Prebiotic')->firstOrFail();
+
+        $report = $this->makeReport($plan);
+        // The report was instantiated with the SWAP applied (first delivery = RF).
+        $this->instantiateSteps($report, $rosemaryFree, $prebiotic);
+
+        $res = $this->get('/report/' . $report->public_token . '/subscribe');
+
+        $res->assertOk()
+            ->assertSee('PetBiome AMR (Rosemary Free)')        // swapped first-delivery name
+            ->assertSee('https://img.test/amr-rf.png', false)  // swapped product image
+            // The standard AMR image (the base plan's product) must NOT appear — the
+            // interstitial no longer reads the live plan's product. ("PetBiome AMR" as
+            // text can't be asserted-absent: it's a substring of the RF name.)
+            ->assertDontSee('https://img.test/amr.jpg', false);
+    }
+
+    /**
+     * PRESERVE: a base (non-variant) report — whose instantiated products equal the
+     * base plan's — looks exactly as before: standard AMR, standard image.
+     */
+    public function test_base_report_is_unchanged_on_the_interstitial(): void
+    {
+        $plan = $this->makePlan();
+        $amr = CatalogProduct::where('name', 'PetBiome AMR')->firstOrFail();
+        $prebiotic = CatalogProduct::where('name', 'PetBiome Prebiotic')->firstOrFail();
+
+        $report = $this->makeReport($plan);
+        $this->instantiateSteps($report, $amr, $prebiotic); // instantiated == base plan
+
+        $this->get('/report/' . $report->public_token . '/subscribe')
+            ->assertOk()
+            ->assertSee('PetBiome AMR')                        // standard product
+            ->assertSee('https://img.test/amr.jpg', false)     // standard image, as now
+            ->assertDontSee('Rosemary Free');
+    }
+
+    /**
+     * CONSISTENCY: for a variant report, the swapped product appears identically on
+     * (a) the report's product card + (b) its subscribe box (report.show) AND
+     * (c) the interstitial — all sourced from the report's instantiated data.
+     */
+    public function test_swapped_product_is_consistent_across_report_card_subscribe_box_and_interstitial(): void
+    {
+        $plan = $this->makePlan();
+        $rosemaryFree = CatalogProduct::create([
+            'name' => 'PetBiome AMR (Rosemary Free)', 'price' => 35, 'is_active' => true,
+            'image_path' => 'https://img.test/amr-rf.png',
+        ]);
+        $prebiotic = CatalogProduct::where('name', 'PetBiome Prebiotic')->firstOrFail();
+
+        // The subscribe box on report.show reads the snapshot's includes list, so
+        // freeze the swapped product there too (mirrors a real variant instantiation).
+        $report = $this->makeReport($plan);
+        $report->update(['subscription_snapshot' => array_merge($report->subscription_snapshot, [
+            'includes' => [['name' => 'PetBiome AMR (Rosemary Free)', 'price' => 35]],
+        ])]);
+        $this->instantiateSteps($report, $rosemaryFree, $prebiotic);
+
+        // (a)+(b) the report page (product card + subscribe box).
+        $this->get('/report/' . $report->public_token)
+            ->assertOk()
+            ->assertSee('PetBiome AMR (Rosemary Free)')
+            ->assertDontSee('https://img.test/amr.jpg', false);
+
+        // (c) the interstitial — same swapped product.
+        $this->get('/report/' . $report->public_token . '/subscribe')
+            ->assertOk()
+            ->assertSee('PetBiome AMR (Rosemary Free)')
+            ->assertDontSee('https://img.test/amr.jpg', false);
     }
 }

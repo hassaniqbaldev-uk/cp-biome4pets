@@ -1,6 +1,7 @@
 {{--
-    Subscribe interstitial. Server-rendered from the LIVE plan for its display
-    details (ReportController@subscribe). Frames the wait as "preparing your plan"
+    Subscribe interstitial. Products come from the REPORT's OWN instantiated steps
+    (variant-swapped), with the live plan supplying name/pricing
+    (ReportController@subscribe). Frames the wait as "preparing your plan"
     with a progress bar, then AUTO-REDIRECTS to the report's resolved Loop checkout
     ($checkoutUrl = the variant-or-base url frozen on the report, with the live plan
     url as fallback) after 15s. The CTA still hands off immediately on click.
@@ -134,7 +135,8 @@
                             <div class="next-row" style="border:1px solid #eef2f6; border-radius:14px; padding:10px 12px; background:#fff;">
                                 @include('report.partials._product-thumb', ['catalog' => $nextCatalog, 'size' => 48])
                                 <div style="flex:1; min-width:0;">
-                                    <div class="text-navy" style="font-size:14.5px; font-weight:700;">{{ $nextCatalog?->name ?? $step->step_title }}</div>
+                                    {{-- Report steps use `title`; the live-plan fallback uses `step_title`. --}}
+                                    <div class="text-navy" style="font-size:14.5px; font-weight:700;">{{ $nextCatalog?->name ?? $step->title ?? $step->step_title }}</div>
                                     @if(filled($step->stage_label))
                                         <div style="font-size:12px; color:#7a7580; margin-top:2px;">{{ $step->stage_label }}</div>
                                     @endif

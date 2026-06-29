@@ -38,15 +38,25 @@ class ReportController extends Controller
     }
 
     /**
-     * The subscribe interstitial: explains the auto-adjusting plan (from the LIVE
-     * plan data) before the CTA hands off to the plan's Loop checkout URL. If the
-     * live plan is missing/disabled or has no checkout URL, degrade gracefully
-     * back to the report.
+     * The subscribe interstitial: explains the auto-adjusting plan before the CTA
+     * hands off to the plan's Loop checkout URL. Product details come from the
+     * REPORT's OWN instantiated steps (report_step_products) — the same swapped
+     * source the report's product card + subscribe box use — so a sensitive-pet
+     * variant shows its swapped product here too, not the base plan's. If the live
+     * plan is missing/disabled or has no checkout URL, degrade gracefully back to
+     * the report.
      */
     public function subscribe(string $token)
     {
         $report = Report::where('public_token', $token)
-            ->with(['client', 'pet.client', 'plan.steps.products.catalogProduct'])
+            ->with([
+                'client', 'pet.client',
+                // The report's instantiated (variant-swapped) products for the
+                // interstitial, plus the live plan for its name/pricing + the
+                // fallback path below.
+                'steps.products.catalogProduct',
+                'plan.steps.products.catalogProduct',
+            ])
             ->firstOrFail();
 
         // Same publish-gate as show(): never serve a draft/unpublished report's
@@ -70,11 +80,22 @@ class ReportController extends Controller
             return redirect()->route('report.show', ['token' => $report->public_token]);
         }
 
-        // Product steps in plan order (skip prose/dietary steps for the product
+        // Product steps in order (skip prose/dietary steps for the product
         // progression). The first is the "first delivery"; the rest are upcoming.
-        $productSteps = $plan->steps
+        //
+        // Source from the REPORT's OWN instantiated steps so a variant report shows
+        // its SWAPPED product (e.g. "PetBiome AMR (Rosemary Free)"), consistent with
+        // the report's product card + subscribe box. Older reports that were never
+        // instantiated (no report_steps) fall back to the live plan, unchanged.
+        $productSteps = $report->steps
             ->where('type', 'product')
             ->values();
+
+        if ($productSteps->isEmpty()) {
+            $productSteps = $plan->steps
+                ->where('type', 'product')
+                ->values();
+        }
 
         $firstStep = $productSteps->first();
 
