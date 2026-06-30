@@ -148,7 +148,7 @@
                 <span style="vertical-align: middle; font-size: 11px; font-weight: bold; color: #ffffff;">Biome4Pets Ltd</span>
             </td>
             <td style="vertical-align: middle; height: 14mm; padding-right: 24px; text-align: right; white-space: nowrap; font-family: Arial, sans-serif; font-size: 11px; color: #ffffff;">
-                info@biome4pets.com &nbsp;&nbsp;&bull;&nbsp;&nbsp; www.biome4pets.com
+                <a href="mailto:info@biome4pets.com" style="color:#ffffff; text-decoration:underline;">info@biome4pets.com</a> &nbsp;&nbsp;&bull;&nbsp;&nbsp; <a href="https://www.biome4pets.com" style="color:#ffffff; text-decoration:underline;">www.biome4pets.com</a>
             </td>
         </tr>
     </table>
@@ -191,7 +191,7 @@
             </div>
 
             <div style="padding-top: 34px;">
-                <span style="font-size: 12px; color: #55505A;">info@biome4pets.com &nbsp;&nbsp;&bull;&nbsp;&nbsp; www.biome4pets.com</span>
+                <span style="font-size: 12px; color: #55505A;"><a href="mailto:info@biome4pets.com" style="color:#55505A; text-decoration:underline;">info@biome4pets.com</a> &nbsp;&nbsp;&bull;&nbsp;&nbsp; <a href="https://www.biome4pets.com" style="color:#55505A; text-decoration:underline;">www.biome4pets.com</a></span>
             </div>
         </td>
     </tr>
@@ -246,7 +246,7 @@
                     <div style="background-color: #E3F0FF; padding: 15px;">
                         <div style="font-size: 13px; font-weight: bold; color: #301C47; margin-bottom: 4px;">Summary of Findings</div>
                         <div style="font-size: 11px; color: #301C47;">Below is a summary of the dysbiosis identified, along with targeted recommendations to help restore balance.</div>
-                        <div style="font-size: 11px; color: #301C47; margin-top: 8px;">Support: For questions or further guidance, contact info@biome4pets.com</div>
+                        <div style="font-size: 11px; color: #301C47; margin-top: 8px;">Support: For questions or further guidance, contact <a href="mailto:info@biome4pets.com" style="color:#301C47; text-decoration:underline;">info@biome4pets.com</a></div>
                     </div>
                 </td>
             </tr>
@@ -656,8 +656,10 @@
                         <div style="font-size: 11px; color: #A99CC4; text-transform: uppercase; letter-spacing: 2px; font-weight: bold; margin-bottom: 10px;">Your tailored plan is online</div>
                         <div style="font-size: 21px; font-weight: bold; color: #ffffff; margin-bottom: 10px;">View {{ $petName }}'s full plan &amp; subscription</div>
                         <div style="font-size: 11px; color: #cdbfe0; margin-bottom: 20px; line-height: 1.6;">The complete step-by-step protocol, recommended products with dosing, and one-click subscription are all available on {{ $petName }}'s secure online report.</div>
+                        {{-- The button IS the clickable link to the online report (DomPDF
+                             renders <a href> as a real link). The raw URL text that used to
+                             sit below it was redundant + messy, so it's removed. --}}
                         <a href="{{ $reportUrlCta }}" style="background-color: #4654A4; color: #ffffff; font-size: 13px; font-weight: bold; text-decoration: none; padding: 12px 24px; display: inline-block;">View plan online &raquo;</a>
-                        <div style="font-size: 10px; color: #A99CC4; margin-top: 16px; word-break: break-all;"><a href="{{ $reportUrlCta }}" style="color: #9FC0E0; text-decoration: underline;">{{ $reportUrl }}</a></div>
                     </td>
                 </tr>
             </table>

@@ -158,9 +158,9 @@
         {{-- Contact bar --}}
         <div class="bg-navy/90 text-white text-xs sm:text-sm">
             <div class="max-w-5xl mx-auto px-4 sm:px-6 py-2 flex flex-col sm:flex-row sm:justify-center gap-1 sm:gap-6 text-center">
-                <span>info@biome4pets.com</span>
+                <span><a href="mailto:info@biome4pets.com" style="color:inherit; text-decoration:underline;">info@biome4pets.com</a></span>
                 <span class="hidden sm:inline">&middot;</span>
-                <span>www.biome4pets.com</span>
+                <span><a href="https://www.biome4pets.com" target="_blank" rel="noopener noreferrer" style="color:inherit; text-decoration:underline;">www.biome4pets.com</a></span>
             </div>
         </div>
     </header>
@@ -185,7 +185,7 @@
                     <div class="bg-light-blue rounded-2xl p-5 lift">
                         <h3 class="font-bold text-navy mb-2">Summary of Findings</h3>
                         <p class="text-sm text-navy/80">On the next page is a summary of the dysbiosis identified, along with targeted recommendations to help restore balance.</p>
-                        <p class="text-sm text-navy/80 mt-2">Support: For questions or further guidance, contact info@biome4pets.com</p>
+                        <p class="text-sm text-navy/80 mt-2">Support: For questions or further guidance, contact <a href="mailto:info@biome4pets.com" style="color:inherit; text-decoration:underline;">info@biome4pets.com</a></p>
                     </div>
                 </div>
             </div>
@@ -986,8 +986,8 @@
                 <img src="/images/biome4pets-logo-white.png" alt="Biome4Pets" style="height:48px; width:auto; display:block;">
             </div>
             <div class="text-sm text-blue-200 space-y-1 sm:text-right">
-                <p>info@biome4pets.com</p>
-                <p>www.biome4pets.com</p>
+                <p><a href="mailto:info@biome4pets.com" style="color:inherit; text-decoration:underline;">info@biome4pets.com</a></p>
+                <p><a href="https://www.biome4pets.com" target="_blank" rel="noopener noreferrer" style="color:inherit; text-decoration:underline;">www.biome4pets.com</a></p>
             </div>
         </div>
     </footer>

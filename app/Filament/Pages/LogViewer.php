@@ -4,6 +4,7 @@ namespace App\Filament\Pages;
 
 use App\Support\LogReader;
 use Filament\Actions\Action;
+use Filament\Notifications\Notification;
 use Filament\Pages\Page;
 
 /**
@@ -11,11 +12,12 @@ use Filament\Pages\Page;
  * storage/logs, so production errors can be diagnosed in-portal without SSH or
  * downloading log files.
  *
- * STRICTLY READ-ONLY: it reads (the tail of) a chosen log file and lists the most
- * recent entries newest-first, each with its message, timestamp, level and a
- * collapsible stack trace. It never writes, clears or deletes a log. All the file
- * work — tail-reading for bounded memory, and whitelist filename resolution so a
- * picked file can never traverse outside storage/logs — lives in LogReader.
+ * Reached UNDER Settings: it's nested beneath the Settings nav item
+ * (navigationParentItem), matching where the client expects to find it, while
+ * staying its own page/URL. Reading is read-only (tail + whitelist resolution in
+ * LogReader); the one mutation is the manual "Clear logs" action below, which
+ * truncates the selected log in place (never auto-on-deploy — a deliberate button
+ * so a deploy error's evidence is never wiped automatically).
  *
  * Gating mirrors Settings / Bulk Operations: canAccess() is the security gate
  * (Filament 403s on direct URL access for Admins) and shouldRegisterNavigation()
@@ -30,6 +32,9 @@ class LogViewer extends Page
     protected static ?string $title = 'Error Logs';
 
     protected static ?string $navigationGroup = 'System';
+
+    // Nested under the Settings nav item so it's reached via Settings.
+    protected static ?string $navigationParentItem = 'Settings';
 
     // Between Bulk Operations (16) and Report an Issue (20).
     protected static ?int $navigationSort = 18;
@@ -67,6 +72,41 @@ class LogViewer extends Page
                 ->icon('heroicon-o-arrow-path')
                 ->color('gray')
                 ->action(fn () => null),
+
+            // Manual one-off "clean slate" — truncates the SELECTED log in place.
+            // Deliberately NOT auto-on-deploy (that would wipe the evidence right
+            // when a deploy error needs diagnosing). Confirm-gated + Super-Admin-only
+            // (the whole page is already Super-Admin-only; canAccess() re-checked in
+            // the handler for defence in depth). Hidden when there's no readable file
+            // to clear.
+            Action::make('clear')
+                ->label('Clear logs')
+                ->icon('heroicon-o-trash')
+                ->color('danger')
+                ->requiresConfirmation()
+                ->modalHeading('Clear the error log?')
+                ->modalDescription('This permanently removes the current log entries. Do this after reviewing — it cannot be undone.')
+                ->modalSubmitActionLabel('Clear logs')
+                ->visible(fn (): bool => filled($this->file) && ! $this->selectedFileUnreadable())
+                ->action(function (): void {
+                    if (! static::canAccess()) {
+                        return; // Super-Admin-only; never clear for anyone else.
+                    }
+
+                    if (LogReader::clear($this->file)) {
+                        Notification::make()
+                            ->title('Error log cleared')
+                            ->body('The log file is now empty. New entries will appear here as they\'re logged.')
+                            ->success()
+                            ->send();
+                    } else {
+                        Notification::make()
+                            ->title('Could not clear the log')
+                            ->body('The selected log file could not be cleared. Pick a valid log file and try again.')
+                            ->danger()
+                            ->send();
+                    }
+                }),
         ];
     }
 

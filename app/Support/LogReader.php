@@ -3,9 +3,10 @@
 namespace App\Support;
 
 /**
- * Read-only reader for the Laravel log files under storage/logs, powering the
- * Super-Admin Error Logs page. It NEVER writes, truncates or deletes — every
- * method only opens files for reading.
+ * Reader for the Laravel log files under storage/logs, powering the Super-Admin
+ * Error Logs page. Every method is read-only EXCEPT clear(), which empties a
+ * whitelisted log in place for the manual "Clear logs" button (it truncates to
+ * zero bytes — it never deletes the file, so logging continues into the same file).
  *
  * Two safety properties matter here:
  *   - Bounded memory: a production log can be tens of MB. We only ever read the
@@ -75,6 +76,27 @@ class LogReader
         $path = self::logDir().'/'.$base;
 
         return is_file($path) && is_readable($path) ? $path : null;
+    }
+
+    /**
+     * Empty (truncate to zero bytes) a whitelisted log file IN PLACE for the manual
+     * "Clear logs" button. Path-safety reuses resolve()'s whitelist, so only a real
+     * *.log file inside storage/logs can ever be cleared — a traversal/absolute path
+     * resolves to null and is refused. The file is truncated, NOT deleted: the inode
+     * stays and Laravel keeps appending to the same file afterwards, so logging is
+     * never broken. Returns true on success, false if the file can't be resolved or
+     * written.
+     */
+    public static function clear(?string $name): bool
+    {
+        $path = self::resolve($name);
+
+        if ($path === null) {
+            return false;
+        }
+
+        // 'w' opens with O_TRUNC and writing '' leaves a zero-byte file in place.
+        return @file_put_contents($path, '') !== false;
     }
 
     /**

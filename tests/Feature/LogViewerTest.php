@@ -147,4 +147,68 @@ class LogViewerTest extends TestCase
         // Reading never mutates the file.
         $this->assertSame($sizeBefore, filesize(LogReader::logDir().'/'.$name));
     }
+
+    public function test_error_logs_is_nested_under_settings_in_navigation(): void
+    {
+        // Relocated: reached via Settings (nested nav item), not a standalone System page.
+        $this->assertSame('Settings', LogViewer::getNavigationParentItem());
+    }
+
+    public function test_clear_logs_truncates_the_file_in_place_and_keeps_logging_working(): void
+    {
+        $this->actingAs($this->user(User::ROLE_SUPER_ADMIN));
+        $name = $this->writeLog(self::SAMPLE);
+        $path = LogReader::logDir().'/'.$name;
+
+        $this->assertGreaterThan(0, filesize($path));
+
+        Livewire::test(LogViewer::class)
+            ->set('file', $name)
+            ->callAction('clear')
+            ->assertNotified('Error log cleared')
+            ->assertHasNoActionErrors();
+
+        clearstatcache();
+
+        // The file still exists (not deleted) and is now empty → logging continues.
+        $this->assertFileExists($path);
+        $this->assertSame(0, filesize($path));
+
+        // The app keeps writing to the SAME file afterwards.
+        file_put_contents($path, "[2026-06-29 09:00:00] production.ERROR: After clear\n", FILE_APPEND);
+        $this->assertStringContainsString('After clear', file_get_contents($path));
+    }
+
+    public function test_clear_logs_action_requires_confirmation(): void
+    {
+        $this->actingAs($this->user(User::ROLE_SUPER_ADMIN));
+        $name = $this->writeLog(self::SAMPLE);
+
+        $component = Livewire::test(LogViewer::class)
+            ->set('file', $name)
+            ->assertActionExists('clear');
+
+        $action = $component->instance()->getAction('clear');
+
+        // requiresConfirmation() centres the modal — assert that + the custom copy.
+        $this->assertSame(\Filament\Support\Enums\Alignment::Center, $action->getModalAlignment());
+        $this->assertSame('Clear the error log?', $action->getModalHeading());
+    }
+
+    public function test_clear_is_path_safe_refusing_non_whitelisted_files(): void
+    {
+        // Traversal sequences / absolute paths / non-log names resolve to null in
+        // LogReader::resolve(), so clear() refuses them — nothing outside the logs
+        // dir (or any non-*.log file) can ever be truncated.
+        $this->assertFalse(LogReader::clear('../../.env'));
+        $this->assertFalse(LogReader::clear('/etc/passwd'));
+        $this->assertFalse(LogReader::clear('does-not-exist.log'));
+        $this->assertFalse(LogReader::clear(null));
+
+        // A real, whitelisted log in the logs dir IS clearable (control case).
+        $name = $this->writeLog(self::SAMPLE);
+        $this->assertTrue(LogReader::clear($name));
+        clearstatcache();
+        $this->assertSame(0, filesize(LogReader::logDir().'/'.$name));
+    }
 }
