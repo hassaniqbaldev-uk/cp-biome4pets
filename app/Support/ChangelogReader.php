@@ -59,6 +59,17 @@ class ChangelogReader
     }
 
     /**
+     * The label of the most recent version (the top entry), or null when the file is
+     * missing/malformed. This is the single source of truth for the platform version
+     * shown in the admin footer — bumping CHANGELOG.md's top entry moves the footer
+     * too, so they can never drift.
+     */
+    public static function latestVersion(): ?string
+    {
+        return self::versions()[0]['version'] ?? null;
+    }
+
+    /**
      * Parse Keep-a-Changelog markdown into versions → categories → entries. Pure and
      * string-based so it's directly testable.
      *

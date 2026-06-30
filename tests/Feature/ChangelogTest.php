@@ -102,13 +102,45 @@ class ChangelogTest extends TestCase
 
     public function test_real_changelog_file_parses_into_versions(): void
     {
-        // The committed CHANGELOG.md must parse into at least one version with entries.
+        // The committed CHANGELOG.md parses into the full history, newest first.
         $this->assertTrue(ChangelogReader::exists());
         $versions = ChangelogReader::versions();
 
-        $this->assertNotEmpty($versions);
+        $this->assertSame(
+            ['v1.4.0', 'v1.3.0', 'v1.2.0', 'v1.1.0', 'v1.0.0'],
+            array_column($versions, 'version'),
+        );
         $this->assertSame('v1.4.0', $versions[0]['version']);
         $this->assertNotEmpty($versions[0]['groups']);
+    }
+
+    public function test_latest_version_is_the_changelog_top_entry(): void
+    {
+        $versions = ChangelogReader::versions();
+
+        // The single source of truth: latestVersion() === the top entry's label.
+        $this->assertSame($versions[0]['version'], ChangelogReader::latestVersion());
+        $this->assertSame('v1.4.0', ChangelogReader::latestVersion());
+    }
+
+    public function test_latest_version_semantics_are_null_for_an_unparseable_file(): void
+    {
+        // latestVersion() is versions()[0]['version'] ?? null; an unparseable file
+        // yields [] → null, which is what the footer's ?? 'v1.4.0' fallback relies on.
+        $emptyVersions = ChangelogReader::parse('');
+        $this->assertSame([], $emptyVersions);
+        $this->assertNull($emptyVersions[0]['version'] ?? null);
+    }
+
+    public function test_footer_shows_the_changelog_version_not_the_stale_v1_0(): void
+    {
+        // The admin footer renders the version from the changelog's top entry, so it
+        // reads v1.4.0 (matching the changelog) and never the old hardcoded v1.0.
+        $html = view('filament.footer-version')->render();
+
+        $this->assertStringContainsString(ChangelogReader::latestVersion().' - Biome4Pets Portal', $html);
+        $this->assertStringContainsString('v1.4.0 - Biome4Pets Portal', $html);
+        $this->assertStringNotContainsString('v1.0 - Biome4Pets Portal', $html);
     }
 
     // ── Access gating (Admins + Super Admins; staff-only) ────────────────

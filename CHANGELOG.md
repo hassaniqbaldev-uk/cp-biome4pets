@@ -5,50 +5,69 @@ All notable changes to the Biome4Pets portal are recorded here. The format follo
 change grouped under **Added / Fixed / Changed / Improved**.
 
 > **Workflow:** this file ships WITH the code. Add entries here as part of each
-> release/deploy — the portal's **Changelog** page (System → Changelog) reads and
-> displays this file read-only, so there is no in-portal editing. Update the file,
-> commit it, deploy, and the new version shows up automatically.
+> release/deploy. The portal's **Changelog** page (System → Changelog) reads and
+> displays this file read-only, and the version shown in the admin footer is taken
+> from the top entry below, so there is no in-portal editing and the version cannot
+> drift. Update the file, commit it, deploy, and the new version shows up everywhere
+> automatically.
 
 ## [v1.4.0] - 2026-06-29
 
 ### Added
-- **Sensitive-pet plan variants.** A plan can now swap a product for a flagged pet —
-  e.g. a sensitive dog is automatically moved from standard AMR to AMR (Rosemary
-  Free), with the right checkout link and the swapped product shown everywhere on the
-  report.
-- **Bulk operations.** A Super-Admin tools page for regenerating and sending many
-  reports at once, with a live progress card so you can see how a run is going.
-- **In-app error log viewer.** Super Admins can review application errors in the
-  portal (under Settings) without server access, including a manual "Clear logs"
-  button for a clean slate after reviewing.
+- Sensitive-pet plans: pets marked as sensitive now automatically receive the rosemary-free AMR product and the correct subscription checkout link.
+- Bulk operations tool for administrators: regenerate or send many reports at once, with progress tracking and the ability to resume if it is interrupted.
+- In-app error log viewer for administrators, with a manual option to clear the log.
+- A changelog section in the admin so the team can see what has shipped in each release.
 
 ### Fixed
-- **Apply-plan error.** Fixed a crash that could occur when applying a plan to a
-  report.
-- **Interstitial product mismatch.** The "creating your plan" screen now shows the
-  swapped product for a sensitive-pet report, matching the rest of the report.
+- Corrected an issue where applying a plan to a report could fail in certain cases.
+- The subscription preview screen now shows the correct product for sensitive pets throughout.
 
 ### Improved
-- **Clickable contact links.** The email address and web address shown on reports
-  (web and PDF) are now proper clickable links.
+- Email and web addresses shown in reports are now clickable links.
+- Reports can be sent to Klaviyo more than once when needed.
+- Tidied the downloadable PDF, with a clearer plan button and a stray web address removed.
 
 ## [v1.3.0] - 2026-06-15
 
 ### Added
-- **Send a report two ways.** Reports can be sent via Klaviyo email or as a direct
-  email from the app.
-- **Breed autocomplete.** Pet breed is backed by a managed suggestion list, so staff
-  pick a consistent breed name instead of free-typing variants.
+- Reports can now be sent in two ways: through Klaviyo or through the app's own email.
+- "Sensitive animal" and "Large breed" options on pet profiles, with large breed selected automatically for pets over 35kg.
+- The breed field now suggests existing breeds as you type and remembers new ones.
+- "Home Cooked" added as a diet option.
 
 ### Changed
-- **"Tub" renamed to "pouch".** Powder quantities now read "one pouch per month"
-  across plans and already-generated reports.
-
-### Fixed
-- **Report accuracy.** Corrected microbiome band calculations and tightened pricing
-  wording so figures read clearly and consistently.
+- Powder product quantities now read "pouch" instead of "tub".
 
 ### Improved
-- **Unpublish to edit safely.** A published report can be unpublished to make edits;
-  while unpublished, its public link shows a friendly "being finalised" page instead
-  of stale content.
+- Reports can be unpublished for editing, and anyone who visits in the meantime sees a friendly "being finalised" message.
+
+## [v1.2.0] - 2026-06-08
+
+### Added
+- Bulk report regeneration tool for administrators, to apply report improvements to reports that already exist.
+- An option to hide the subscription section on a report, for retests or customers already on a programme.
+
+### Improved
+- Reports are now fully mobile friendly, with no sideways scrolling and pricing shown correctly on phones.
+- Clearer subscription pricing, showing the discounted monthly price.
+- A tidier footer on the downloadable PDF, with a clearer logo and neater layout.
+
+## [v1.1.0] - 2026-06-01
+
+### Added
+- Branded welcome and password-reset emails, with a consistent look across all system emails.
+- Year of birth for pets, instead of a full date, since owners do not always know the exact day.
+
+### Fixed
+- Improved report accuracy so the wording about each microbe level always matches the underlying figures.
+- An automatic safety check that flags a report for review when its wording does not match the data.
+
+### Changed
+- Updated the platform's branding colour.
+- Refined staff access levels for Admins and Super Admins.
+
+## [v1.0.0] - 2026-05-19
+
+### Added
+- Initial release of the Biome4Pets portal: gut microbiome report generation, treatment plans, client and pet management, and report delivery to customers.
