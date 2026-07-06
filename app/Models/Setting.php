@@ -34,8 +34,22 @@ class Setting extends Model
     public const SIGNS_OF_STABILITY = 'signs_of_stability';
 
     /**
+     * The single OpenAI model used by BOTH generation calls (report interpretation
+     * AND plan copy), resolved through OpenAiService::resolveModel(). Empty / unknown
+     * / missing always falls back to config('services.openai.model') (gpt-4o), so it
+     * can never break or change today's behaviour when unset. Replaces the retired
+     * per-call PLAN_GENERATION_MODEL.
+     */
+    public const OPENAI_MODEL = 'openai_model';
+
+    /**
      * Plan-generation config — read by OpenAiService::generatePlanCopy().
      * Each consumer falls back to a sensible default when the value is blank.
+     *
+     * NOTE: PLAN_GENERATION_MODEL is RETIRED — the model is now the single
+     * Setting::OPENAI_MODEL above. The constant is kept only so the consolidation
+     * migration can read/carry over any existing live value; nothing reads it at
+     * generation time any more.
      */
     public const PLAN_GENERATION_MODEL = 'plan_generation_model';
 
@@ -62,6 +76,34 @@ class Setting extends Model
      * Display currency (stored for display use; no behavioural change today).
      */
     public const CURRENCY = 'currency';
+
+    /**
+     * Editable per-model OpenAI token rates, stored as a JSON map
+     * model => {input_per_1k, output_per_1k} in the display currency
+     * (Setting::CURRENCY, default GBP). Admin-maintained — they drive the
+     * COST ESTIMATE on the OpenAI settings tab and are deliberately editable
+     * (not hardcoded) because OpenAI prices change and differ per model and per
+     * direction (prompt/input vs completion/output).
+     *
+     * Seeded with the *_DEFAULT below: approximate current rates for the
+     * whitelist models, to be verified against OpenAI's published pricing. These
+     * produce an ESTIMATE only — never the amount OpenAI actually bills.
+     */
+    public const OPENAI_TOKEN_RATES = 'openai_token_rates';
+
+    /**
+     * Seeded per-1,000-token rates for the whitelist models, in the display
+     * currency (GBP by default). Approximate GBP conversions of OpenAI's USD
+     * list prices — admins should verify and adjust against current pricing.
+     *
+     * @var array<string, array{input_per_1k: float, output_per_1k: float}>
+     */
+    public const OPENAI_TOKEN_RATES_DEFAULT = [
+        'gpt-4o' => ['input_per_1k' => 0.002, 'output_per_1k' => 0.008],
+        'gpt-4o-mini' => ['input_per_1k' => 0.00012, 'output_per_1k' => 0.00048],
+        'gpt-4-turbo' => ['input_per_1k' => 0.008, 'output_per_1k' => 0.024],
+        'gpt-4' => ['input_per_1k' => 0.024, 'output_per_1k' => 0.048],
+    ];
 
     /**
      * Review figures shown on the subscribe interstitial. Admin-editable; each
@@ -214,5 +256,30 @@ class Setting extends Model
     public static function setEncrypted(string $key, string $value): void
     {
         static::set($key, encrypt($value));
+    }
+
+    /** The configured display currency code (blank falls back to GBP). */
+    public static function currencyCode(): string
+    {
+        $code = static::get(self::CURRENCY);
+
+        return filled($code) ? strtoupper(trim((string) $code)) : 'GBP';
+    }
+
+    /**
+     * A short display symbol for the configured currency. Falls back to the
+     * currency code plus a space for anything unmapped, so it is never blank.
+     */
+    public static function currencySymbol(): string
+    {
+        $code = static::currencyCode();
+
+        return [
+            'GBP' => '£',
+            'USD' => '$',
+            'EUR' => '€',
+            'AUD' => 'A$',
+            'CAD' => 'C$',
+        ][$code] ?? $code.' ';
     }
 }

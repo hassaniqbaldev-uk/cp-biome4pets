@@ -86,6 +86,9 @@ class Settings extends Page implements HasForms
         // Never prefill secrets (OpenAI / Klaviyo keys, SMTP password) — they stay
         // masked/blank.
         $this->form->fill([
+            // The single model setting shows the resolved model (the stored value
+            // when valid, else the default) so the dropdown is never blank.
+            Setting::OPENAI_MODEL => OpenAiService::resolveModel(),
             Setting::OPENAI_PROMPT_DIRECTIVES => Setting::get(Setting::OPENAI_PROMPT_DIRECTIVES, ''),
             Setting::OPENAI_DIRECTIVE_SUMMARY => Setting::get(Setting::OPENAI_DIRECTIVE_SUMMARY, ''),
             Setting::OPENAI_DIRECTIVE_VET_SUMMARY => Setting::get(Setting::OPENAI_DIRECTIVE_VET_SUMMARY, ''),
@@ -96,6 +99,7 @@ class Settings extends Page implements HasForms
             ...$this->loadReportText(),
             ...$this->loadKlaviyo(),
             ...$this->loadSmtp(),
+            'openai_token_rates' => $this->loadTokenRates(),
             'product_rules' => $this->loadRules(),
         ]);
     }
@@ -109,7 +113,8 @@ class Settings extends Page implements HasForms
         $subsRaw = Setting::get(Setting::SUBSCRIPTIONS_ENABLED);
 
         return [
-            Setting::PLAN_GENERATION_MODEL => Setting::get(Setting::PLAN_GENERATION_MODEL) ?: config('services.openai.model'),
+            // PLAN_GENERATION_MODEL retired — the model is the single OPENAI_MODEL
+            // (OpenAI tab). Not loaded here any more.
             Setting::PLAN_GENERATION_TEMPERATURE => Setting::get(Setting::PLAN_GENERATION_TEMPERATURE, '0.4'),
             Setting::PLAN_GENERATION_SYSTEM_PROMPT => Setting::get(Setting::PLAN_GENERATION_SYSTEM_PROMPT) ?: OpenAiService::PLAN_SYSTEM_PROMPT,
             Setting::DEFAULT_DOSE => Setting::get(Setting::DEFAULT_DOSE) ?: Setting::DEFAULT_DOSE_FALLBACK,
@@ -167,6 +172,25 @@ class Settings extends Page implements HasForms
         ];
     }
 
+    /**
+     * The editable token-rate rows for the OpenAI tab's Repeater, seeded from the
+     * resolved rates (stored map layered over the seeded defaults) so a fresh
+     * install already shows sensible, editable defaults.
+     */
+    protected function loadTokenRates(): array
+    {
+        $rows = [];
+        foreach (\App\Models\AiUsageEvent::resolveRates() as $model => $rate) {
+            $rows[] = [
+                'model' => $model,
+                'input_per_1k' => $rate['input_per_1k'],
+                'output_per_1k' => $rate['output_per_1k'],
+            ];
+        }
+
+        return $rows;
+    }
+
     protected function loadRules(): array
     {
         try {
@@ -214,6 +238,16 @@ class Settings extends Page implements HasForms
     protected function openAiTab(): Tabs\Tab
     {
         $hasKey = filled(Setting::get(Setting::OPENAI_API_KEY));
+        $usage = \App\Models\AiUsageEvent::summary();
+
+        // Cost estimate layer (read-only display over the tracked usage + the
+        // editable rates below). All figures are ESTIMATES, never the OpenAI bill.
+        $rates = \App\Models\AiUsageEvent::resolveRates();
+        $cost = \App\Models\AiUsageEvent::costSummary($rates);
+        $currentModel = OpenAiService::resolveModel();
+        $guide = \App\Models\AiUsageEvent::reportEstimate(100, $rates, $currentModel);
+        $symbol = Setting::currencySymbol();
+        $currency = Setting::currencyCode();
 
         return Tabs\Tab::make('OpenAI')
             ->icon('heroicon-o-sparkles')
@@ -225,6 +259,13 @@ class Settings extends Page implements HasForms
                     ->autocomplete(false)
                     ->placeholder($hasKey ? '•••••••••••• (leave blank to keep current key)' : 'Not set')
                     ->helperText('Stored encrypted at rest. Leave blank when saving to keep the existing key.'),
+                Select::make(Setting::OPENAI_MODEL)
+                    ->label('OpenAI Model')
+                    ->options(fn (): array => OpenAiService::modelOptions())
+                    ->default(OpenAiService::resolveModel())
+                    ->native(false)
+                    ->selectablePlaceholder(false)
+                    ->helperText('The OpenAI model used for report generation (both the report interpretation and the plan copy). Defaults to gpt-4o. Use a valid model — an invalid one will produce blank AI copy.'),
                 Textarea::make(Setting::OPENAI_PROMPT_DIRECTIVES)
                     ->label('AI Prompt Directives (global)')
                     ->rows(6)
@@ -255,7 +296,151 @@ class Settings extends Page implements HasForms
                     ->label('Signs of Stability (report boilerplate)')
                     ->rows(6)
                     ->helperText('Shown in the report\'s "Your Dog\'s Personal Summary". Use {pet} where the pet\'s name should appear. Same text for all reports.'),
+                Section::make('Usage')
+                    ->description('Tokens used by report generation, recorded per call. Read-only.')
+                    ->collapsible()
+                    ->columns(2)
+                    ->schema([
+                        Placeholder::make('usage_interpretation_calls')
+                            ->label('Report interpretation calls')
+                            ->content(number_format($usage['by_type'][\App\Models\AiUsageEvent::TYPE_INTERPRETATION]['calls'])),
+                        Placeholder::make('usage_plan_copy_calls')
+                            ->label('Plan copy calls')
+                            ->content(number_format($usage['by_type'][\App\Models\AiUsageEvent::TYPE_PLAN_COPY]['calls'])),
+                        Placeholder::make('usage_total_tokens')
+                            ->label('Total tokens (all time)')
+                            ->content(number_format($usage['overall']['total_tokens'])),
+                        Placeholder::make('usage_total_tokens_30d')
+                            ->label('Total tokens (last 30 days)')
+                            ->content(number_format($usage['last_30_days']['total_tokens'])),
+                        Placeholder::make('usage_total_calls')
+                            ->label('Total calls (all time)')
+                            ->content(number_format($usage['overall']['calls'])),
+                        Placeholder::make('usage_prompt_completion')
+                            ->label('Prompt / completion tokens (all time)')
+                            ->content(number_format($usage['overall']['prompt_tokens']).' / '.number_format($usage['overall']['completion_tokens'])),
+                    ]),
+                Section::make('Token rates (for cost estimate)')
+                    ->description('Per-1,000-token rates in '.$currency.', used only to ESTIMATE cost — they are not sent to OpenAI. OpenAI prices differ per model and per direction (prompt/input vs completion/output) and change over time, so these are admin-maintained. Update them if OpenAI changes its pricing, and verify against OpenAI\'s current pricing at platform.openai.com/pricing.')
+                    ->collapsible()
+                    ->collapsed()
+                    ->schema([
+                        Repeater::make('openai_token_rates')
+                            ->label('Per-model rates')
+                            ->helperText('One row per model. The input rate prices prompt tokens; the output rate prices completion tokens. A model used for generation but missing here is estimated at the gpt-4o rate and flagged below.')
+                            ->schema([
+                                TextInput::make('model')
+                                    ->label('Model')
+                                    ->required()
+                                    ->maxLength(64),
+                                TextInput::make('input_per_1k')
+                                    ->label('Input rate ('.$symbol.' / 1K prompt tokens)')
+                                    ->numeric()
+                                    ->minValue(0)
+                                    ->step('0.00001')
+                                    ->required(),
+                                TextInput::make('output_per_1k')
+                                    ->label('Output rate ('.$symbol.' / 1K completion tokens)')
+                                    ->numeric()
+                                    ->minValue(0)
+                                    ->step('0.00001')
+                                    ->required(),
+                            ])
+                            ->columns(3)
+                            ->itemLabel(fn (array $state): ?string => $state['model'] ?? 'New model')
+                            ->addActionLabel('Add model rate')
+                            ->reorderable(false)
+                            ->columnSpanFull(),
+                    ]),
+                Section::make('Cost estimate')
+                    ->description('Estimated spend from the tracked usage above, priced with the rates you set. An ESTIMATE, not your OpenAI invoice.')
+                    ->collapsible()
+                    ->columns(2)
+                    ->schema([
+                        Placeholder::make('cost_estimate_disclaimer')
+                            ->label('')
+                            ->columnSpanFull()
+                            ->content(new HtmlString(
+                                '<p style="color:#92400e;background:#fffbeb;border:1px solid #fde68a;border-radius:8px;padding:10px 12px;margin:0;">'
+                                .'<strong>Estimate only — not your OpenAI bill.</strong> These figures are calculated from the tokens we track and the rates set above, so they are approximate. '
+                                .'Your actual charges are in OpenAI\'s billing dashboard (platform.openai.com/usage) and will differ.'
+                                .'</p>',
+                            )),
+                        Placeholder::make('cost_all_time')
+                            ->label('Estimated cost (all time)')
+                            ->content($this->formatMoney($cost['all_time'], $symbol)),
+                        Placeholder::make('cost_last_30_days')
+                            ->label('Estimated cost (last 30 days)')
+                            ->content($this->formatMoney($cost['last_30_days'], $symbol)),
+                        Placeholder::make('cost_missing_rates')
+                            ->label('Models without a set rate')
+                            ->columnSpanFull()
+                            ->visible(fn (): bool => ! empty($cost['missing_rate_models']))
+                            ->content(fn (): HtmlString => new HtmlString(
+                                '<span style="color:#b45309;">Rate not set for: <strong>'
+                                .e(implode(', ', $cost['missing_rate_models']))
+                                .'</strong>. These were estimated at the gpt-4o rate — add a row for them under “Token rates” for an accurate figure.</span>',
+                            )),
+                        Placeholder::make('cost_100_reports')
+                            ->label('Guide: cost of ~100 reports')
+                            ->columnSpanFull()
+                            ->content(new HtmlString($this->reportGuideHtml($guide, $symbol))),
+                    ]),
             ]);
+    }
+
+    /**
+     * Render the "cost of ~100 reports" guide transparently: the per-report token
+     * basis (from tracked averages or the documented baseline), the ×100 total,
+     * and the priced estimate at the current model's rate — plus the regeneration
+     * caveat. All read-only; the figure is clearly an estimate.
+     *
+     * @param  array{reports:int, model:string, rate_configured:bool, source:string, prompt_per_report:float, completion_per_report:float, tokens_per_report:float, total_tokens:float, interpretation_tokens:float, cost:float}  $guide
+     */
+    protected function reportGuideHtml(array $guide, string $symbol): string
+    {
+        $reports = $guide['reports'];
+        $perReport = (int) round($guide['tokens_per_report']);
+        $prompt = (int) round($guide['prompt_per_report']);
+        $completion = (int) round($guide['completion_per_report']);
+        $totalTokens = (int) round($guide['total_tokens']);
+        $totalK = round($totalTokens / 1000).'K';
+        $cost = $this->formatMoney($guide['cost'], $symbol);
+        $model = e($guide['model']);
+        $regen = (int) round($guide['interpretation_tokens']);
+
+        $sourceNote = $guide['source'] === 'tracked'
+            ? 'Averaged from real tracked usage.'
+            : 'Baseline estimate (used until enough real usage is tracked).';
+
+        $rateNote = $guide['rate_configured']
+            ? ''
+            : ' <span style="color:#b45309;">(no rate set for '.$model.' — estimated at the gpt-4o rate)</span>';
+
+        return '<div style="color:#374151;line-height:1.6;">'
+            .'<div>~'.number_format($perReport).' tokens/report ('
+            .number_format($prompt).' prompt + '.number_format($completion).' completion) '
+            .'× '.number_format($reports).' reports = ~'.number_format($totalTokens).' tokens (~'.$totalK.')</div>'
+            .'<div style="font-size:18px;font-weight:700;margin-top:4px;">≈ '.e($cost).' at '.$model.' rates'.$rateNote.'</div>'
+            .'<div style="color:#6b7280;font-size:12px;margin-top:6px;">'.$sourceNote
+            .' Estimate is per generation event — each regeneration is another interpretation call (~'.number_format($regen).' tokens) and adds cost.</div>'
+            .'</div>';
+    }
+
+    /**
+     * Format an estimated money amount for display. Scales the decimal places to
+     * the magnitude so tiny per-token costs stay legible (e.g. £0.0042) while
+     * larger totals read cleanly (e.g. £5.20).
+     */
+    protected function formatMoney(float $amount, string $symbol): string
+    {
+        $decimals = match (true) {
+            $amount >= 1 => 2,
+            $amount >= 0.01 => 4,
+            default => 6,
+        };
+
+        return $symbol.number_format($amount, $decimals);
     }
 
     /**
@@ -268,11 +453,9 @@ class Settings extends Page implements HasForms
         return Tabs\Tab::make('Plans / Generation')
             ->icon('heroicon-o-clipboard-document-list')
             ->schema([
-                TextInput::make(Setting::PLAN_GENERATION_MODEL)
-                    ->label('Plan Generation Model')
-                    ->default(config('services.openai.model'))
-                    ->maxLength(255)
-                    ->helperText('OpenAI model used to write plan copy. Blank falls back to the default ('.config('services.openai.model').').'),
+                // The model moved to the OpenAI tab (Setting::OPENAI_MODEL) — it is
+                // now the single model for BOTH the interpretation and plan-copy
+                // calls, so there is no separate plan model here any more.
                 TextInput::make(Setting::PLAN_GENERATION_TEMPERATURE)
                     ->label('Plan Generation Temperature')
                     ->numeric()
@@ -830,6 +1013,10 @@ class Settings extends Page implements HasForms
             Setting::setEncrypted(Setting::OPENAI_API_KEY, $data[Setting::OPENAI_API_KEY]);
         }
 
+        // The single model. The dropdown only offers known-good values, so this is
+        // already safe; resolveModel() guards anyway, so a bad value can never break
+        // generation (it falls back to the config default at read time).
+        Setting::set(Setting::OPENAI_MODEL, $data[Setting::OPENAI_MODEL] ?? '');
         Setting::set(Setting::OPENAI_PROMPT_DIRECTIVES, $data[Setting::OPENAI_PROMPT_DIRECTIVES] ?? '');
         Setting::set(Setting::OPENAI_DIRECTIVE_SUMMARY, $data[Setting::OPENAI_DIRECTIVE_SUMMARY] ?? '');
         Setting::set(Setting::OPENAI_DIRECTIVE_VET_SUMMARY, $data[Setting::OPENAI_DIRECTIVE_VET_SUMMARY] ?? '');
@@ -839,7 +1026,8 @@ class Settings extends Page implements HasForms
 
         // Plans / Generation — store verbatim; blanks are tolerated because
         // every consumer falls back to its own default when the value is blank.
-        Setting::set(Setting::PLAN_GENERATION_MODEL, $data[Setting::PLAN_GENERATION_MODEL] ?? '');
+        // PLAN_GENERATION_MODEL retired — the model is saved once as OPENAI_MODEL
+        // (OpenAI block above). Nothing writes the old key any more.
         Setting::set(Setting::PLAN_GENERATION_TEMPERATURE, $data[Setting::PLAN_GENERATION_TEMPERATURE] ?? '');
         Setting::set(Setting::PLAN_GENERATION_SYSTEM_PROMPT, $data[Setting::PLAN_GENERATION_SYSTEM_PROMPT] ?? '');
         Setting::set(Setting::DEFAULT_DOSE, $data[Setting::DEFAULT_DOSE] ?? '');
@@ -847,6 +1035,10 @@ class Settings extends Page implements HasForms
         Setting::set(Setting::CURRENCY, $data[Setting::CURRENCY] ?? '');
         Setting::set(Setting::REVIEW_RATING, $data[Setting::REVIEW_RATING] ?? '');
         Setting::set(Setting::REVIEW_COUNT, $data[Setting::REVIEW_COUNT] ?? '');
+
+        // Editable per-model token rates (OpenAI tab) → stored as a JSON map that
+        // drives the cost estimate. Never sent to OpenAI; blank/invalid rows drop.
+        $this->saveTokenRates($data['openai_token_rates'] ?? []);
 
         // Report Text — store verbatim; blank reverts to the built-in default at
         // render time (ReportContent::reportText), so wiping a field is safe.
@@ -888,6 +1080,9 @@ class Settings extends Page implements HasForms
 
         // Reset the form: clear the secret fields, reload persisted values.
         $this->form->fill([
+            // The single model setting shows the resolved model (the stored value
+            // when valid, else the default) so the dropdown is never blank.
+            Setting::OPENAI_MODEL => OpenAiService::resolveModel(),
             Setting::OPENAI_PROMPT_DIRECTIVES => Setting::get(Setting::OPENAI_PROMPT_DIRECTIVES, ''),
             Setting::OPENAI_DIRECTIVE_SUMMARY => Setting::get(Setting::OPENAI_DIRECTIVE_SUMMARY, ''),
             Setting::OPENAI_DIRECTIVE_VET_SUMMARY => Setting::get(Setting::OPENAI_DIRECTIVE_VET_SUMMARY, ''),
@@ -898,8 +1093,38 @@ class Settings extends Page implements HasForms
             ...$this->loadReportText(),
             ...$this->loadKlaviyo(),
             ...$this->loadSmtp(),
+            'openai_token_rates' => $this->loadTokenRates(),
             'product_rules' => $this->loadRules(),
         ]);
+    }
+
+    /**
+     * Encode the token-rate rows to the JSON map stored under
+     * Setting::OPENAI_TOKEN_RATES. Rows without a model name or with a
+     * non-numeric rate are dropped, so a malformed row can never poison the
+     * estimate (resolveRates() falls back to the seeded defaults for anything
+     * absent). A later-model row wins over an earlier duplicate.
+     */
+    protected function saveTokenRates(array $rows): void
+    {
+        $map = [];
+
+        foreach ($rows as $row) {
+            $model = trim((string) ($row['model'] ?? ''));
+            $input = $row['input_per_1k'] ?? null;
+            $output = $row['output_per_1k'] ?? null;
+
+            if ($model === '' || ! is_numeric($input) || ! is_numeric($output)) {
+                continue;
+            }
+
+            $map[$model] = [
+                'input_per_1k' => (float) $input,
+                'output_per_1k' => (float) $output,
+            ];
+        }
+
+        Setting::set(Setting::OPENAI_TOKEN_RATES, json_encode($map));
     }
 
     /**

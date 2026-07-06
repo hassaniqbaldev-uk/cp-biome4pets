@@ -56,7 +56,7 @@ class ApplyPlanActionTest extends TestCase
         // The action resolves OpenAiService from the container, so this fake is used.
         $this->app->instance(OpenAiService::class, new class extends OpenAiService
         {
-            public function generatePlanCopy(array $petFindings, array $planScaffold): array
+            public function generatePlanCopy(array $petFindings, array $planScaffold, ?int $reportId = null): array
             {
                 return ['intro' => 'Generated plan intro for the test pet.', 'steps' => []];
             }

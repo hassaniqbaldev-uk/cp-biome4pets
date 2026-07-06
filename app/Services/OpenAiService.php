@@ -2,6 +2,7 @@
 
 namespace App\Services;
 
+use App\Models\AiUsageEvent;
 use App\Models\Setting;
 use Illuminate\Support\Facades\Log;
 
@@ -76,7 +77,118 @@ PROMPT;
      */
     public ?string $lastErrorCode = null;
 
-    public function generateReportInterpretations(array $phylumTotals, float $diversityScore, array $petContext = [], array $deterministic = []): array
+    /**
+     * Known-good OpenAI models offered in the settings dropdown. The configured
+     * default (config('services.openai.model')) is the safe fallback for anything
+     * outside this list; the first entry mirrors that default.
+     */
+    public const MODELS = ['gpt-4o', 'gpt-4o-mini', 'gpt-4-turbo', 'gpt-4'];
+
+    /**
+     * The model BOTH generation calls use — the SINGLE source of truth.
+     *
+     * Returns Setting::OPENAI_MODEL when it is a non-empty, sane model id (a
+     * whitelisted model, or a plausibly-formed custom id), otherwise the configured
+     * default config('services.openai.model') (gpt-4o). So an empty / missing /
+     * legacy / malformed setting ALWAYS falls back to today's model: it can never
+     * error and never changes today's behaviour when unset.
+     *
+     * NB: the whitelist guards against typos reaching the API. A custom-but-unknown
+     * model that OpenAI itself rejects is still handled gracefully downstream (the
+     * call returns an empty response, never a crash) — the settings UI warns admins
+     * to use a valid model for that reason.
+     */
+    public static function resolveModel(): string
+    {
+        $default = (string) config('services.openai.model', 'gpt-4o');
+        $default = $default !== '' ? $default : 'gpt-4o';
+
+        $configured = Setting::get(Setting::OPENAI_MODEL);
+        if (! is_string($configured)) {
+            return $default;
+        }
+
+        $configured = trim($configured);
+        if ($configured === '') {
+            return $default;
+        }
+
+        // A whitelisted model is always accepted.
+        if (in_array($configured, self::MODELS, true)) {
+            return $configured;
+        }
+
+        // A guarded custom value: accept only a plausibly-formed model id (e.g.
+        // "gpt-4o-2024-08-06"); anything obviously malformed falls back to default.
+        if (preg_match('/^[A-Za-z0-9][A-Za-z0-9._:-]{1,63}$/', $configured) === 1) {
+            return $configured;
+        }
+
+        return $default;
+    }
+
+    /**
+     * Options for the settings model dropdown: the whitelist, plus the currently
+     * stored value if it's a (valid) custom one, so an admin's saved custom model
+     * still displays as the selected option.
+     *
+     * @return array<string, string>
+     */
+    public static function modelOptions(): array
+    {
+        $options = array_combine(self::MODELS, self::MODELS);
+
+        $current = self::resolveModel();
+        if (! isset($options[$current])) {
+            $options[$current] = $current.' (custom)';
+        }
+
+        return $options;
+    }
+
+    /**
+     * Record one call's token usage (additive analytics). Deliberately defensive:
+     *   - no-ops when usage is absent (a failed / usage-less response writes nothing);
+     *   - wraps the insert in try/catch so a tracking-write failure (bad table, DB
+     *     hiccup) is logged and SWALLOWED — usage tracking must NEVER break a live
+     *     report generation. It runs only after the usage has already been logged.
+     *
+     * @param  mixed  $usage  the response's `usage` block (or null)
+     */
+    private function recordUsage(string $callType, string $model, mixed $usage, ?int $reportId = null): void
+    {
+        if (! is_array($usage)) {
+            return; // no usage in the response → nothing billed to record
+        }
+
+        $prompt = $usage['prompt_tokens'] ?? null;
+        $completion = $usage['completion_tokens'] ?? null;
+        $total = $usage['total_tokens'] ?? null;
+
+        // Need at least one numeric token count to be meaningful.
+        if (! is_numeric($prompt) && ! is_numeric($completion) && ! is_numeric($total)) {
+            return;
+        }
+
+        try {
+            AiUsageEvent::create([
+                'report_id' => $reportId,
+                'call_type' => $callType,
+                'model' => $model,
+                'prompt_tokens' => (int) ($prompt ?? 0),
+                'completion_tokens' => (int) ($completion ?? 0),
+                'total_tokens' => (int) ($total ?? (((int) ($prompt ?? 0)) + ((int) ($completion ?? 0)))),
+            ]);
+        } catch (\Throwable $e) {
+            // Secondary to generation — never let a tracking failure surface.
+            Log::warning('AI usage tracking: failed to record event', [
+                'call_type' => $callType,
+                'error' => $e->getMessage(),
+            ]);
+        }
+    }
+
+    public function generateReportInterpretations(array $phylumTotals, float $diversityScore, array $petContext = [], array $deterministic = [], ?int $reportId = null): array
     {
         // Reset the observability signal for this call (success leaves it null).
         $this->lastErrorCode = null;
@@ -106,7 +218,9 @@ PROMPT;
             $apiKey = config('services.openai.api_key', env('OPENAI_API_KEY'));
         }
 
-        $model = config('services.openai.model', env('OPENAI_MODEL', 'gpt-4'));
+        // Single source of truth for the model (Setting::OPENAI_MODEL, guarded;
+        // falls back to config default = gpt-4o). Same resolver as plan copy below.
+        $model = self::resolveModel();
 
         if (empty($apiKey)) {
             Log::error('OpenAI API key is not configured.');
@@ -160,6 +274,12 @@ PROMPT;
                 'usage' => $decoded['usage'] ?? null,
                 'error_type' => $decoded['error']['type'] ?? null,
             ]);
+
+            // Side-write usage tracking (no-ops on error/usage-less responses; never
+            // throws). Secondary to generation — see recordUsage().
+            if (! isset($decoded['error'])) {
+                $this->recordUsage(AiUsageEvent::TYPE_INTERPRETATION, $model, $decoded['usage'] ?? null, $reportId);
+            }
 
             if (isset($decoded['error'])) {
                 // The error envelope can echo request content, so log only the
@@ -464,7 +584,7 @@ PROMPT;
      * Reuses the same auth/HTTP/error-handling style as
      * generateReportInterpretations().
      */
-    public function generatePlanCopy(array $petFindings, array $planScaffold): array
+    public function generatePlanCopy(array $petFindings, array $planScaffold, ?int $reportId = null): array
     {
         $apiKey = Setting::getDecrypted(Setting::OPENAI_API_KEY);
         if (empty($apiKey)) {
@@ -477,10 +597,11 @@ PROMPT;
             return $this->emptyPlanCopy($planScaffold);
         }
 
-        // Model/temperature: dedicated settings first, then the shared default.
-        $model = Setting::get(Setting::PLAN_GENERATION_MODEL)
-            ?: config('services.openai.model', env('OPENAI_MODEL', 'gpt-4o'));
+        // Model: the single source of truth shared with the interpretation call
+        // (Setting::OPENAI_MODEL, guarded; falls back to config default = gpt-4o).
+        $model = self::resolveModel();
 
+        // Temperature is unchanged: its own dedicated setting, default 0.4.
         $temperature = Setting::get(Setting::PLAN_GENERATION_TEMPERATURE);
         $temperature = is_numeric($temperature) ? (float) $temperature : 0.4;
 
@@ -523,6 +644,12 @@ PROMPT;
                 'usage' => $decoded['usage'] ?? null,
                 'error_type' => $decoded['error']['type'] ?? null,
             ]);
+
+            // Side-write usage tracking (no-ops on error/usage-less responses; never
+            // throws). Secondary to generation — see recordUsage().
+            if (! isset($decoded['error'])) {
+                $this->recordUsage(AiUsageEvent::TYPE_PLAN_COPY, $model, $decoded['usage'] ?? null, $reportId);
+            }
 
             if (isset($decoded['error'])) {
                 Log::error('Plan copy generation: OpenAI API returned error.', [

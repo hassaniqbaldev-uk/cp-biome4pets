@@ -62,6 +62,68 @@ class SettingsPageTest extends TestCase
             ->assertFormFieldExists('openai_prompt_directives', 'form');
     }
 
+    public function test_model_selector_is_on_the_openai_tab_and_old_plan_model_field_is_gone(): void
+    {
+        Livewire::test(Settings::class)
+            ->assertOk()
+            // The single model selector now lives on the OpenAI tab…
+            ->assertFormFieldExists('openai_model', 'form')
+            // …and the old free-text Plan Generation Model field is retired.
+            ->assertFormFieldDoesNotExist('plan_generation_model', 'form')
+            // Unset → the dropdown shows the resolved default (gpt-4o), never blank.
+            ->assertFormSet(['openai_model' => OpenAiService::resolveModel()]);
+    }
+
+    public function test_saving_a_model_persists_it_to_the_single_setting(): void
+    {
+        Livewire::test(Settings::class)
+            ->fillForm(['openai_model' => 'gpt-4o-mini'])
+            ->call('save')
+            ->assertHasNoFormErrors();
+
+        $this->assertSame('gpt-4o-mini', Setting::get(Setting::OPENAI_MODEL));
+        $this->assertSame('gpt-4o-mini', OpenAiService::resolveModel());
+        // The retired key is never written by a save.
+        $this->assertNull(Setting::get(Setting::PLAN_GENERATION_MODEL));
+    }
+
+    public function test_openai_tab_shows_the_cost_estimate_ui_and_honest_labelling(): void
+    {
+        // The tab renders even though this test never creates the ai_usage_events
+        // table — the cost layer is defensive (zeros/baseline), matching the usage
+        // totals. The editable rates field, the estimate, the guide and the honest
+        // "estimate not invoice" note are all present.
+        Livewire::test(Settings::class)
+            ->assertOk()
+            ->assertFormFieldExists('openai_token_rates', 'form')
+            ->assertSee('Token rates (for cost estimate)')
+            ->assertSee('Cost estimate')
+            ->assertSee('Estimate only')          // the disclaimer
+            ->assertSee('not your OpenAI bill')
+            ->assertSee('cost of ~100 reports');  // the guide
+    }
+
+    public function test_saving_token_rates_persists_them_as_a_json_map(): void
+    {
+        Livewire::test(Settings::class)
+            ->set('data.openai_token_rates', [
+                ['model' => 'gpt-4o', 'input_per_1k' => 0.003, 'output_per_1k' => 0.009],
+                ['model' => 'custom-x', 'input_per_1k' => 0.001, 'output_per_1k' => 0.002],
+            ])
+            ->call('save')
+            ->assertHasNoFormErrors();
+
+        $stored = json_decode((string) Setting::get(Setting::OPENAI_TOKEN_RATES), true);
+
+        $this->assertSame(0.003, $stored['gpt-4o']['input_per_1k']);
+        $this->assertSame(0.002, $stored['custom-x']['output_per_1k']);
+
+        // The saved override flows through resolveRates() for the estimate.
+        $this->assertSame(0.003, \App\Models\AiUsageEvent::resolveRates()['gpt-4o']['input_per_1k']);
+        // An un-edited default model is still present (defaults layer underneath).
+        $this->assertArrayHasKey('gpt-4-turbo', \App\Models\AiUsageEvent::resolveRates());
+    }
+
     /**
      * Phase E: Email & Integrations was folded into Settings — Klaviyo + SMTP now
      * live here as tabs, and the "Platform Emails — coming soon" placeholder is

@@ -107,10 +107,10 @@ class ChangelogTest extends TestCase
         $versions = ChangelogReader::versions();
 
         $this->assertSame(
-            ['v1.4.0', 'v1.3.0', 'v1.2.0', 'v1.1.0', 'v1.0.0'],
+            ['v1.4.1', 'v1.4.0', 'v1.3.9', 'v1.3.8', 'v1.3.7', 'v1.3.5', 'v1.3.3', 'v1.3.0', 'v1.2.6', 'v1.2.4', 'v1.2.2', 'v1.2.0', 'v1.1.6', 'v1.1.4', 'v1.1.0', 'v1.0.6', 'v1.0.3', 'v1.0.1', 'v1.0.0'],
             array_column($versions, 'version'),
         );
-        $this->assertSame('v1.4.0', $versions[0]['version']);
+        $this->assertSame('v1.4.1', $versions[0]['version']);
         $this->assertNotEmpty($versions[0]['groups']);
     }
 
@@ -120,13 +120,13 @@ class ChangelogTest extends TestCase
 
         // The single source of truth: latestVersion() === the top entry's label.
         $this->assertSame($versions[0]['version'], ChangelogReader::latestVersion());
-        $this->assertSame('v1.4.0', ChangelogReader::latestVersion());
+        $this->assertSame('v1.4.1', ChangelogReader::latestVersion());
     }
 
     public function test_latest_version_semantics_are_null_for_an_unparseable_file(): void
     {
         // latestVersion() is versions()[0]['version'] ?? null; an unparseable file
-        // yields [] → null, which is what the footer's ?? 'v1.4.0' fallback relies on.
+        // yields [] → null, which is what the footer's ?? 'v1.4.1' fallback relies on.
         $emptyVersions = ChangelogReader::parse('');
         $this->assertSame([], $emptyVersions);
         $this->assertNull($emptyVersions[0]['version'] ?? null);
@@ -135,11 +135,11 @@ class ChangelogTest extends TestCase
     public function test_footer_shows_the_changelog_version_not_the_stale_v1_0(): void
     {
         // The admin footer renders the version from the changelog's top entry, so it
-        // reads v1.4.0 (matching the changelog) and never the old hardcoded v1.0.
+        // reads v1.4.1 (matching the changelog) and never the old hardcoded v1.0.
         $html = view('filament.footer-version')->render();
 
         $this->assertStringContainsString(ChangelogReader::latestVersion().' - Biome4Pets Portal', $html);
-        $this->assertStringContainsString('v1.4.0 - Biome4Pets Portal', $html);
+        $this->assertStringContainsString('v1.4.1 - Biome4Pets Portal', $html);
         $this->assertStringNotContainsString('v1.0 - Biome4Pets Portal', $html);
     }
 
