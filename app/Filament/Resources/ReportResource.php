@@ -1441,6 +1441,9 @@ class ReportResource extends Resource
                     ->date(AdminFormatting::DATE)
                     ->sortable(),
             ])
+            // Load newest reports first by default. Column headers stay sortable, so
+            // this is only the initial order — clicking any header re-sorts as before.
+            ->defaultSort('created_at', 'desc')
             ->emptyStateIcon('heroicon-o-document-chart-bar')
             ->emptyStateHeading('No reports yet')
             ->emptyStateDescription('Reports appear here once generated from a pet\'s test.')

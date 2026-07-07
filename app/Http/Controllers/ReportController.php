@@ -15,15 +15,39 @@ class ReportController extends Controller
             ->with(['client', 'pet.client', 'test', 'plan', 'catalogProducts', 'steps.products.catalogProduct'])
             ->firstOrFail();
 
-        // Publish-gate: a draft / unpublished report (incl. one a staff member has
-        // unpublished to edit) must NEVER serve its content to the public — show the
-        // branded "being finalised" holding page at the SAME url instead. Re-publishing
-        // serves the report again. (A trashed report still 404s via firstOrFail above.)
-        if (! $report->isPublished()) {
+        // Publish-gate WITH an admin-preview exception:
+        //   - A published report is public (served to anyone), exactly as before.
+        //   - An UNPUBLISHED report is served ONLY to a logged-in admin, as a preview
+        //     (with a banner + no PDF option) so staff can review before publishing.
+        //   - Anyone else on an unpublished report (a customer, or anyone with just
+        //     the link and no session) gets the branded "being finalised" holding page.
+        //     THIS is the draft-privacy protection — an unauthenticated visitor must
+        //     NEVER see unpublished content. The pivot is real session auth + role
+        //     (viewerIsAdmin()), which cannot be spoofed with a token alone.
+        // (A trashed report still 404s via firstOrFail above.)
+        if (! $report->isPublished() && ! $this->viewerIsAdmin()) {
             return $this->finalisingResponse();
         }
 
-        return view('report.show', compact('report'));
+        // True only in the admin-preview case (unpublished, viewed by a logged-in
+        // admin). Drives the preview banner and hides the not-yet-available PDF
+        // option in the view. For a published report this is always false.
+        $adminPreview = ! $report->isPublished();
+
+        return view('report.show', compact('report', 'adminPreview'));
+    }
+
+    /**
+     * Is the current viewer a logged-in staff member (admin or super admin)? Uses
+     * real session authentication plus the role check — NOT anything a public
+     * visitor can influence — so it is safe as the admin-preview pivot on the public
+     * publish-gate. Anonymous requests (no session) are never admins.
+     */
+    private function viewerIsAdmin(): bool
+    {
+        $user = auth()->user();
+
+        return $user !== null && $user->isAdmin();
     }
 
     /**

@@ -184,16 +184,20 @@ class ReportQualityValidator
             $issues[] = self::issue('unwell_no_plan', self::SEVERITY_WARNING, self::TIER_DETERMINISTIC, "Classified {$classification} but no plan matched — needs manual plan selection.");
         }
 
-        // 7. Panel contradiction: the report's own panels tell inconsistent
-        //    stories. High-precision — only the clear case is flagged: an
-        //    "Imbalanced & Depleted" verdict (unwell) while the diversity DISPLAY
-        //    band reads "High" (reassuring). Reads the existing band definition;
-        //    no threshold/scale change.
-        $diversity = $context['diversity_score'] ?? null;
-        if ($classification === ReportContent::CLASSIFICATION_DEPLETED && $diversity !== null
-            && ReportContent::diversityBand((float) $diversity)['label'] === 'High') {
-            $issues[] = self::issue('panel_contradiction', self::SEVERITY_WARNING, self::TIER_DETERMINISTIC, 'Classified Imbalanced & Depleted but the diversity panel reads High — inconsistent signals.');
-        }
+        // 7. RETIRED — panel_contradiction. This flag fired when the classification
+        //    was "Imbalanced & Depleted" while the diversity display band read "High".
+        //    An audit proved it a false positive BY CONSTRUCTION: whenever it fired,
+        //    the "Depleted" verdict came from the RICHNESS arm (richness < 400), never
+        //    diversity (a High band means diversity > 2.5, which rules out the < 1.9
+        //    diversity arm). So it only ever detected "high Shannon diversity + low
+        //    species richness" — two DIFFERENT, legitimately co-existing metrics
+        //    (Shannon = species count + evenness; richness = raw distinct-species
+        //    count), not a contradiction. It flagged a valid biological state on a
+        //    systematic slice of low-richness pets and cluttered the review queue,
+        //    violating the deterministic tier's "effectively zero false positives"
+        //    contract. Removed. The apparent mismatch is now reconciled in the report
+        //    COPY (see OpenAiService::buildInterpretationsPrompt). classify() and
+        //    diversityBand() are correct and are deliberately left unchanged.
 
         // 8. Microbe BAND contradiction (DETERMINISTIC — exact arithmetic, drives
         //    needs_review). The band a value sits in (low / within / high) is now

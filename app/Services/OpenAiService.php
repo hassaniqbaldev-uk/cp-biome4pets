@@ -445,6 +445,23 @@ PROMPT;
             ? "\n- The overall microbiome classification above is a FIXED finding. Keep the WHOLE interpretation consistent with it: do not describe a gut classified \"Imbalanced\" or \"Imbalanced & Depleted\" as thriving, fully balanced, or problem free, and acknowledge low species richness or imbalance honestly where relevant. Stay calm, supportive, non-alarmist and non-diagnostic — note what to work on without overstating risk."
             : '';
 
+        // Reconcile the diversity-vs-richness picture ONLY in the exact case that a
+        // layperson would read as a mixed message: the classification is depleted
+        // (driven by LOW species richness, < RICHNESS_LOW_MAX) while the DIVERSITY
+        // band is NOT low (so the diversity panel looks healthy/decent). These two
+        // metrics measure different things and legitimately co-exist, so the report
+        // must explain the relationship instead of leaving "Imbalanced & Depleted"
+        // sitting next to a healthy-looking diversity panel unexplained. The AI only
+        // EXPLAINS the (already-computed, fixed) numbers here; it never re-judges
+        // them. Omitted entirely when it doesn't apply, so other reports are
+        // byte-for-byte unchanged.
+        $richnessIsLow = is_numeric($richness)
+            && (float) $richness < \App\Support\ReportContent::RICHNESS_LOW_MAX;
+        $reconcileRule = ($classification === \App\Support\ReportContent::CLASSIFICATION_DEPLETED
+            && $richnessIsLow && $diversityBand !== 'Low')
+            ? "\n- RECONCILE DIVERSITY vs RICHNESS (this pet's numbers make these look like a mixed message, so explain it plainly in the summary and vet_summary): the Shannon diversity reads {$diversityBand} (the balance/evenness of the species that ARE present looks reasonable), BUT the number of DISTINCT species detected (species richness) is low. Explain, in plain owner-friendly language, that these measure different things — diversity is about how evenly balanced the species present are, while richness is how MANY different species are present — and that a gut can look reasonably balanced yet still be low in the VARIETY of species, which is why the overall picture is described as depleted. State this factually using the figures already given; do NOT change any number or re-judge any band, and keep it calm, supportive and non-diagnostic."
+            : '';
+
         // Build a pet-context block from whatever fields are present. Any
         // missing/blank field is omitted gracefully so the prompt stays clean.
         $petName = trim((string) ($petContext['name'] ?? ''));
@@ -539,7 +556,7 @@ Grounding rules (these are critical and override any temptation to embellish):
 - Each score_* value must be EXACTLY one of: Very High, High, Medium, Low, with no other text, punctuation, or explanation inside the score field.
 - If you cannot ground a statement in the provided data, omit it rather than inventing or speculating.
 - You must still state the actual figures where a field asks for them: the phylum and diversity fields should state the level/score as instructed. State them accurately using the exact numbers above; do not drop the numbers, just never change them.
-- The band verdicts in the Level assessment above (low / within the typical range / high; and low / medium / high for diversity) are FIXED and already computed from the figures. State each level EXACTLY as given and keep the prose consistent with it. NEVER describe a value given as LOW as normal, within range, healthy, or elevated; NEVER describe a value given as HIGH as low, normal, or within range; only a value given as WITHIN the range may be called normal or within the typical range. Do not invent specific clinical consequences of a level; keep the explanation to accurate general statements.{$coherenceRule}
+- The band verdicts in the Level assessment above (low / within the typical range / high; and low / medium / high for diversity) are FIXED and already computed from the figures. State each level EXACTLY as given and keep the prose consistent with it. NEVER describe a value given as LOW as normal, within range, healthy, or elevated; NEVER describe a value given as HIGH as low, normal, or within range; only a value given as WITHIN the range may be called normal or within the typical range. Do not invent specific clinical consequences of a level; keep the explanation to accurate general statements.{$coherenceRule}{$reconcileRule}
 
 Style: Write in warm, natural, plain British English as if a knowledgeable person were explaining to a pet owner. Vary sentence length and structure. Avoid AI-cliché phrasing (e.g. 'it's important to note', 'plays a crucial role', 'in conclusion', 'delve', 'tapestry', 'navigating'). Do NOT use em dashes (—) or en dashes (–) anywhere; use commas, full stops, or the word 'to' for ranges. Keep it concrete and specific to this pet's findings, not generic. Do not overuse lists.
 

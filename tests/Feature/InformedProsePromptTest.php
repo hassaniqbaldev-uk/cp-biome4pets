@@ -52,6 +52,56 @@ class InformedProsePromptTest extends TestCase
         $this->assertStringContainsString('Do not invent or alter any numbers', $prompt);
     }
 
+    public function test_prompt_reconciles_high_diversity_with_low_richness(): void
+    {
+        // The exact case that drove the retired panel_contradiction flag: depleted
+        // classification (from LOW richness 267 < 400) while diversity 2.89 reads
+        // "High". The prompt must instruct the AI to reconcile the two in plain
+        // language instead of leaving a mixed message.
+        $prompt = (new OpenAiService())->buildInterpretationsPrompt(
+            ['Fusobacteria' => 54.4, 'Firmicutes' => 26.2, 'Bacteroidetes' => 15.8],
+            2.89,
+            ['name' => 'Biscuit'],
+            ['species_richness' => 267, 'dysbiosis_score' => 1.66, 'microbiome_classification' => 'Imbalanced & Depleted'],
+        );
+
+        $this->assertStringContainsString('RECONCILE DIVERSITY vs RICHNESS', $prompt);
+        // It names the band it observed and the metric distinction.
+        $this->assertStringContainsString('the Shannon diversity reads High', $prompt);
+        $this->assertStringContainsString('species richness) is low', $prompt);
+        // …and ties it to why the picture reads depleted, factually.
+        $this->assertStringContainsString('described as depleted', $prompt);
+        $this->assertStringContainsString('do NOT change any number or re-judge any band', $prompt);
+    }
+
+    public function test_prompt_reconciliation_absent_when_richness_is_healthy(): void
+    {
+        // Depleted via LOW DIVERSITY (1.5), richness healthy (700). Not the mixed-
+        // message case → no reconciliation block (would be irrelevant/confusing).
+        $prompt = (new OpenAiService())->buildInterpretationsPrompt(
+            ['Fusobacteria' => 54.4, 'Firmicutes' => 26.2, 'Bacteroidetes' => 15.8],
+            1.5,
+            ['name' => 'Biscuit'],
+            ['species_richness' => 700, 'dysbiosis_score' => 1.66, 'microbiome_classification' => 'Imbalanced & Depleted'],
+        );
+
+        $this->assertStringNotContainsString('RECONCILE DIVERSITY vs RICHNESS', $prompt);
+    }
+
+    public function test_prompt_reconciliation_absent_when_diversity_band_is_low(): void
+    {
+        // Low richness (267) BUT diversity is also Low (1.5) → the two panels agree
+        // (both point to depletion), so there is nothing to reconcile.
+        $prompt = (new OpenAiService())->buildInterpretationsPrompt(
+            ['Fusobacteria' => 54.4, 'Firmicutes' => 26.2, 'Bacteroidetes' => 15.8],
+            1.5,
+            ['name' => 'Biscuit'],
+            ['species_richness' => 267, 'dysbiosis_score' => 1.66, 'microbiome_classification' => 'Imbalanced & Depleted'],
+        );
+
+        $this->assertStringNotContainsString('RECONCILE DIVERSITY vs RICHNESS', $prompt);
+    }
+
     public function test_prompt_unchanged_when_no_deterministic_context_supplied(): void
     {
         // Back-compat: the 3-arg form (no deterministic block) adds nothing.

@@ -241,12 +241,19 @@ class ReportGeneration
     /** Review-flag codes whose condition an ADMIN EDIT can resolve (plan picked,
      *  score corrected), so they are re-derived live on save. Everything else
      *  (band/number/taxon/banned/generation/empty) depends on the AI prose or a
-     *  transient generation event and is preserved — refreshed only by regenerate. */
+     *  transient generation event and is preserved — refreshed only by regenerate.
+     *
+     *  panel_contradiction is a RETIRED check (see ReportQualityValidator): listing
+     *  it here means recomputeReviewState DROPS it from any report still carrying it
+     *  (it's filtered out of $kept and nothing re-adds it), so a stale flag clears on
+     *  the next re-save — no full regenerate needed — and needs_review recomputes
+     *  from the remaining deterministic issues. */
     public const LIVE_REFRESH_CODES = [
         'bad_score_enum',
         'unwell_no_plan',
         'plan_unmatched',
         'manual_plan_review',
+        'panel_contradiction',
     ];
 
     /**

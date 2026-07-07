@@ -95,6 +95,18 @@
 </head>
 <body class="bg-light-grey text-gray-800">
 
+    {{-- Admin-only preview overlay. Shown ONLY when a logged-in admin is previewing an
+         UNPUBLISHED report (ReportController::show passes $adminPreview = true for that
+         case, never for a public/published view). A distinct fixed amber bar makes it
+         obvious this is a staff-only preview and that the public sees a holding page. --}}
+    @if (($adminPreview ?? false) === true)
+        <div role="status" style="position:fixed;top:0;left:0;right:0;z-index:9999;background:#b45309;color:#fff;padding:10px 16px;text-align:center;font-size:14px;font-weight:600;line-height:1.4;box-shadow:0 2px 10px rgba(0,0,0,0.25);">
+            Admin preview: this report is not published yet. Customers currently see a &lsquo;being finalised&rsquo; page at this link.
+        </div>
+        {{-- Spacer so the fixed banner doesn't cover the header below it. --}}
+        <div aria-hidden="true" style="height:44px;"></div>
+    @endif
+
     @php
         $phylumData = $report->phylum_data ?? [];
         $ownerName = !empty($report->petClient?->name) ? $report->petClient->name : 'Owner';
@@ -110,6 +122,10 @@
                 <div>
                     <img src="/images/biome4pets-logo-white.png" alt="Biome4Pets" style="height:54px; width:auto; display:block;">
                 </div>
+                {{-- The PDF route is PUBLISHED-ONLY for everyone (no admin exception),
+                     so hide the download option while the report is unpublished (the
+                     admin-preview case). It reappears once the report is published. --}}
+                @if ($report->isPublished())
                 <a
                     href="{{ route('report.pdf', $report->public_token) }}"
                     class="inline-flex items-center gap-2 bg-teal hover:bg-teal/90 text-white text-sm font-semibold py-2.5 px-5 rounded-lg shadow-sm hover:shadow-md hover:-translate-y-0.5 transition duration-300 whitespace-nowrap self-start sm:self-auto"
@@ -119,6 +135,7 @@
                     </svg>
                     Download PDF
                 </a>
+                @endif
             </div>
         </div>
 

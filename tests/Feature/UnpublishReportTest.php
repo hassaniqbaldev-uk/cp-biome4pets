@@ -46,6 +46,19 @@ class UnpublishReportTest extends TestCase
         Filament::setCurrentPanel(Filament::getPanel('admin'));
     }
 
+    /** Log in a user with an EXPLICIT role (so isAdmin() reflects that role) and
+     *  return it — for the admin-preview / non-admin publish-gate cases. */
+    private function loginAs(string $role): User
+    {
+        $user = User::create([
+            'name' => ucfirst($role), 'email' => $role.uniqid().'@e.com',
+            'password' => Hash::make('secret'), 'role' => $role,
+        ]);
+        $this->actingAs($user);
+
+        return $user;
+    }
+
     private function makeReport(string $status = 'published', string $email = 'owner@example.test'): Report
     {
         $client = Client::create(['name' => 'Owner', 'email' => $email]);
@@ -106,6 +119,104 @@ class UnpublishReportTest extends TestCase
     public function test_unknown_token_still_404s(): void
     {
         $this->get('/report/notarealtoken')->assertNotFound();
+    }
+
+    // ── Admin preview of an unpublished report ───────────────────────────────
+
+    public function test_unpublished_report_shows_admin_preview_to_a_logged_in_admin(): void
+    {
+        $this->loginAs(User::ROLE_ADMIN);
+        $report = $this->makeReport('draft');
+
+        $this->get('/report/'.$report->public_token)
+            ->assertOk()
+            // Full report content is shown to the admin…
+            ->assertSee('Biscuit')
+            ->assertSee('Petbiome Microbiome Profile')
+            // …with the clear admin-only preview banner…
+            ->assertSee('Admin preview')
+            // …and NOT the public holding page.
+            ->assertDontSee('This report is being finalised');
+    }
+
+    public function test_admin_preview_hides_the_download_pdf_option(): void
+    {
+        // The PDF route is published-only, so the download button is hidden while the
+        // report is an unpublished admin preview. (Super admins preview too.)
+        $this->loginAs(User::ROLE_SUPER_ADMIN);
+        $report = $this->makeReport('draft');
+
+        $this->get('/report/'.$report->public_token)
+            ->assertOk()
+            ->assertSee('Admin preview')
+            ->assertDontSee('Download PDF');
+    }
+
+    public function test_unpublished_report_shows_holding_page_to_an_anonymous_visitor(): void
+    {
+        // DRAFT PRIVACY: a valid token with NO session must still get the holding page,
+        // never the content and never the admin banner.
+        $report = $this->makeReport('draft');
+
+        $this->get('/report/'.$report->public_token)
+            ->assertOk()
+            ->assertSee('This report is being finalised')
+            ->assertDontSee('Petbiome Microbiome Profile')
+            ->assertDontSee('Biscuit')
+            ->assertDontSee('Admin preview');
+    }
+
+    public function test_authenticated_non_admin_still_gets_the_holding_page(): void
+    {
+        // The pivot is the admin ROLE, not merely being logged in — a non-admin
+        // session is treated like the public and never sees unpublished content.
+        $this->loginAs('viewer');
+        $report = $this->makeReport('draft');
+
+        $this->get('/report/'.$report->public_token)
+            ->assertOk()
+            ->assertSee('This report is being finalised')
+            ->assertDontSee('Petbiome Microbiome Profile')
+            ->assertDontSee('Admin preview');
+    }
+
+    public function test_unpublished_pdf_is_gated_even_for_an_admin(): void
+    {
+        // PDF stays PUBLISHED-ONLY for everyone — no admin exception.
+        $this->loginAs(User::ROLE_ADMIN);
+        $report = $this->makeReport('draft');
+
+        $this->get('/report/'.$report->public_token.'/pdf')
+            ->assertOk()
+            ->assertSee('This report is being finalised')
+            ->assertHeaderMissing('content-disposition');   // not a PDF download
+    }
+
+    public function test_unpublished_subscribe_is_gated_even_for_an_admin(): void
+    {
+        // Subscribe stays PUBLISHED-ONLY too — no working checkout for a draft.
+        $this->loginAs(User::ROLE_ADMIN);
+        $report = $this->makeReport('draft');
+
+        $this->get('/report/'.$report->public_token.'/subscribe')
+            ->assertOk()
+            ->assertSee('This report is being finalised')
+            ->assertDontSee('Admin preview');
+    }
+
+    public function test_published_report_is_unchanged_for_an_admin_viewer(): void
+    {
+        // A published report: full content, PDF button present, and NO admin-preview
+        // banner (the banner is strictly the unpublished-preview case).
+        $this->loginAs(User::ROLE_ADMIN);
+        $report = $this->makeReport('published');
+
+        $this->get('/report/'.$report->public_token)
+            ->assertOk()
+            ->assertSee('Petbiome Microbiome Profile')
+            ->assertSee('Download PDF')
+            ->assertDontSee('Admin preview')
+            ->assertDontSee('being finalised');
     }
 
     // ── Unpublish action ─────────────────────────────────────────────────────

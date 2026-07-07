@@ -149,6 +149,48 @@ class ReviewFlagRecomputeTest extends TestCase
         $this->assertTrue($report->fresh()->needs_review);
     }
 
+    // ── RETIRED panel_contradiction clears on the next recompute (no regen) ───
+    public function test_retired_panel_contradiction_flag_clears_on_recompute(): void
+    {
+        // A report still carrying the now-retired flag as its only issue.
+        $report = $this->report([
+            'plan_id' => null,
+            'needs_review' => true,
+            'review_flags' => ['detected_at' => '2026-06-20T00:00:00+00:00',
+                'issues' => [['code' => 'panel_contradiction', 'severity' => 'warning', 'tier' => 'deterministic', 'detail' => 'x']]],
+        ]);
+
+        ReportGeneration::recomputeReviewState($report);
+
+        // Dropped entirely (it's a LIVE_REFRESH_CODE now and nothing re-adds it), and
+        // with no deterministic issue left the report no longer needs review — no full
+        // regenerate required, a plain re-save/recompute is enough.
+        $this->assertNotContains('panel_contradiction', $this->codes($report));
+        $this->assertNull($report->fresh()->review_flags);
+        $this->assertFalse($report->fresh()->needs_review);
+    }
+
+    public function test_retired_panel_contradiction_clears_but_keeps_other_flags(): void
+    {
+        // The retired flag alongside a genuine prose flag: only the retired one goes.
+        $report = $this->report([
+            'plan_id' => null,
+            'needs_review' => true,
+            'review_flags' => ['detected_at' => '2026-06-20T00:00:00+00:00',
+                'issues' => [
+                    ['code' => 'panel_contradiction', 'severity' => 'warning', 'tier' => 'deterministic', 'detail' => 'x'],
+                    ['code' => 'band_contradiction', 'severity' => 'warning', 'tier' => 'deterministic', 'detail' => 'x'],
+                ]],
+        ]);
+
+        ReportGeneration::recomputeReviewState($report);
+
+        $codes = $this->codes($report);
+        $this->assertNotContains('panel_contradiction', $codes);   // retired flag gone
+        $this->assertContains('band_contradiction', $codes);       // real flag preserved
+        $this->assertTrue($report->fresh()->needs_review);         // still actionable
+    }
+
     // ── Preserves unrelated flags + respects "Mark as reviewed" ──────────────
     public function test_preserves_prose_flags_and_respects_prior_review(): void
     {

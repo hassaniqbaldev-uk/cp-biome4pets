@@ -6,11 +6,15 @@ use App\Support\ReportQualityValidator;
 use PHPUnit\Framework\TestCase;
 
 /**
- * The two new DETERMINISTIC quality flags (both drive needs_review):
+ * Deterministic quality flags around classification:
  *  - unwell_no_plan: classification is unwell but no plan was selected (the
- *    safety net for the classification-gated router — makes the miss loud).
- *  - panel_contradiction: the report's own panels disagree — an "Imbalanced &
- *    Depleted" verdict while the diversity DISPLAY band reads "High".
+ *    safety net for the classification-gated router — makes the miss loud). Still
+ *    active and drives needs_review.
+ *  - panel_contradiction: RETIRED. It fired on "Imbalanced & Depleted" + a High
+ *    diversity band, but an audit proved that is a false positive by construction
+ *    (the Depleted verdict there always comes from LOW RICHNESS, not diversity —
+ *    two different, co-existing metrics). It no longer fires and no longer drives
+ *    needs_review; the mismatch is reconciled in the report copy instead.
  */
 class UnwellAndContradictionFlagsTest extends TestCase
 {
@@ -37,7 +41,9 @@ class UnwellAndContradictionFlagsTest extends TestCase
 
         return array_merge([
             'interpretations' => $interp,
-            'phylum_totals' => ['Fusobacteria' => 54.4, 'Firmicutes' => 26.2, 'Bacteroidetes' => 15.8],
+            // All four named phyla present so the prose naming them is whitelisted
+            // (the unknown_taxon guardrail otherwise fires on "Proteobacteria").
+            'phylum_totals' => ['Fusobacteria' => 54.4, 'Firmicutes' => 26.2, 'Bacteroidetes' => 15.8, 'Proteobacteria' => 9.0],
             'diversity_score' => 2.89,
             'species_richness' => 267,
             'dysbiosis_score' => 1.66,
@@ -76,27 +82,30 @@ class UnwellAndContradictionFlagsTest extends TestCase
         $this->assertNotContains('unwell_no_plan', $this->codes($v));
     }
 
-    public function test_depleted_with_high_diversity_band_flags_panel_contradiction(): void
+    public function test_depleted_with_high_diversity_band_no_longer_flags_panel_contradiction(): void
     {
-        // diversity 2.89 → "High" band (>2.5) while classification is depleted.
+        // The retired false positive: diversity 2.89 → "High" band while the
+        // classification is depleted (via low richness 267). This is a valid
+        // biological state (high evenness, low species count), NOT a contradiction —
+        // it must no longer be flagged. With a plan selected (so unwell_no_plan is
+        // not in play) and valid output, the report has NO deterministic issue and
+        // does NOT need review.
         $v = ReportQualityValidator::validate($this->context(['plan_id' => 7]));
 
-        $this->assertContains('panel_contradiction', $this->codes($v));
-        $this->assertTrue($v['needs_review']);
-
-        $flag = collect($v['issues'])->firstWhere('code', 'panel_contradiction');
-        $this->assertSame('deterministic', $flag['tier']);
-        $this->assertSame('warning', $flag['severity']);
+        $this->assertNotContains('panel_contradiction', $this->codes($v));
+        $this->assertFalse($v['needs_review']);
+        $this->assertSame(0, $v['deterministic_count']);
     }
 
-    public function test_depleted_with_low_diversity_band_does_not_contradict(): void
+    public function test_depleted_with_low_diversity_band_also_does_not_flag(): void
     {
-        // diversity 1.5 → "Low" band — consistent with a depleted verdict.
+        // diversity 1.5 → "Low" band. Never flagged (the check is gone entirely).
         $v = ReportQualityValidator::validate($this->context([
             'plan_id' => 7,
             'diversity_score' => 1.5,
         ]));
 
         $this->assertNotContains('panel_contradiction', $this->codes($v));
+        $this->assertFalse($v['needs_review']);
     }
 }
