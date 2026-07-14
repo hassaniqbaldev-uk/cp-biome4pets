@@ -130,19 +130,23 @@ class AiDirectiveInjectionTest extends TestCase
         }
     }
 
-    public function test_scores_directive_is_appended_after_the_score_block(): void
+    public function test_prompt_no_longer_asks_the_ai_for_the_six_scores(): void
     {
+        // Stage 2: the six health-insight scores are computed deterministically, so
+        // the prompt must not request them, and the scores directive is now inert.
         Setting::set(Setting::OPENAI_DIRECTIVE_SCORES, 'Be conservative; prefer Low when uncertain.');
 
         $prompt = $this->buildPrompt();
 
-        // Appended to the final score bullet, before the Style/safety block.
-        $this->assertStringContainsString(
-            'Assess environmental stress resilience based on the microbiome composition.'
-            . ' Admin guidance for this field: Be conservative; prefer Low when uncertain.',
-            $prompt,
-        );
-        $this->assertSame(1, substr_count($prompt, 'Admin guidance for this field:'));
+        foreach ([
+            'score_gut_wall', 'score_skin_allergy', 'score_behaviour_mood',
+            'score_gut_barrier', 'score_gas_digestive', 'score_stress_resilience',
+        ] as $scoreKey) {
+            $this->assertStringNotContainsString($scoreKey, $prompt);
+        }
+        // The (now removed) score block gave the directive nowhere to attach.
+        $this->assertStringNotContainsString('Be conservative; prefer Low when uncertain.', $prompt);
+        $this->assertSame(0, substr_count($prompt, 'Admin guidance for this field:'));
     }
 
     public function test_global_directive_still_appends_after_the_whole_prompt(): void
@@ -169,8 +173,10 @@ class AiDirectiveInjectionTest extends TestCase
 
         $prompt = $this->buildPrompt();
 
-        // 1 summary + 5 phyla + 1 scores = 7 inline clauses.
-        $this->assertSame(7, substr_count($prompt, 'Admin guidance for this field:'));
+        // 1 summary + 5 phyla = 6 inline clauses. The scores directive is now inert
+        // (the AI no longer produces the six deterministic scores), so it adds none.
+        $this->assertSame(6, substr_count($prompt, 'Admin guidance for this field:'));
+        $this->assertStringNotContainsString('Scores steer.', $prompt);
 
         // Safety / format rules survive untouched.
         $this->assertStringContainsString('Do NOT use em dashes', $prompt);

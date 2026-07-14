@@ -230,7 +230,9 @@ class SettingsPageTest extends TestCase
         );
 
         $this->assertSame('', $result['summary']);
-        $this->assertArrayHasKey('score_gut_wall', $result);
+        // Stage 2: the six health-insight scores are computed deterministically and
+        // are NO LONGER part of the AI response shape.
+        $this->assertArrayNotHasKey('score_gut_wall', $result);
     }
 
     /**

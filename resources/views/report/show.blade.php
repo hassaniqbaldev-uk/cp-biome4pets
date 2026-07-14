@@ -73,20 +73,6 @@
         @media (max-width: 420px) {
             .slider-band-labels { font-size: 11px !important; }
         }
-
-        /* Gut-wall gauge: its 220px canvas + label row would overflow the card on
-           the smallest phones (~320px, card inner ~200px). Cap to the column width
-           and let the canvas scale down (it stays 220px on larger screens via the
-           max-width). The 220×120 buffer just displays scaled, keeping the ratio. */
-        @media (max-width: 380px) {
-            .gauge-wrap {
-                width: 100% !important;
-                max-width: 220px;
-                height: auto !important;
-            }
-            .gauge-wrap canvas { width: 100% !important; height: auto !important; display: block; }
-            .gauge-labels { width: 100% !important; max-width: 220px; }
-        }
     </style>
     {{-- Flag JS as available before first paint so scroll-reveal can hide-then-reveal
          without flashing. With JS off, this never runs and all content stays visible. --}}
@@ -557,56 +543,47 @@
             </div>
             <div class="report-body">
                 @php
-                    // Shared with the PDF — see app/Support/ReportContent.php.
-                    $insights = \App\Support\ReportContent::insights($report);
+                    // Stage 3: all six insights render CONSISTENTLY as colour-coded
+                    // cards. Each carries its computed band, the client's fixed
+                    // comment for that band, and its good/bad DIRECTION — sourced from
+                    // ReportContent::healthInsights() (override-aware, shared with the
+                    // PDF). The old gut-wall gauge and its Low/Target/High legend are
+                    // removed per the client's request.
+                    $insights = \App\Support\ReportContent::healthInsights($report);
                 @endphp
-
-                {{-- Gut Wall Integrity Gauge --}}
-                @php
-                    $gwScore = $report->score_gut_wall ?? 'N/A';
-                    // Map text score to a numeric value for needle position (0-180 degrees)
-                    if ($gwScore === 'Low') { $gwDeg = 30; $gwLabel = 'Low'; }
-                    elseif ($gwScore === 'Medium') { $gwDeg = 90; $gwLabel = 'Target'; }
-                    elseif ($gwScore === 'High') { $gwDeg = 140; $gwLabel = 'High'; }
-                    elseif ($gwScore === 'Very High') { $gwDeg = 165; $gwLabel = 'High'; }
-                    else { $gwDeg = 90; $gwLabel = 'N/A'; }
-                @endphp
-                <div class="border border-gray-200 rounded-2xl p-5 mb-6 lift">
-                    <h3 class="font-bold text-navy text-center mb-2">Gut Wall Integrity</h3>
-                    <p class="text-sm text-gray-500 text-center mb-4">Measures the strength and resilience of the intestinal lining based on key bacterial markers.</p>
-                    <div class="flex flex-col items-center">
-                        <div class="gauge-wrap" style="width: 220px; height: 120px;">
-                            <canvas id="gutWallGauge" width="220" height="120"></canvas>
-                        </div>
-                        <p class="text-2xl font-bold text-navy mt-3">{{ $gwScore }}</p>
-                        <div class="gauge-labels flex justify-between w-[220px] mt-2 text-xs font-semibold">
-                            <span class="text-green-600">Low</span>
-                            <span class="text-amber-600">Target</span>
-                            <span class="text-red-600">High</span>
-                        </div>
-                    </div>
-                </div>
 
                 <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
                     @foreach($insights as $insight)
                         @php
-                            $score = $insight['score'] ?? 'N/A';
-                            if ($score === 'Very High') { $scoreColor = 'text-white'; $scoreBg = 'bg-red-800'; }
-                            elseif ($score === 'High') { $scoreColor = 'text-white'; $scoreBg = 'bg-red-500'; }
-                            elseif ($score === 'Medium') { $scoreColor = 'text-white'; $scoreBg = 'bg-amber-500'; }
-                            elseif ($score === 'Low') { $scoreColor = 'text-white'; $scoreBg = 'bg-green-500'; }
-                            else { $scoreColor = 'text-gray-500'; $scoreBg = 'bg-gray-100'; }
+                            // Colour is driven PURELY by the stored direction (Stage 2
+                            // tone): favourable band green, concern red, middle amber.
+                            // Per-insight, so Gas & Digestive's LOW (tone 'good') shows
+                            // GREEN, not red. An overridden score flows through here too.
+                            $tone = $insight['tone'] ?? null;
+                            [$badgeBg, $badgeText] = match ($tone) {
+                                'good' => ['bg-green-500', 'text-white'],
+                                'warn' => ['bg-amber-500', 'text-white'],
+                                'bad'  => ['bg-red-500', 'text-white'],
+                                default => ['bg-gray-100', 'text-gray-500'],
+                            };
+                            $label = $insight['label'] ?: 'N/A';
                         @endphp
-                        <div class="border border-gray-200 rounded-2xl p-5 min-h-32 flex items-start gap-4 lift">
-                            <div class="flex-1">
-                                <h3 class="font-bold text-navy">{{ $insight['title'] }}</h3>
-                                <p class="text-sm text-gray-500 mt-1">{{ $insight['desc'] }}</p>
-                            </div>
-                            <div class="shrink-0">
-                                <span class="inline-block px-3 py-1 rounded-full text-sm font-bold {{ $scoreColor }} {{ $scoreBg }}">
-                                    {{ $score }}
+                        <div class="border border-gray-200 rounded-2xl p-5 flex flex-col lift">
+                            <div class="flex items-start justify-between gap-4">
+                                <div class="flex-1">
+                                    <h3 class="font-bold text-navy">{{ $insight['title'] }}</h3>
+                                    <p class="text-sm text-gray-500 mt-1">{{ $insight['desc'] }}</p>
+                                </div>
+                                <span class="shrink-0 inline-block px-3 py-1 rounded-full text-sm font-bold {{ $badgeText }} {{ $badgeBg }}">
+                                    {{ $label }}
                                 </span>
                             </div>
+                            @if(!empty($insight['comment']))
+                                <p class="text-sm text-gray-700 mt-3 leading-relaxed">{{ $insight['comment'] }}</p>
+                            @endif
+                            @if(!empty($insight['shared_note']))
+                                <p class="text-xs text-gray-500 mt-3 pt-3 border-t border-gray-100 italic">{{ $insight['shared_note'] }}</p>
+                            @endif
                         </div>
                     @endforeach
                 </div>
@@ -1228,56 +1205,8 @@
             });
         });
 
-        // Gut Wall Integrity Semicircular Gauge
-        (function() {
-            const canvas = document.getElementById('gutWallGauge');
-            if (!canvas) return;
-            const ctx = canvas.getContext('2d');
-            const W = canvas.width;
-            const H = canvas.height;
-            const cx = W / 2;
-            const cy = H - 10;
-            const radius = 90;
-            const lineWidth = 18;
-
-            // Draw arcs: Low (green) | Target (amber) | High (red)
-            const bands = [
-                { start: Math.PI, end: Math.PI + (Math.PI / 3), color: '#22c55e' },
-                { start: Math.PI + (Math.PI / 3), end: Math.PI + (2 * Math.PI / 3), color: '#f59e0b' },
-                { start: Math.PI + (2 * Math.PI / 3), end: 2 * Math.PI, color: '#ef4444' },
-            ];
-
-            bands.forEach(function(band) {
-                ctx.beginPath();
-                ctx.arc(cx, cy, radius, band.start, band.end);
-                ctx.lineWidth = lineWidth;
-                ctx.strokeStyle = band.color;
-                ctx.lineCap = 'butt';
-                ctx.stroke();
-            });
-
-            // Needle — gwDeg from PHP (0=left, 180=right)
-            const needleDeg = {{ $gwDeg }};
-            const needleRad = Math.PI + (needleDeg / 180) * Math.PI;
-            const needleLen = radius - 8;
-
-            ctx.beginPath();
-            ctx.moveTo(cx, cy);
-            ctx.lineTo(
-                cx + Math.cos(needleRad) * needleLen,
-                cy + Math.sin(needleRad) * needleLen
-            );
-            ctx.lineWidth = 3;
-            ctx.strokeStyle = '#301C47';
-            ctx.lineCap = 'round';
-            ctx.stroke();
-
-            // Center dot
-            ctx.beginPath();
-            ctx.arc(cx, cy, 6, 0, 2 * Math.PI);
-            ctx.fillStyle = '#301C47';
-            ctx.fill();
-        })();
+        // (The Gut Wall gauge was removed in Stage 3 — the six insights now render
+        // as consistent colour-coded cards; see the Health Insights section.)
     </script>
 
 </body>

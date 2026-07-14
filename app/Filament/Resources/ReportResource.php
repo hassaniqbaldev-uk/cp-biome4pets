@@ -592,6 +592,8 @@ class ReportResource extends Resource
                                             // Specific bacteria from the freshly-parsed CSV ($results
                                             // carries top_taxa now). Same wiring as the other three paths.
                                             'top_taxa' => $results['top_taxa'] ?? [],
+                                            // Stage 2: genus % for the deterministic health-insight scores.
+                                            'insight_taxa' => $results['insight_taxa'] ?? [],
                                         ];
                                         $genError = null;
                                         $interpretations = ReportGeneration::interpretationColumns(
@@ -630,7 +632,10 @@ class ReportResource extends Resource
                                         $set('needs_review', $verdict['needs_review']);
                                         $set('review_flags', ReportGeneration::reviewFlagsFromVerdict($verdict));
 
-                                        $allEmpty = collect($interpretations)->every(fn ($val) => empty($val));
+                                        // AI-text emptiness only — score_* are always
+                                        // populated now (deterministic), so they must
+                                        // not mask a genuinely empty AI response.
+                                        $allEmpty = ReportGeneration::aiTextIsEmpty($interpretations);
                                         if ($allEmpty) {
                                             Notification::make()
                                                 ->title('AI interpretations returned empty')
@@ -692,54 +697,35 @@ class ReportResource extends Resource
                                 ->label('Recommended Actions')
                                 ->rows(3)
                                 ->columnSpanFull(),
+                            // The score is computed deterministically at generation
+                            // (HealthInsightRules); this dropdown is the admin OVERRIDE.
+                            // Options are that insight's own band labels, so staff can
+                            // only pick a valid band, and the computed value is the
+                            // default already set on the record.
                             Forms\Components\Select::make('score_gut_wall')
                                 ->label('Gut Wall Integrity Score')
-                                ->options([
-                                    'Very High' => 'Very High',
-                                    'High' => 'High',
-                                    'Medium' => 'Medium',
-                                    'Low' => 'Low',
-                                ]),
+                                ->helperText('Computed from Blautia %. Override only if needed.')
+                                ->options(\App\Support\HealthInsightRules::labelOptions('score_gut_wall')),
                             Forms\Components\Select::make('score_skin_allergy')
                                 ->label('Skin & Allergy Risk Score')
-                                ->options([
-                                    'Very High' => 'Very High',
-                                    'High' => 'High',
-                                    'Medium' => 'Medium',
-                                    'Low' => 'Low',
-                                ]),
+                                ->helperText('Computed from Bacteroidetes %. Override only if needed.')
+                                ->options(\App\Support\HealthInsightRules::labelOptions('score_skin_allergy')),
                             Forms\Components\Select::make('score_behaviour_mood')
                                 ->label('Behaviour & Mood Score')
-                                ->options([
-                                    'Very High' => 'Very High',
-                                    'High' => 'High',
-                                    'Medium' => 'Medium',
-                                    'Low' => 'Low',
-                                ]),
+                                ->helperText('Computed from Firmicutes %. Override only if needed.')
+                                ->options(\App\Support\HealthInsightRules::labelOptions('score_behaviour_mood')),
                             Forms\Components\Select::make('score_gut_barrier')
                                 ->label('Gut Barrier & Metabolic Score')
-                                ->options([
-                                    'Very High' => 'Very High',
-                                    'High' => 'High',
-                                    'Medium' => 'Medium',
-                                    'Low' => 'Low',
-                                ]),
+                                ->helperText('Computed from Verrucomicrobia %. Override only if needed.')
+                                ->options(\App\Support\HealthInsightRules::labelOptions('score_gut_barrier')),
                             Forms\Components\Select::make('score_gas_digestive')
                                 ->label('Gas & Digestive Comfort Score')
-                                ->options([
-                                    'Very High' => 'Very High',
-                                    'High' => 'High',
-                                    'Medium' => 'Medium',
-                                    'Low' => 'Low',
-                                ]),
+                                ->helperText('Computed from Escherichia/Shigella %. Override only if needed.')
+                                ->options(\App\Support\HealthInsightRules::labelOptions('score_gas_digestive')),
                             Forms\Components\Select::make('score_stress_resilience')
                                 ->label('Environmental Stress Score')
-                                ->options([
-                                    'Very High' => 'Very High',
-                                    'High' => 'High',
-                                    'Medium' => 'Medium',
-                                    'Low' => 'Low',
-                                ]),
+                                ->helperText('Computed from Firmicutes %. Override only if needed.')
+                                ->options(\App\Support\HealthInsightRules::labelOptions('score_stress_resilience')),
                         ]),
 
                     Forms\Components\Wizard\Step::make('Products')

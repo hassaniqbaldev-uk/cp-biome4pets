@@ -54,6 +54,45 @@ class ReportContent
         return self::PHYLUM_COLORS[$name] ?? self::PHYLUM_COLOR_FALLBACK;
     }
 
+    /**
+     * Canonical phylum name => the naming variants that mean the SAME phylum. Labs
+     * following the newer ICNP/GTDB taxonomy print the "-ota" forms (Bacteroidota,
+     * Bacillota, Verrucomicrobiota, Pseudomonadota, …) where our data/baselines use
+     * the older names. Without this a present phylum under a newer name would read
+     * as 0. Match is case-insensitive; the canonical name is always its own alias.
+     *
+     * @var array<string,array<int,string>>
+     */
+    public const PHYLUM_ALIASES = [
+        'Bacteroidetes'   => ['Bacteroidetes', 'Bacteroidota'],
+        'Firmicutes'      => ['Firmicutes', 'Bacillota'],
+        'Verrucomicrobia' => ['Verrucomicrobia', 'Verrucomicrobiota'],
+        'Proteobacteria'  => ['Proteobacteria', 'Pseudomonadota'],
+        'Fusobacteria'    => ['Fusobacteria', 'Fusobacteriota'],
+        'Actinobacteria'  => ['Actinobacteria', 'Actinomycetota'],
+    ];
+
+    /**
+     * A phylum's percentage from a phylum_data map, resilient to old-vs-new
+     * taxonomy naming: sums every key that is an alias of the canonical name
+     * (case-insensitive, whitespace-trimmed). A genuinely absent phylum returns 0.0
+     * — never an error — so callers can treat absent as 0. Additive-safe: for the
+     * old canonical names already in our data this returns exactly the stored value.
+     */
+    public static function phylumPercent(array $phylumData, string $canonical): float
+    {
+        $wanted = array_map('strtolower', self::PHYLUM_ALIASES[$canonical] ?? [$canonical]);
+
+        $sum = 0.0;
+        foreach ($phylumData as $name => $value) {
+            if (in_array(strtolower(trim((string) $name)), $wanted, true)) {
+                $sum += (float) $value;
+            }
+        }
+
+        return round($sum, 2);
+    }
+
     /*
     |---------------------------------------------------------------------------
     | Static report text blocks (the "Help and Contacts" section)
@@ -499,5 +538,111 @@ class ReportContent
                 'desc' => "Measures the microbiome's ability to withstand environmental stressors and maintain stability.",
             ],
         ];
+    }
+
+    /*
+    |---------------------------------------------------------------------------
+    | Stage 1: deterministic health-insights source data (READ HELPER ONLY)
+    |---------------------------------------------------------------------------
+    | The forthcoming six insights are driven by a fixed set of bacteria
+    | percentages. This exposes each one per report as a single clean read — the
+    | rule layer (next stage, once the client confirms thresholds) consumes THIS
+    | and never re-derives from raw data. NO rule/band/colour/display logic here.
+    |
+    | Phyla come from phylum_data via the naming-robust phylumPercent(); genera
+    | come from csv_data['insight_taxa'] (persisted by CsvParserService regardless
+    | of top-20 ranking). Everything defaults to 0 when absent — including reports
+    | generated before this stage, until they are backfilled — so a consumer never
+    | hits a missing key.
+    */
+
+    /** Phyla the insights need, by canonical name (resolved naming-robustly). */
+    public const INSIGHT_PHYLA = ['Bacteroidetes', 'Firmicutes', 'Verrucomicrobia'];
+
+    /**
+     * Genera the insights need: display name => the csv_data['insight_taxa'] storage
+     * key written by CsvParserService::INSIGHT_GENERA. Keep the two in step.
+     *
+     * @var array<string,string>
+     */
+    public const INSIGHT_GENERA = [
+        'Blautia' => 'blautia',
+        'Escherichia/Shigella' => 'escherichia_shigella',
+    ];
+
+    /**
+     * Every bacteria percentage the Stage-1 insights need, for ONE report, as a
+     * display-name => percent map. Phyla are read naming-robustly from phylum_data;
+     * genera from csv_data['insight_taxa']. Absent (incl. not-yet-backfilled
+     * reports) reads 0.0, never a missing key or an error.
+     *
+     * @return array<string,float>
+     */
+    public static function insightTaxonPercentages(Report $report): array
+    {
+        return self::insightTaxonPercentagesFrom(
+            $report->phylum_data ?? [],
+            ($report->csv_data ?? [])['insight_taxa'] ?? [],
+        );
+    }
+
+    /**
+     * The same map, built from RAW arrays instead of a Report — used at generation
+     * time (before a Report row exists) so the deterministic scores can be computed
+     * from a Test's phylum_data + csv_data['insight_taxa']. The Report accessor
+     * above delegates here so there is one definition.
+     *
+     * @param  array<string,float|int>  $phylumData  phylum name => percent
+     * @param  array<string,float|int>  $insightTaxa  genus storage key => percent
+     * @return array<string,float>
+     */
+    public static function insightTaxonPercentagesFrom(array $phylumData, array $insightTaxa): array
+    {
+        $out = [];
+        foreach (self::INSIGHT_PHYLA as $name) {
+            $out[$name] = self::phylumPercent($phylumData, $name);
+        }
+        foreach (self::INSIGHT_GENERA as $display => $storageKey) {
+            $out[$display] = round((float) ($insightTaxa[$storageKey] ?? 0), 2);
+        }
+
+        return $out;
+    }
+
+    /**
+     * A single Stage-1 insight bacteria's percentage for a report, by the same
+     * name used as a key in insightTaxonPercentages (a canonical phylum name or a
+     * genus display name). Unknown/absent → 0.0.
+     */
+    public static function insightTaxonPercent(Report $report, string $name): float
+    {
+        return self::insightTaxonPercentages($report)[$name] ?? 0.0;
+    }
+
+    /**
+     * Stage 2: the six health insights fully described for THIS report — band label,
+     * the client's fixed comment for that band, the good/bad direction (for Stage-3
+     * colours), the driver percentage, and any shared note. Keyed by score field.
+     *
+     * The band is taken from the STORED score_* value (so an admin override changes
+     * the label AND its comment together), and the descriptor is looked up from the
+     * one config in HealthInsightRules. The driver percentage comes from the Stage-1
+     * helper. Display/gauge overhaul is Stage 3 — this only exposes the values.
+     *
+     * @return array<string,array<string,mixed>>
+     */
+    public static function healthInsights(Report $report): array
+    {
+        $percentages = self::insightTaxonPercentages($report);
+
+        $out = [];
+        foreach (HealthInsightRules::scoreFields() as $field) {
+            $label = trim((string) ($report->{$field} ?? ''));
+            $descriptor = HealthInsightRules::describeByLabel($field, $label !== '' ? $label : null);
+            $descriptor['value'] = $percentages[$descriptor['driver']] ?? 0.0;
+            $out[$field] = $descriptor;
+        }
+
+        return $out;
     }
 }

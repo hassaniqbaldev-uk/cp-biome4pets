@@ -90,7 +90,9 @@
     $healthyDog = ReportContent::HEALTHY_DOG_PHYLA;
     $top6 = ReportContent::topPhyla($phylumData);
     $microbes = ReportContent::keyMicrobes($report);
-    $insights = ReportContent::insights($report);
+    // Stage 3: the six insights as colour-coded cards (band + comment + direction),
+    // override-aware and identical to the web view. Replaces the old gut-wall gauge.
+    $insights = ReportContent::healthInsights($report);
 
     // Diversity / Species Richness / Dysbiosis: label + colour by threshold.
     // Band cutoffs + labels come from ONE place (ReportContent — identical to the
@@ -117,15 +119,6 @@
     $signsOfStability = $signsOfStability !== ''
         ? str_replace(['{pet}', '{Pet}'], $petName, $signsOfStability)
         : '';
-
-    // Gut Wall gauge needle: map the text score to a degree on the 0-180 arc
-    // (same mapping as the web canvas gauge).
-    $gwScore = $report->score_gut_wall ?? 'N/A';
-    if ($gwScore === 'Low') { $gwDeg = 30; }
-    elseif ($gwScore === 'Medium') { $gwDeg = 90; }
-    elseif ($gwScore === 'High') { $gwDeg = 140; }
-    elseif ($gwScore === 'Very High') { $gwDeg = 165; }
-    else { $gwDeg = 90; }
 
     $logoPath = public_path('images/biome4pets-logo.png');
     // DomPDF-safe charts live in App\Support\ChartSvg (server-side SVG emitted as
@@ -545,33 +538,18 @@
 <div class="section">
     <div class="section-bar">Microbiome-Driven Health Insights</div>
     <div class="section-body">
-        {{-- Gut Wall Integrity gauge --}}
-        <div style="border: 1px solid #e6e6ea; padding: 14px; margin-bottom: 14px; text-align: center; page-break-inside: avoid;">
-            <div style="font-size: 13px; font-weight: bold; color: #301C47;">Gut Wall Integrity</div>
-            <div style="font-size: 10px; color: #55505A; margin-bottom: 6px;">Measures the strength and resilience of the intestinal lining based on key bacterial markers.</div>
-            <div style="text-align: center;">{!! ChartSvg::gauge($gwDeg) !!}</div>
-            <div style="font-size: 18px; font-weight: bold; color: #301C47; margin-top: 4px;">{{ $gwScore }}</div>
-            <table style="width: 220px; margin: 6px auto 0 auto;" cellspacing="0" cellpadding="0">
-                <tr>
-                    <td style="text-align: left; font-size: 10px; color: #16a34a; font-weight: bold;">Low</td>
-                    <td style="text-align: center; font-size: 10px; color: #d97706; font-weight: bold;">Target</td>
-                    <td style="text-align: right; font-size: 10px; color: #dc2626; font-weight: bold;">High</td>
-                </tr>
-            </table>
-        </div>
-
+        {{-- Stage 3: six consistent colour-coded cards (band + client comment),
+             coloured PURELY by each insight's stored direction (tone) — favourable
+             green, concern red, middle amber, so Gas & Digestive's LOW shows green.
+             The former Gut Wall gauge + Low/Target/High legend are removed. The badge
+             colour reuses $toneHex, the same map the diversity/richness bands use. --}}
         <table style="width: 100%;" cellspacing="0" cellpadding="0">
-            @foreach($insights as $i => $insight)
+            @foreach(array_values($insights) as $i => $insight)
                 @if($i % 2 === 0)<tr>@endif
                 @php
-                    $scoreVal = $insight['score'] ?? 'N/A';
-                    $scoreBgColor = match($scoreVal) {
-                        'Very High' => '#991b1b',
-                        'High' => '#ef4444',
-                        'Medium' => '#f59e0b',
-                        'Low' => '#22c55e',
-                        default => '#9ca3af',
-                    };
+                    $label = $insight['label'] ?: 'N/A';
+                    // Tone → hex (shared with the diversity/richness/dysbiosis bands).
+                    $badgeBgColor = $toneHex[$insight['tone']] ?? '#9ca3af';
                 @endphp
                 <td style="width: 48%; vertical-align: top; padding-bottom: 12px;">
                     <div style="border: 1px solid #e6e6ea; padding: 12px;">
@@ -582,10 +560,16 @@
                                     <div style="font-size: 9px; color: #55505A; margin-top: 3px;">{{ $insight['desc'] }}</div>
                                 </td>
                                 <td style="width: 78px; text-align: right; vertical-align: top;">
-                                    <span style="background-color: {{ $scoreBgColor }}; color: #ffffff; padding: 3px 8px; font-weight: bold; font-size: 10px;">{{ $scoreVal }}</span>
+                                    <span style="background-color: {{ $badgeBgColor }}; color: #ffffff; padding: 3px 8px; font-weight: bold; font-size: 10px;">{{ $label }}</span>
                                 </td>
                             </tr>
                         </table>
+                        @if(!empty($insight['comment']))
+                            <div style="font-size: 9px; color: #33303a; margin-top: 8px; line-height: 1.5;">{{ $insight['comment'] }}</div>
+                        @endif
+                        @if(!empty($insight['shared_note']))
+                            <div style="font-size: 8px; color: #55505A; font-style: italic; margin-top: 8px; padding-top: 6px; border-top: 1px solid #ececf0;">{{ $insight['shared_note'] }}</div>
+                        @endif
                     </div>
                 </td>
                 @if($i % 2 === 0)<td style="width: 4%;"></td>@endif

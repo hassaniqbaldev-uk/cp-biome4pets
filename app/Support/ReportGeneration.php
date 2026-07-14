@@ -65,7 +65,16 @@ class ReportGeneration
         );
         $generationError = $service->lastErrorCode;
 
-        return [
+        // Stage 2: the six health-insight score_* values are computed
+        // DETERMINISTICALLY from the bacteria percentages (HealthInsightRules), not
+        // written by the AI. Build the driver percentages from the raw phylum data +
+        // the Stage-1 insight_taxa (genus %) carried in $deterministic, then band
+        // them. This overrides whatever the AI used to return (it no longer does).
+        $scores = HealthInsightRules::computeScores(
+            ReportContent::insightTaxonPercentagesFrom($phylumData, $deterministic['insight_taxa'] ?? []),
+        );
+
+        return array_merge([
             'ai_summary' => $interp['summary'],
             'ai_bacteroidetes_interpretation' => $interp['bacteroidetes_interpretation'],
             'ai_firmicutes_interpretation' => $interp['firmicutes_interpretation'],
@@ -75,13 +84,25 @@ class ReportGeneration
             'vet_summary' => $interp['vet_summary'],
             'goal' => $interp['goal'],
             'recommended_actions' => $interp['recommended_actions'],
-            'score_gut_wall' => $interp['score_gut_wall'],
-            'score_skin_allergy' => $interp['score_skin_allergy'],
-            'score_behaviour_mood' => $interp['score_behaviour_mood'],
-            'score_gut_barrier' => $interp['score_gut_barrier'],
-            'score_gas_digestive' => $interp['score_gas_digestive'],
-            'score_stress_resilience' => $interp['score_stress_resilience'],
-        ];
+        ], $scores);
+    }
+
+    /**
+     * Whether the AI TEXT half of a generation came back empty — the signal that a
+     * transient API failure produced no usable prose (so the caller keeps existing
+     * content / warns). Deliberately ignores the score_* columns: those are now
+     * ALWAYS present (computed deterministically), so counting them would mask a
+     * genuinely empty AI response.
+     */
+    public static function aiTextIsEmpty(array $interpretations): bool
+    {
+        foreach (ReportQualityValidator::TEXT_FIELDS as $field) {
+            if (trim((string) ($interpretations[$field] ?? '')) !== '') {
+                return false;
+            }
+        }
+
+        return true;
     }
 
     /**
@@ -292,7 +313,7 @@ class ReportGeneration
         // SCORES — re-derive bad_score_enum from the CURRENT score columns.
         foreach (ReportQualityValidator::SCORE_FIELDS as $field) {
             $value = trim((string) ($report->{$field} ?? ''));
-            if (! in_array($value, ReportQualityValidator::VALID_SCORES, true)) {
+            if (! in_array($value, ReportQualityValidator::validScores(), true)) {
                 $shown = $value === '' ? '(empty)' : $value;
                 $kept[] = self::issueRow('bad_score_enum', "{$field} = {$shown}");
             }
@@ -420,6 +441,8 @@ class ReportGeneration
                 // The pet's specific bacteria (Stage 1 retention). Fed to the prompt
                 // as fixed facts and used as the validator's allowed-taxa whitelist.
                 'top_taxa' => $test->csv_data['top_taxa'] ?? [],
+                // Stage 2: genus % for the deterministic health-insight scores.
+                'insight_taxa' => $test->csv_data['insight_taxa'] ?? [],
             ];
             $genError = null;
             $interp = self::interpretationColumns($test->phylum_data ?? [], $test->diversity_score, $pet, $asOf, $genError, $deterministic);
@@ -498,13 +521,16 @@ class ReportGeneration
             'dysbiosis_score' => $test->dysbiosis_score,
             'microbiome_classification' => $test->microbiome_classification,
             'top_taxa' => $test->csv_data['top_taxa'] ?? [],
+            // Stage 2: genus % for the deterministic health-insight scores.
+            'insight_taxa' => $test->csv_data['insight_taxa'] ?? [],
         ];
 
         $genError = null;
         $interp = self::interpretationColumns($phylumData, $test->diversity_score, $pet, $asOf, $genError, $deterministic);
 
         // Never overwrite good content with a transient failure / empty result.
-        $allEmpty = collect($interp)->every(fn ($v) => $v === '' || $v === null);
+        // Judge emptiness on the AI TEXT only — score_* are always populated now.
+        $allEmpty = self::aiTextIsEmpty($interp);
         if ($genError !== null || $allEmpty) {
             return ['ok' => false, 'needs_review' => (bool) $report->needs_review, 'reason' => $genError ?? 'empty_output'];
         }

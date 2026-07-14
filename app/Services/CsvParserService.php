@@ -137,6 +137,7 @@ class CsvParserService
         );
 
         $topTaxa = $this->buildTopTaxa($genusPctTotals, $speciesPctTotals);
+        $insightTaxa = $this->buildInsightTaxa($genusPctTotals);
 
         return [
             'phylum_totals' => $phylumTotals,
@@ -148,6 +149,14 @@ class CsvParserService
             // species, each tagged with its rank. Rides inside csv_data (JSON) — no
             // migration. Absent on pre-existing reports; readers default to [].
             'top_taxa' => $topTaxa,
+            // Stage 1 of the deterministic health-insights rework: the SPECIFIC
+            // genus percentages the forthcoming rules need, captured regardless of
+            // top-20 ranking (Escherichia/Shigella especially is usually too low to
+            // rank). Canonical key => summed %, with an entry for EVERY needed genus
+            // even when absent (stored 0) so the rule layer can treat absent as 0.
+            // Also rides inside csv_data (JSON) — no migration. NO display/rule use
+            // yet; this only makes the data reliably available.
+            'insight_taxa' => $insightTaxa,
         ];
     }
 
@@ -192,6 +201,77 @@ class CsvParserService
             fn (array $t): array => ['name' => $t['name'], 'rank' => $t['rank'], 'pct' => round($t['pct'], 2)],
             $taxa,
         );
+    }
+
+    /**
+     * The specific genera the Stage-1 health-insights rework must have reliably
+     * available per report, as: canonical storage key => the lowercase alias
+     * TOKENS that identify the genus in a raw CSV Genus cell. A raw genus matches
+     * when any of its normalised tokens (see normaliseTokens) is one of these.
+     *
+     * Escherichia/Shigella is a single combined SILVA-style genus that appears as
+     * "Escherichia-Shigella", "Escherichia_Shigella", "Escherichia/Shigella" etc;
+     * matching on EITHER token captures it whatever the separator, and also folds a
+     * lab that happens to split it into two rows back into one canonical total.
+     *
+     * The canonical keys ('blautia', 'escherichia_shigella') are the stable storage
+     * keys in csv_data['insight_taxa']; the read side (ReportContent) maps them to
+     * display names. Keep the two in sync when adding a genus.
+     *
+     * @var array<string,array<int,string>>
+     */
+    public const INSIGHT_GENERA = [
+        'blautia' => ['blautia'],
+        'escherichia_shigella' => ['escherichia', 'shigella'],
+    ];
+
+    /**
+     * Build the insight_taxa map: for each needed genus (INSIGHT_GENERA), the sum
+     * of the %_hits of every raw genus whose normalised tokens match one of its
+     * aliases. Seeds every canonical key at 0 so an absent genus is stored as 0
+     * (not a missing key) — the later rule layer can treat 0 as "absent". Rounded
+     * last so the sum is accumulated at full precision.
+     *
+     * @param  array<string,float>  $genusPctTotals  raw genus name => summed %
+     * @return array<string,float>  canonical genus key => summed %
+     */
+    private function buildInsightTaxa(array $genusPctTotals): array
+    {
+        $insight = array_fill_keys(array_keys(self::INSIGHT_GENERA), 0.0);
+
+        foreach ($genusPctTotals as $rawGenus => $pct) {
+            $tokens = self::normaliseTokens((string) $rawGenus);
+            if ($tokens === []) {
+                continue;
+            }
+
+            foreach (self::INSIGHT_GENERA as $canonical => $aliases) {
+                if (array_intersect($tokens, $aliases) !== []) {
+                    $insight[$canonical] += $pct;
+                }
+            }
+        }
+
+        return array_map(fn (float $v): float => round($v, 2), $insight);
+    }
+
+    /**
+     * Normalise a raw taxon token into lowercase alphanumeric WORD TOKENS: drop any
+     * trailing accession in parentheses, lowercase, and split on every run of
+     * non-alphanumeric characters (so "/", "-", "_" and whitespace all separate).
+     * "Escherichia-Shigella" -> ['escherichia','shigella']; "Blautia" -> ['blautia'].
+     * Empty input (or an all-separator string) yields [].
+     *
+     * @return array<int,string>
+     */
+    private static function normaliseTokens(string $raw): array
+    {
+        $name = preg_replace('/\([^)]*\)\s*$/', '', $raw) ?? $raw;  // strip accession
+        $name = strtolower($name);
+        $name = preg_replace('/[^a-z0-9]+/', ' ', $name) ?? $name;  // separators → space
+        $name = trim($name);
+
+        return $name === '' ? [] : explode(' ', $name);
     }
 
     /**

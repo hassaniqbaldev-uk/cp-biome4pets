@@ -396,6 +396,20 @@ class Report extends Model
     }
 
     /**
+     * Stage 1 read helper for the deterministic health-insights rework: every
+     * bacteria percentage the forthcoming insights need, as a display-name =>
+     * percent map (naming-robust phyla + the persisted Blautia / Escherichia-
+     * Shigella genus totals). Delegates to the single source in ReportContent so
+     * the rule layer (next stage) consumes ONE definition. Absent → 0.0.
+     *
+     * @return array<string,float>
+     */
+    public function insightTaxonPercentages(): array
+    {
+        return \App\Support\ReportContent::insightTaxonPercentages($this);
+    }
+
+    /**
      * The owning client reached through the pet. Falls back to the directly
      * stored client_id when the pet relationship is not yet set.
      */

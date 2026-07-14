@@ -46,8 +46,24 @@ class ReportQualityValidator
 
     public const SEVERITY_INFO = 'info';
 
-    /** The only acceptable score_* values. */
-    public const VALID_SCORES = ['Very High', 'High', 'Medium', 'Low'];
+    /**
+     * The acceptable score_* values. The score_* columns are now computed
+     * DETERMINISTICALLY (HealthInsightRules) rather than written by the AI, so the
+     * per-insight band labels ('Target', 'Disrupted', 'Leaky Gut', …) are valid too;
+     * the legacy AI enum values are kept so pre-Stage-2 reports still validate. The
+     * enum check therefore only ever fires on a genuinely bad value (an out-of-set
+     * manual override or an empty column). Union built from the rules config so the
+     * two can't drift.
+     */
+    public const LEGACY_SCORES = ['Very High', 'High', 'Medium', 'Low'];
+
+    public static function validScores(): array
+    {
+        return array_values(array_unique(array_merge(
+            self::LEGACY_SCORES,
+            HealthInsightRules::allBandLabels(),
+        )));
+    }
 
     /**
      * Heuristic tolerances — deliberately generous (precision over recall) since
@@ -161,7 +177,7 @@ class ReportQualityValidator
         if (! $allEmpty) {
             foreach (self::SCORE_FIELDS as $field) {
                 $value = trim((string) ($interp[$field] ?? ''));
-                if (! in_array($value, self::VALID_SCORES, true)) {
+                if (! in_array($value, self::validScores(), true)) {
                     $shown = $value === '' ? '(empty)' : self::clip($value, 40);
                     $issues[] = self::issue('bad_score_enum', self::SEVERITY_WARNING, self::TIER_DETERMINISTIC, "{$field} = {$shown}");
                 }
@@ -483,7 +499,10 @@ class ReportQualityValidator
 
     protected static function allInterpretationsEmpty(array $interp): bool
     {
-        foreach (array_merge(self::TEXT_FIELDS, self::SCORE_FIELDS) as $field) {
+        // AI TEXT only. The score_* columns are now always populated (computed
+        // deterministically), so including them would mask a genuinely empty AI
+        // response — "empty output" means the model produced no prose.
+        foreach (self::TEXT_FIELDS as $field) {
             if (trim((string) ($interp[$field] ?? '')) !== '') {
                 return false;
             }
