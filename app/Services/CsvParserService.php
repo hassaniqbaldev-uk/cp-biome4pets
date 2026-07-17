@@ -43,7 +43,12 @@ class CsvParserService
         $headerCount = count($header);
 
         $phylumTotals = [];
-        $speciesProportions = [];
+        // Shannon inputs for the INCLUDED species rows, kept as RAW per-row values
+        // (not proportions) so they can be renormalised over the included set after
+        // the loop — see shannon(). Both units are collected: exact counts, plus the
+        // lab's pre-rounded percentages as a whole-sample fallback.
+        $speciesCounts = [];
+        $speciesPcts = [];
         $speciesRichness = 0;
         $rowCount = 0;
 
@@ -85,12 +90,23 @@ class CsvParserService
                 $phylumTotals[$phylum] = ($phylumTotals[$phylum] ?? 0) + $pctHits;
             }
 
+            // DIVERSITY taxa set: species-resolved rows carrying abundance. Rows that
+            // only classify to genus/family (blank Species) are deliberately EXCLUDED
+            // — the lab's Shannon is "over classified species only". Their abundance
+            // is instead accounted for by renormalising in shannon() below.
             $species = $data['Species'] ?? '';
             if ($species !== '' && $pctHits > 0) {
-                $speciesProportions[] = $pctHits / 100;
+                $speciesPcts[] = $pctHits;
+                $speciesCounts[] = (float) ($data['num_hits'] ?? 0);
             }
 
-            // Count species richness: non-empty, non-null, not containing "Unclassified"
+            // RICHNESS taxa set: non-empty and not "Unclassified".
+            // NB: this is NOT the same set as the diversity one above — richness also
+            // drops rows whose Species is literally "Unclassified" (which diversity
+            // keeps) and does not require abundance > 0. Flagged in the audit; left
+            // as-is deliberately because aligning it would change a second
+            // customer-facing figure (and the richness-gated classification), so it
+            // needs sign-off first. See ReportContent::classify() / richnessBand().
             if ($species !== '' && stripos($species, 'Unclassified') === false) {
                 $speciesRichness++;
             }
@@ -110,16 +126,7 @@ class CsvParserService
 
         $phylumTotals = array_map(fn ($v) => round($v, 2), $phylumTotals);
 
-        $diversityScore = 0.0;
-        if (count($speciesProportions) > 0) {
-            foreach ($speciesProportions as $p) {
-                if ($p > 0) {
-                    $diversityScore -= $p * log($p);
-                }
-            }
-        }
-
-        $diversityScore = round($diversityScore, 2);
+        $diversityScore = self::shannon($speciesCounts, $speciesPcts);
 
         // Calculate dysbiosis score (Firmicutes / Bacteroidetes ratio)
         $firmicutes = $phylumTotals['Firmicutes'] ?? 0;
@@ -158,6 +165,52 @@ class CsvParserService
             // yet; this only makes the data reliably available.
             'insight_taxa' => $insightTaxa,
         ];
+    }
+
+    /**
+     * The Shannon diversity index over the INCLUDED species rows:
+     *
+     *     H = -Σ p_i · ln(p_i),   p_i = value_i / Σ(value over included rows)
+     *
+     * The proportions are RENORMALISED over the included set so Σp = 1.0, which
+     * Shannon requires. This is the fix for the report-4050 bug: the previous code
+     * used a hardcoded p = %_hits / 100, so on a sample where some abundance sits in
+     * rows that only classify to genus/family (blank Species — correctly excluded
+     * from the taxa set), the remaining proportions summed to LESS than 1.0 and H was
+     * systematically UNDERESTIMATED. On 4050 the species rows carry 83.065% of the
+     * abundance: /100 gave 2.37 (the stored, wrong value); renormalising over the
+     * included subtotal gives 2.67 (the lab's correct value). On a fully-resolved
+     * sample the subtotal is ~100, so renormalising changes nothing.
+     *
+     * UNITS: prefers the exact raw counts (num_hits); the lab's %_hits are pre-rounded
+     * and lose precision. Falls back to %_hits for the WHOLE sample when any included
+     * row lacks a usable count — the two units are never mixed within one
+     * normalisation, which would be meaningless.
+     *
+     * @param  array<int,float>  $counts  per-row num_hits for the included rows
+     * @param  array<int,float>  $pcts  per-row %_hits for the same rows, same order
+     */
+    private static function shannon(array $counts, array $pcts): float
+    {
+        // Use counts only when EVERY included row has a usable (>0) count.
+        $countsUsable = $counts !== [] && count(array_filter($counts, fn (float $c): bool => $c > 0)) === count($counts);
+        $values = $countsUsable ? $counts : $pcts;
+
+        $total = array_sum($values);
+        if ($total <= 0) {
+            return 0.0;
+        }
+
+        $h = 0.0;
+        foreach ($values as $value) {
+            if ($value <= 0) {
+                continue;
+            }
+            $p = $value / $total;   // renormalised — Σp = 1.0
+            $h -= $p * log($p);
+        }
+
+        return round($h, 2);
     }
 
     /**
