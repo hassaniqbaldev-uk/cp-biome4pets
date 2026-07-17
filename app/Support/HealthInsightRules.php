@@ -59,7 +59,7 @@ class HealthInsightRules
      * THE SIX INSIGHTS. Keyed by the report score_* column each one computes.
      *
      * Per insight:
-     *   title            — display title (matches ReportContent::insights()).
+     *   title            — display title (as rendered by ReportContent::healthInsights()).
      *   driver           — the bacteria whose % drives it; a key returned by
      *                      ReportContent::insightTaxonPercentages() (a canonical
      *                      phylum name or a genus display name).
@@ -87,7 +87,9 @@ class HealthInsightRules
         //    band uses the optimal/on-target wording (client's confirmed choice).
         'score_skin_allergy' => [
             'title' => 'Skin & Allergy Risk',
-            'desc' => 'Assesses the likelihood of skin sensitivities and allergic responses linked to gut microbiome imbalances.',
+            // Client's scientific wording. Editable in Settings → Report Text →
+            // Health Insight Descriptions; this stays the default/fallback.
+            'desc' => 'This score evaluates microbiome characteristics associated with immune regulation, production of beneficial microbial metabolites and maintenance of the intestinal barrier, all of which influence systemic inflammation and allergic susceptibility. The assessment identifies microbial patterns that may increase or reduce the risk of microbiome-associated skin and immune dysfunction.',
             'driver' => 'Bacteroidetes',
             'target' => 25.0, // CONFIRMED
             'favourable_label' => 'Target',
@@ -112,7 +114,8 @@ class HealthInsightRules
         //    a range via TARGET_TOLERANCE), Low <25; no medium band.
         'score_behaviour_mood' => [
             'title' => 'Behaviour & Mood Balance',
-            'desc' => 'Evaluates the gut-brain axis indicators that influence mood, anxiety, and behavioural patterns.',
+            // Client's scientific wording (Firmicutes / gut-brain axis).
+            'desc' => 'Evaluates the abundance of Firmicutes, a major bacterial phylum that includes many beneficial species involved in the gut-brain axis. These bacteria support the production of short-chain fatty acids and stimulate pathways involved in serotonin synthesis, helping to regulate mood, behaviour and stress resilience through microbiome-brain communication.',
             'driver' => 'Firmicutes',
             'target' => 25.0, // per original spec
             'favourable_label' => 'Target',
@@ -136,7 +139,15 @@ class HealthInsightRules
         //    favourable/green band is the 1–4% Healthy Optimal range; both ends are
         //    concern. Comments are the client's exact (deliberately short) wording.
         'score_gut_barrier' => [
-            'title' => 'Gut Barrier & Metabolic Health',
+            // "Gut Barrier" deliberately removed: that describes the Blautia-driven
+            // insight (Gut Wall Integrity), so having it here — on the
+            // Verrucomicrobia insight — was confusing. Client's wording. The field
+            // KEY (score_gut_barrier) is unchanged; this is display only.
+            'title' => 'Metabolic Health',
+            // The ONLY insight the client did not supply new scientific wording for,
+            // so this keeps the ORIGINAL Stage-3 copy as the placeholder (never blank).
+            // Surfaced as the odd-one-out in the Settings helper text so she can update
+            // it herself when she has the wording.
             'desc' => 'Reflects the functional capacity of the gut barrier and efficiency of nutrient metabolism.',
             'driver' => 'Verrucomicrobia',
             // No 'target' point — the healthy band is a range; kept null so the
@@ -162,7 +173,11 @@ class HealthInsightRules
         //    Optimal Health (score 3, incl. 4%, 5%+). Edge behaviour is CONFIRMED.
         'score_gut_wall' => [
             'title' => 'Gut Wall Integrity',
-            'desc' => 'Measures the strength and resilience of the intestinal lining based on key bacterial markers.',
+            // Client's scientific wording. NB: the client calls this her "Gut Barrier"
+            // comment and it is about BLAUTIA — so it belongs to THIS field
+            // (score_gut_wall, driver Blautia), NOT to score_gut_barrier (which is
+            // Metabolic Health / Verrucomicrobia). Mapped by driver, not field name.
+            'desc' => 'Evaluates the abundance of Blautia, a beneficial bacterial group associated with maintaining intestinal barrier integrity and supporting anti-inflammatory activity within the gut. Reduced levels may be associated with impaired gut barrier function, increased intestinal permeability and greater exposure of the immune system to secondary metabolites and toxins.',
             'driver' => 'Blautia',
             'target' => 3.0,
             'favourable_label' => 'Optimal Health',
@@ -185,7 +200,8 @@ class HealthInsightRules
         //    good/bad DIRECTION differs, captured for Stage-3 colours.
         'score_gas_digestive' => [
             'title' => 'Gas & Digestive Comfort',
-            'desc' => 'Indicates the level of gas-producing bacteria and overall digestive comfort.',
+            // Client's scientific wording (Escherichia/Shigella).
+            'desc' => 'Evaluates the abundance of Escherichia/Shigella, bacterial groups that can increase during gut microbial imbalance and are associated with intestinal inflammation and digestive disturbance. Elevated levels may indicate reduced microbial stability and a greater likelihood of gastrointestinal discomfort, altered stool quality and impaired digestive health.',
             'driver' => 'Escherichia/Shigella',
             'target' => 0.5, // CONFIRMED
             'favourable_label' => 'Low', // low is GOOD here
@@ -208,7 +224,8 @@ class HealthInsightRules
         //    shared note explaining why Firmicutes drives two insights.
         'score_stress_resilience' => [
             'title' => 'Environmental Stress Resilience',
-            'desc' => "Measures the microbiome's ability to withstand environmental stressors and maintain stability.",
+            // Client's scientific wording (Firmicutes / resilience).
+            'desc' => 'Assesses Firmicutes, a dominant bacterial phylum associated with microbial resilience, metabolic flexibility and maintenance of a stable gut ecosystem. Adequate abundance supports resistance to environmental challenges, helping the microbiome recover from dietary changes, stress and other factors that may disrupt microbial balance.',
             'driver' => 'Firmicutes',
             'target' => 25.0,
             'favourable_label' => 'Target',
@@ -229,6 +246,19 @@ class HealthInsightRules
     public static function scoreFields(): array
     {
         return array_keys(self::HEALTH_INSIGHT_RULES);
+    }
+
+    /**
+     * The Settings key holding the admin-editable description for one insight, e.g.
+     * "health_insight_desc_score_gut_wall". Derived from the field so the six settings
+     * and the six insights can never drift apart (add an insight → it gets a field).
+     * The config's 'desc' remains the DEFAULT: an unset/blank setting falls back to it,
+     * so a description can never render blank. Resolved by
+     * ReportContent::insightDescription().
+     */
+    public static function descriptionSettingKey(string $field): string
+    {
+        return 'health_insight_desc_'.$field;
     }
 
     /** Every distinct band label a computed/overridden insight can carry (across

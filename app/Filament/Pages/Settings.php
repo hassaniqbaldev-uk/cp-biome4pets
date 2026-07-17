@@ -6,6 +6,8 @@ use App\Filament\Resources\ReportResource;
 use App\Mail\TestSmtpEmail;
 use App\Models\ProductRule;
 use App\Models\Setting;
+use App\Support\HealthInsightRules;
+use App\Support\ReportContent;
 use App\Services\KlaviyoService;
 use App\Services\OpenAiService;
 use App\Support\PaidActionLimiter;
@@ -136,11 +138,20 @@ class Settings extends Page implements HasForms
      */
     protected function loadReportText(): array
     {
-        return [
+        $values = [
             Setting::REPORT_ABOUT_TEXT => Setting::get(Setting::REPORT_ABOUT_TEXT) ?: Setting::REPORT_ABOUT_TEXT_DEFAULT,
             Setting::REPORT_APPROACH_TEXT => Setting::get(Setting::REPORT_APPROACH_TEXT) ?: Setting::REPORT_APPROACH_TEXT_DEFAULT,
             Setting::REPORT_SUPPORT_TEXT => Setting::get(Setting::REPORT_SUPPORT_TEXT) ?: Setting::REPORT_SUPPORT_TEXT_DEFAULT,
         ];
+
+        // The six health-insight descriptions — each pre-filled to its stored value or
+        // the config default, so the editor never shows a blank box. Same resolution
+        // the report itself uses (ReportContent::insightDescription).
+        foreach (HealthInsightRules::scoreFields() as $field) {
+            $values[HealthInsightRules::descriptionSettingKey($field)] = ReportContent::insightDescription($field);
+        }
+
+        return $values;
     }
 
     protected function loadKlaviyo(): array
@@ -529,7 +540,43 @@ class Settings extends Page implements HasForms
                     ->rows(5)
                     ->default(Setting::REPORT_SUPPORT_TEXT_DEFAULT)
                     ->helperText('The "Support & Next Steps" contact block. Plain text; line breaks are preserved.'),
+
+                Section::make('Health Insight Descriptions')
+                    ->description('The explanatory paragraph shown under each of the six "Microbiome-Driven Health Insights" cards, on both the web report and the PDF. These describe what each insight measures; they do NOT change any score, band or result. Leave a field blank to restore its original wording.')
+                    ->collapsible()
+                    ->schema(static::healthInsightDescriptionFields()),
             ]);
+    }
+
+    /**
+     * One textarea per health insight, built by looping the rules config so the fields,
+     * their labels and their defaults all come from that single source — add an insight
+     * and it gets an editable description automatically, with no drift.
+     */
+    protected static function healthInsightDescriptionFields(): array
+    {
+        $fields = [];
+
+        foreach (HealthInsightRules::HEALTH_INSIGHT_RULES as $field => $cfg) {
+            // Naming the driver bacteria matters: two insights are both driven by
+            // Firmicutes, and "Gut Wall Integrity" (Blautia) vs "Metabolic Health"
+            // (Verrucomicrobia) are easy to mix up from the titles alone.
+            $helper = 'Driven by '.$cfg['driver'].'. Leave blank to restore the default wording.';
+
+            // The one insight with no new copy from the client — flag it so it is
+            // obvious which is still on the original wording.
+            if ($field === 'score_gut_barrier') {
+                $helper = 'Driven by '.$cfg['driver'].'. NOTE: this one still uses the ORIGINAL wording — the other five were updated with the new scientific descriptions, so you may want to rewrite this one. Leave blank to restore the default wording.';
+            }
+
+            $fields[] = Textarea::make(HealthInsightRules::descriptionSettingKey($field))
+                ->label($cfg['title'])
+                ->rows(4)
+                ->default($cfg['desc'])
+                ->helperText($helper);
+        }
+
+        return $fields;
     }
 
     /**
@@ -1045,6 +1092,14 @@ class Settings extends Page implements HasForms
         Setting::set(Setting::REPORT_ABOUT_TEXT, $data[Setting::REPORT_ABOUT_TEXT] ?? '');
         Setting::set(Setting::REPORT_APPROACH_TEXT, $data[Setting::REPORT_APPROACH_TEXT] ?? '');
         Setting::set(Setting::REPORT_SUPPORT_TEXT, $data[Setting::REPORT_SUPPORT_TEXT] ?? '');
+
+        // The six health-insight descriptions — same contract: stored verbatim, and a
+        // blank field reverts to the config default at render time
+        // (ReportContent::insightDescription), so wiping one is safe.
+        foreach (HealthInsightRules::scoreFields() as $field) {
+            $key = HealthInsightRules::descriptionSettingKey($field);
+            Setting::set($key, $data[$key] ?? '');
+        }
 
         // ── Klaviyo ──────────────────────────────────────────────────────────
         // Only overwrite the key when a new value was entered (same guard as the

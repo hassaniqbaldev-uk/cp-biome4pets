@@ -143,7 +143,12 @@ class InformedProsePromptTest extends TestCase
         // (c) The prose is now ACTIVELY asked to reference the notable taxa by name
         //     (strengthened from "may name" → "should reference"), so names reliably appear.
         $this->assertStringContainsString('You SHOULD reference the most notable of these taxa BY NAME', $prompt);
-        $this->assertStringContainsString('especially in the summary and vet_summary', $prompt);
+        // Naming is now scoped to vet_summary (the DETAIL paragraph). Previously it
+        // asked for the taxa in "the summary and vet_summary" — the two paragraphs are
+        // printed one above the other, so that instruction drove the duplicated opening
+        // paragraphs the client reported. The summary now stays big-picture.
+        $this->assertStringContainsString('especially in vet_summary', $prompt);
+        $this->assertStringNotContainsString('especially in the summary and vet_summary', $prompt);
 
         // (d) CRITICAL: factual only — no verdict words for taxa (no reference ranges).
         $this->assertStringContainsString('Describe them factually', $prompt);

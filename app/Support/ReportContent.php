@@ -123,6 +123,63 @@ class ReportContent
         return self::reportText(Setting::REPORT_SUPPORT_TEXT, Setting::REPORT_SUPPORT_TEXT_DEFAULT);
     }
 
+    /**
+     * "Understanding Your Dog's Results": what each of the three Microbiome Overview
+     * scores means. The client's EXACT wording — do not paraphrase. Lives here once
+     * so the web report and the PDF render identical copy and can't drift (the
+     * templates share data, not styling — see the class docblock).
+     *
+     * @return array<int,array{title:string,text:string}>
+     */
+    public static function resultsExplanations(): array
+    {
+        return [
+            [
+                'title' => 'Diversity',
+                'text' => 'Diversity is measured using the Shannon Index, a standard method used to assess how varied and balanced the microbiome is. Higher scores indicate greater diversity and a more resilient microbiome.',
+            ],
+            [
+                'title' => 'Species Richness',
+                'text' => 'Species richness reflects the number of different bacterial species present. Higher numbers are typically associated with a more diverse and resilient microbiome.',
+            ],
+            [
+                'title' => 'Dysbiosis Pattern Score',
+                'text' => 'The Dysbiosis Pattern Score reflects the balance between Firmicutes and Bacteroidetes.',
+            ],
+        ];
+    }
+
+    /*
+    |---------------------------------------------------------------------------
+    | Kibble + imbalanced: the nutritionist diet-review recommendation
+    |---------------------------------------------------------------------------
+    | Shown in place of the generic nutritionist nudge when the pet is kibble-fed
+    | AND its classification is Imbalanced / Imbalanced & Depleted — the client's
+    | rule (see Report::recommendsDietReview()). Copy lives here once so the web
+    | report and the PDF render identical wording and can't drift.
+    */
+
+    /** The nutritionist diet-review product the recommendation links to. */
+    public const DIET_REVIEW_URL = 'https://biome4pets.com/products/microbiome-diet-review-optimisation-60-minutes';
+
+    /** The client's EXACT wording for the recommendation — do not paraphrase. */
+    public static function dietReviewText(): string
+    {
+        return "We recommend speaking with one of our nutritionists, as your dog's diet may be contributing to their microbiome imbalance. Gut health and nutrition go hand in hand, and by reviewing your dog's microbiome results alongside their current diet, our nutritionists can identify foods and feeding strategies that better support a healthy, balanced microbiome and help optimise long-term gut health.";
+    }
+
+    /** The loyalty/subscription discount note shown beside the link. */
+    public static function dietReviewLoyaltyNote(): string
+    {
+        return 'If you are on a subscription or part of the loyalty programme, you get 10% off.';
+    }
+
+    /** Call-to-action label for the diet-review link. */
+    public static function dietReviewLinkLabel(): string
+    {
+        return 'Book a microbiome diet review';
+    }
+
     /** The "Our Approach" block as a list of non-blank bullet lines. */
     public static function reportApproachLines(): array
     {
@@ -503,43 +560,6 @@ class ReportContent
         ));
     }
 
-    /** Microbiome-driven health insight scores (title, the report's score, copy). */
-    public static function insights(Report $report): array
-    {
-        return [
-            [
-                'title' => 'Gut Wall Integrity',
-                'score' => $report->score_gut_wall,
-                'desc' => 'Measures the strength and resilience of the intestinal lining based on key bacterial markers.',
-            ],
-            [
-                'title' => 'Skin & Allergy Risk',
-                'score' => $report->score_skin_allergy,
-                'desc' => 'Assesses the likelihood of skin sensitivities and allergic responses linked to gut microbiome imbalances.',
-            ],
-            [
-                'title' => 'Behaviour & Mood Balance',
-                'score' => $report->score_behaviour_mood,
-                'desc' => 'Evaluates the gut-brain axis indicators that influence mood, anxiety, and behavioural patterns.',
-            ],
-            [
-                'title' => 'Gut Barrier & Metabolic Health',
-                'score' => $report->score_gut_barrier,
-                'desc' => 'Reflects the functional capacity of the gut barrier and efficiency of nutrient metabolism.',
-            ],
-            [
-                'title' => 'Gas & Digestive Comfort',
-                'score' => $report->score_gas_digestive,
-                'desc' => 'Indicates the level of gas-producing bacteria and overall digestive comfort.',
-            ],
-            [
-                'title' => 'Environmental Stress Resilience',
-                'score' => $report->score_stress_resilience,
-                'desc' => "Measures the microbiome's ability to withstand environmental stressors and maintain stability.",
-            ],
-        ];
-    }
-
     /*
     |---------------------------------------------------------------------------
     | Stage 1: deterministic health-insights source data (READ HELPER ONLY)
@@ -640,9 +660,27 @@ class ReportContent
             $label = trim((string) ($report->{$field} ?? ''));
             $descriptor = HealthInsightRules::describeByLabel($field, $label !== '' ? $label : null);
             $descriptor['value'] = $percentages[$descriptor['driver']] ?? 0.0;
+            // Admin-editable copy wins over the config default. Both the web card and
+            // the PDF card read this method, so editing it in Settings updates both.
+            $descriptor['desc'] = self::insightDescription($field);
             $out[$field] = $descriptor;
         }
 
         return $out;
+    }
+
+    /**
+     * One insight's description: the admin-editable Settings value when set, otherwise
+     * the config default (HealthInsightRules' 'desc'). Same blank-falls-back-to-default
+     * contract as the other report-text blocks (see reportText()), so clearing the
+     * field in Settings restores the original wording rather than rendering blank.
+     */
+    public static function insightDescription(string $field): string
+    {
+        $value = trim((string) Setting::get(HealthInsightRules::descriptionSettingKey($field)));
+
+        return $value !== ''
+            ? $value
+            : (string) (HealthInsightRules::HEALTH_INSIGHT_RULES[$field]['desc'] ?? '');
     }
 }

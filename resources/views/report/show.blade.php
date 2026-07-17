@@ -257,6 +257,17 @@
             </div>
             <div class="report-body">
                 <p class="text-gray-700 leading-relaxed">This section explains the current state of your dog's microbiome, including how stable, diverse, and resilient it is &mdash; key factors that influence gut health and overall wellbeing.</p>
+
+                {{-- What each of the three Microbiome Overview scores means. Copy is
+                     shared with the PDF — see app/Support/ReportContent.php. --}}
+                <dl class="mt-5 space-y-4">
+                    @foreach(\App\Support\ReportContent::resultsExplanations() as $explanation)
+                        <div>
+                            <dt class="font-bold text-navy text-sm">{{ $explanation['title'] }}</dt>
+                            <dd class="text-sm text-gray-700 leading-relaxed mt-1">{{ $explanation['text'] }}</dd>
+                        </div>
+                    @endforeach
+                </dl>
             </div>
         </section>
 
@@ -870,8 +881,18 @@
                         </div>
                         <div>
                             <h3 style="font-size:17px; font-weight:700; color:#301C47; margin:0 0 6px;">We recommend speaking to a nutritionist</h3>
-                            <p style="font-size:14px; color:#4b5563; line-height:1.6; margin:0 0 16px; max-width:60ch;">Pets on a kibble diet can benefit from tailored guidance on supporting gut health. Our nutritionists can help you build a plan suited to {{ $petName }}'s individual results.</p>
-                            <a href="{{ \App\Support\Utm::report('https://biome4pets.com/nutritionists', 'nutritionist', 'nutritionist_cta') }}" target="_blank" rel="noopener noreferrer" style="display:inline-block; background:#4654A4; color:#fff; font-weight:600; font-size:14px; text-decoration:none; padding:11px 22px; border-radius:9px;">View recommendations &rarr;</a>
+                            @if($report->recommendsDietReview())
+                                {{-- Kibble-fed AND Imbalanced / Imbalanced & Depleted: the
+                                     client's diet-review recommendation REPLACES the generic
+                                     nudge below. Copy + link shared with the PDF — see
+                                     app/Support/ReportContent.php. --}}
+                                <p style="font-size:14px; color:#4b5563; line-height:1.6; margin:0 0 16px; max-width:60ch;">{{ \App\Support\ReportContent::dietReviewText() }}</p>
+                                <a href="{{ \App\Support\Utm::report(\App\Support\ReportContent::DIET_REVIEW_URL, 'nutritionist', 'diet_review_cta') }}" target="_blank" rel="noopener noreferrer" style="display:inline-block; background:#4654A4; color:#fff; font-weight:600; font-size:14px; text-decoration:none; padding:11px 22px; border-radius:9px;">{{ \App\Support\ReportContent::dietReviewLinkLabel() }} &rarr;</a>
+                                <p style="font-size:13px; color:#6b7280; line-height:1.6; margin:12px 0 0;">{{ \App\Support\ReportContent::dietReviewLoyaltyNote() }}</p>
+                            @else
+                                <p style="font-size:14px; color:#4b5563; line-height:1.6; margin:0 0 16px; max-width:60ch;">Pets on a kibble diet can benefit from tailored guidance on supporting gut health. Our nutritionists can help you build a plan suited to {{ $petName }}'s individual results.</p>
+                                <a href="{{ \App\Support\Utm::report('https://biome4pets.com/nutritionists', 'nutritionist', 'nutritionist_cta') }}" target="_blank" rel="noopener noreferrer" style="display:inline-block; background:#4654A4; color:#fff; font-weight:600; font-size:14px; text-decoration:none; padding:11px 22px; border-radius:9px;">View recommendations &rarr;</a>
+                            @endif
                         </div>
                     </div>
                 </div>

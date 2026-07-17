@@ -296,6 +296,15 @@
     <div class="section-bar">Understanding Your Dog's Results</div>
     <div class="section-body">
         <p>This section explains the current state of your dog's microbiome, including how stable, diverse, and resilient it is &mdash; key factors that influence gut health and overall wellbeing.</p>
+
+        {{-- What each of the three Microbiome Overview scores means. Copy is shared
+             with the web view — see app/Support/ReportContent.php. --}}
+        @foreach(ReportContent::resultsExplanations() as $explanation)
+            <div style="margin-top: 10px;">
+                <div style="font-size: 11px; font-weight: bold; color: #301C47;">{{ $explanation['title'] }}</div>
+                <div style="font-size: 10px; color: #55505A; margin-top: 2px; line-height: 1.6;">{{ $explanation['text'] }}</div>
+            </div>
+        @endforeach
     </div>
 </div>
 
@@ -421,12 +430,25 @@
         <table style="width: 100%; margin-bottom: 14px;" cellspacing="0" cellpadding="0">
             <tr>
                 @foreach($classCards as $card)
-                    @php $isActive = $classification === $card['name']; @endphp
-                    <td style="width: 32%; vertical-align: top;">
-                        <div style="background-color: {{ $isActive ? $card['active'] : '#FAF8FF' }}; border-top: 4px solid {{ $card['border'] }}; border-left: 1px solid #e6e6ea; border-right: 1px solid #e6e6ea; border-bottom: 1px solid #e6e6ea; padding: 12px; text-align: center;">
-                            <div style="font-size: 14px; font-weight: bold; color: {{ $card['text'] }};">{{ $card['name'] }}</div>
-                            <div style="font-size: 10px; color: #55505A; margin-top: 4px;">{{ $card['desc'] }}</div>
-                        </div>
+                    @php
+                        // EXACT match, never a substring: "Imbalanced" is a prefix of
+                        // "Imbalanced & Depleted", so a partial match would light up both.
+                        $isActive = $classification === $card['name'];
+                    @endphp
+                    {{-- The card box lives on the <td> itself, NOT on an inner div. The
+                         box used to be a div sized to its own content: the "Imbalanced"
+                         copy is the longest and wraps to two lines, so that card rendered
+                         ~9pt TALLER than the other two in EVERY report and read as the
+                         selected one (the client's bug). Cells in a table row share the
+                         row's height, so putting the box on the td equalises all three.
+                         The web has never had this — its CSS grid stretches items to
+                         equal height. Font size/weight are IDENTICAL for all three cards;
+                         only colour changes, so nothing but the ACTIVE card is emphasised
+                         (mirrors the web dimming inactive cards, which DomPDF can't do
+                         via opacity). --}}
+                    <td style="width: 32%; vertical-align: top; background-color: {{ $isActive ? $card['active'] : '#FAF8FF' }}; border-top: 4px solid {{ $isActive ? $card['border'] : '#d8d5e0' }}; border-left: 1px solid #e6e6ea; border-right: 1px solid #e6e6ea; border-bottom: 1px solid #e6e6ea; padding: 12px; text-align: center;">
+                        <div style="font-size: 14px; font-weight: bold; color: {{ $isActive ? $card['text'] : '#8b8794' }};">{{ $card['name'] }}</div>
+                        <div style="font-size: 10px; color: {{ $isActive ? '#55505A' : '#9995a3' }}; margin-top: 4px;">{{ $card['desc'] }}</div>
                     </td>
                     @if(!$loop->last)<td style="width: 2%;"></td>@endif
                 @endforeach
@@ -659,8 +681,18 @@
                     <td style="background-color: #F3F8FC; border-left: 4px solid #4654A4; padding: 22px 24px; vertical-align: top;">
                         <div style="font-size: 11px; color: #4654A4; text-transform: uppercase; letter-spacing: 2px; font-weight: bold; margin-bottom: 8px;">Nutrition support</div>
                         <div style="font-size: 17px; font-weight: bold; color: #301C47; margin-bottom: 8px;">We recommend speaking to a nutritionist</div>
-                        <div style="font-size: 12px; color: #4b5563; line-height: 1.6; margin-bottom: 16px;">Pets on a kibble diet can benefit from tailored guidance on supporting gut health. Our nutritionists can help you build a plan suited to {{ $petName }}'s individual results.</div>
-                        <a href="{{ \App\Support\Utm::report('https://biome4pets.com/nutritionists', 'nutritionist', 'nutritionist_cta') }}" style="background-color: #4654A4; color: #ffffff; font-size: 13px; font-weight: bold; text-decoration: none; padding: 12px 24px; display: inline-block;">View recommendations &raquo;</a>
+                        @if($report->recommendsDietReview())
+                            {{-- Kibble-fed AND Imbalanced / Imbalanced & Depleted: the client's
+                                 diet-review recommendation REPLACES the generic nudge. Copy +
+                                 link shared with the web view (ReportContent), so the two can't
+                                 drift. DomPDF renders <a href> as a real clickable link. --}}
+                            <div style="font-size: 12px; color: #4b5563; line-height: 1.6; margin-bottom: 16px;">{{ ReportContent::dietReviewText() }}</div>
+                            <a href="{{ \App\Support\Utm::report(ReportContent::DIET_REVIEW_URL, 'nutritionist', 'diet_review_cta') }}" style="background-color: #4654A4; color: #ffffff; font-size: 13px; font-weight: bold; text-decoration: none; padding: 12px 24px; display: inline-block;">{{ ReportContent::dietReviewLinkLabel() }} &raquo;</a>
+                            <div style="font-size: 11px; color: #6b7280; line-height: 1.6; margin-top: 12px;">{{ ReportContent::dietReviewLoyaltyNote() }}</div>
+                        @else
+                            <div style="font-size: 12px; color: #4b5563; line-height: 1.6; margin-bottom: 16px;">Pets on a kibble diet can benefit from tailored guidance on supporting gut health. Our nutritionists can help you build a plan suited to {{ $petName }}'s individual results.</div>
+                            <a href="{{ \App\Support\Utm::report('https://biome4pets.com/nutritionists', 'nutritionist', 'nutritionist_cta') }}" style="background-color: #4654A4; color: #ffffff; font-size: 13px; font-weight: bold; text-decoration: none; padding: 12px 24px; display: inline-block;">View recommendations &raquo;</a>
+                        @endif
                     </td>
                 </tr>
             </table>

@@ -81,6 +81,8 @@ class ReportGeneration
             'ai_fusobacteria_interpretation' => $interp['fusobacteria_interpretation'],
             'ai_proteobacteria_interpretation' => $interp['proteobacteria_interpretation'],
             'ai_diversity_interpretation' => $interp['diversity_interpretation'],
+            // 'vet_summary' is the owner-facing DETAIL paragraph of the personal
+            // summary (a misnomer — not vet-facing). See Report::$fillable / the prompt.
             'vet_summary' => $interp['vet_summary'],
             'goal' => $interp['goal'],
             'recommended_actions' => $interp['recommended_actions'],

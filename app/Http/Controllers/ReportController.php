@@ -152,11 +152,67 @@ class ReportController extends Controller
             return $this->finalisingResponse();
         }
 
-        $filename = 'report-' . Str::slug($report->pet?->name) . '-' . $report->sample_id . '.pdf';
-
         $pdf = Pdf::loadView('report.pdf', compact('report'))
             ->setPaper('a4', 'portrait');
 
-        return $pdf->download($filename);
+        return $pdf->download(self::pdfFilename($report));
+    }
+
+    /**
+     * The downloaded PDF's filename: "{Owner Name} - {Pet Name}.pdf"
+     * (e.g. "Jane Smith - Biscuit.pdf"), so a customer's download is identifiable
+     * rather than a generic "report-…".
+     *
+     * The pet name comes from the report's FROZEN snapshot (petField), matching what
+     * the report itself prints; the owner is the pet's client (falling back to the
+     * directly-linked client).
+     *
+     * Degrades sensibly rather than ever producing an empty or broken name:
+     *   both names      → "Jane Smith - Biscuit.pdf"
+     *   pet missing     → "Jane Smith.pdf"
+     *   owner missing   → "Biscuit.pdf"
+     *   both missing    → "Report {sample_id}.pdf", or plain "Report.pdf" if there
+     *                     is no sample id either.
+     */
+    public static function pdfFilename(Report $report): string
+    {
+        $parts = array_values(array_filter([
+            self::filenamePart($report->petClient?->name),
+            self::filenamePart($report->petField('name')),
+        ], fn (string $p): bool => $p !== ''));
+
+        if ($parts !== []) {
+            return implode(' - ', $parts).'.pdf';
+        }
+
+        // Neither name usable — fall back to the sample id, then to a bare label.
+        $sample = self::filenamePart($report->sample_id);
+
+        return trim('Report '.$sample).'.pdf';
+    }
+
+    /**
+     * Make one name safe to use inside a filename: transliterate accents to ASCII
+     * (é → e) for maximum cross-platform/header compatibility, replace the characters
+     * that are invalid on Windows/macOS/Linux (/ \ : * ? " < > |) plus control chars,
+     * collapse whitespace, strip leading/trailing dots and spaces (which break or hide
+     * files), and truncate long names. Apostrophes and hyphens are legal and kept, so
+     * "O'Brien" survives intact. Returns '' when nothing usable remains.
+     */
+    private static function filenamePart(?string $value): string
+    {
+        $value = trim((string) $value);
+        if ($value === '') {
+            return '';
+        }
+
+        $value = Str::ascii($value);                                        // accents → ASCII
+        $value = preg_replace('#[/\\\\:*?"<>|]+#', ' ', $value) ?? $value;  // invalid → space
+        $value = preg_replace('/[\x00-\x1F\x7F]+/', '', $value) ?? $value;  // control chars
+        $value = preg_replace('/\s+/', ' ', $value) ?? $value;              // collapse whitespace
+        $value = trim($value, " .");                                        // no leading/trailing . or space
+
+        // Keep each part well inside the ~255-char filesystem limit.
+        return Str::limit($value, 60, '');
     }
 }

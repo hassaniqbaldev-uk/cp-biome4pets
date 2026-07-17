@@ -40,6 +40,13 @@ class Report extends Model
         'score_gut_barrier',
         'score_gas_digestive',
         'score_stress_resilience',
+        // NB: 'vet_summary' is a MISNOMER — despite the name it is NOT vet-facing. It
+        // is the DETAIL paragraph of the owner-facing personal summary, rendered
+        // directly beneath 'ai_summary' under the "Your Dog's Personal Summary"
+        // heading (see report/show.blade.php). Its AI prompt explicitly asks for warm,
+        // jargon-free owner copy. (The static "Veterinary Summary" section on the
+        // report is separate boilerplate and does NOT render this field.) The column
+        // name is kept to avoid a migration; see OpenAiService's prompt for its job.
         'vet_summary',
         'goal',
         'recommended_actions',
@@ -167,7 +174,31 @@ class Report extends Model
      */
     public function recommendsNutritionist(): bool
     {
-        return $this->petField('diet') === 'Kibble';
+        return $this->petField('diet') === self::NUTRITIONIST_DIET;
+    }
+
+    /** The exact diet value that triggers the nutritionist copy (the pet form's enum). */
+    public const NUTRITIONIST_DIET = 'Kibble';
+
+    /**
+     * Whether to show the nutritionist DIET REVIEW recommendation in place of the
+     * generic nutritionist nudge. The client's rule: the pet is KIBBLE fed AND its
+     * microbiome classification is "Imbalanced" OR "Imbalanced & Depleted".
+     *
+     * BOTH must hold — kibble + Stable, or non-kibble + Imbalanced, keep the existing
+     * copy. Classification matching is delegated to
+     * ReportContent::isUnwellClassification(), which does a STRICT in_array against
+     * the two exact strings: "Imbalanced" and "Imbalanced & Depleted" share a prefix,
+     * so a substring test would be fragile (we hit that trap in the PDF classification
+     * bug). "Stable", null and any unknown value are NOT unwell, so a missing or
+     * unrecognised classification safely falls back to the existing copy — as does a
+     * missing diet. Diet reads the FROZEN snapshot (petField), matching the rest of
+     * the report. One shared accessor so the web and PDF templates stay in lockstep.
+     */
+    public function recommendsDietReview(): bool
+    {
+        return $this->recommendsNutritionist()
+            && \App\Support\ReportContent::isUnwellClassification($this->microbiome_classification);
     }
 
     protected static function booted(): void

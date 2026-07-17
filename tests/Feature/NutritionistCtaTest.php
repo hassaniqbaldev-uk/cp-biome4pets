@@ -14,9 +14,13 @@ use Illuminate\Support\Facades\DB;
 use Tests\TestCase;
 
 /**
- * The "speak to a nutritionist" CTA: triggered off the report's FROZEN diet
+ * The GENERIC "speak to a nutritionist" CTA: triggered off the report's FROZEN diet
  * snapshot (Kibble only), rendered in both the web report and the PDF, absent
  * otherwise. Guards the trigger helper and the dual-maintained templates.
+ *
+ * NB: these fixtures deliberately use a "Stable" classification. Kibble + Imbalanced /
+ * Imbalanced & Depleted now swaps this generic copy for the client's diet-review
+ * recommendation — that path is covered by NutritionistDietReviewTest.
  */
 class NutritionistCtaTest extends TestCase
 {
@@ -42,8 +46,13 @@ class NutritionistCtaTest extends TestCase
         Artisan::call('migrate', ['--force' => true]);
     }
 
-    /** A published report with a plan + one step, and the given diet frozen on the snapshot. */
-    private function makeReport(?string $diet): Report
+    /**
+     * A published report with a plan + one step, and the given diet frozen on the
+     * snapshot. Classification defaults to "Stable" so the GENERIC nutritionist copy
+     * is the one under test (kibble + an unwell classification shows the diet-review
+     * copy instead — see NutritionistDietReviewTest).
+     */
+    private function makeReport(?string $diet, string $classification = 'Stable'): Report
     {
         $client = Client::create(['name' => 'Owner', 'email' => 'o' . uniqid() . '@e.com']);
         $pet = Pet::create(['client_id' => $client->id, 'name' => 'Biscuit', 'breed' => 'Labrador', 'diet' => $diet]);
@@ -53,7 +62,7 @@ class NutritionistCtaTest extends TestCase
             'report_date' => '2026-06-17',
             'phylum_data' => ['Firmicutes' => 45, 'Bacteroidetes' => 25, 'Fusobacteria' => 15, 'Proteobacteria' => 10],
             'diversity_score' => 2.4, 'species_richness' => 600, 'dysbiosis_score' => 0.45,
-            'microbiome_classification' => 'Imbalanced', 'csv_data' => ['phylum_totals' => []],
+            'microbiome_classification' => $classification, 'csv_data' => ['phylum_totals' => []],
         ]);
 
         $plan = Plan::create(['key' => 'plan-' . uniqid(), 'name' => 'Restore & Rebalance', 'enabled' => true]);

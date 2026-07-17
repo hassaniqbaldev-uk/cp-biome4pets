@@ -684,6 +684,13 @@ class ReportResource extends Resource
                                 ->label('Additional Notes')
                                 ->rows(3)
                                 ->columnSpanFull(),
+                            // 'vet_summary' is a MISNOMER (column name kept to avoid a
+                            // migration): this edits the owner-facing DETAIL paragraph
+                            // of "Your Dog's Personal Summary" (rendered beneath the
+                            // 'ai_summary' paragraph), NOT the static "Veterinary
+                            // Summary" boilerplate section. The visible label is left as
+                            // "Veterinary Summary" pending the client's sign-off — see
+                            // the recommendation in the tidy-up notes.
                             Forms\Components\Textarea::make('vet_summary')
                                 ->label('Veterinary Summary')
                                 ->rows(4)
@@ -715,7 +722,7 @@ class ReportResource extends Resource
                                 ->helperText('Computed from Firmicutes %. Override only if needed.')
                                 ->options(\App\Support\HealthInsightRules::labelOptions('score_behaviour_mood')),
                             Forms\Components\Select::make('score_gut_barrier')
-                                ->label('Gut Barrier & Metabolic Score')
+                                ->label('Metabolic Health Score')
                                 ->helperText('Computed from Verrucomicrobia %. Override only if needed.')
                                 ->options(\App\Support\HealthInsightRules::labelOptions('score_gut_barrier')),
                             Forms\Components\Select::make('score_gas_digestive')
