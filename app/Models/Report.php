@@ -2,10 +2,12 @@
 
 namespace App\Models;
 
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\SoftDeletes;
+use Illuminate\Database\QueryException;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Str;
 
@@ -206,16 +208,12 @@ class Report extends Model
         static::creating(function (Report $report) {
             if (empty($report->slug)) {
                 $petName = $report->pet?->name ?? optional(Pet::find($report->pet_id))->name;
-                $base = Str::slug($petName.'-'.$report->sample_id);
-                $slug = $base;
-                $counter = 1;
-
-                while (static::where('slug', $slug)->exists()) {
-                    $slug = $base.'-'.$counter;
-                    $counter++;
-                }
-
-                $report->slug = $slug;
+                // NB: the slug is "{pet}-{sample_id}", so for a pet whose name and
+                // sample id coincide (e.g. pet "PP1A", sample "PP1A") it reads
+                // "pp1a-pp1a". That is not a duplicated pet name — the two halves just
+                // happen to match for that pet — and it is only for admin display
+                // (the public URL uses public_token). Uniqueness is what matters here.
+                $report->slug = static::uniqueSlug(Str::slug($petName.'-'.$report->sample_id));
             }
 
             // High-entropy public URL key — the report is served at
@@ -234,6 +232,65 @@ class Report extends Model
                 $report->public_token = $token;
             }
         });
+    }
+
+    /**
+     * A slug that does not collide with the reports_slug_unique index.
+     *
+     * CRITICAL: the check runs withTrashed(). reports.slug is UNIQUE at the DB level
+     * and that index INCLUDES soft-deleted rows, but the default query scope hides
+     * them — so the old check (static::where('slug', ...)) could report "free" for a
+     * slug still held by a trashed report, and the insert then hit a duplicate-key
+     * 500 ("Duplicate entry 'pp1a-pp1a' for key 'reports_slug_unique'"). Checking ALL
+     * rows fixes that. Appends -2, -3, … until free; falls back to "report" when the
+     * base slugifies to empty (e.g. a pet with only non-latin characters).
+     */
+    protected static function uniqueSlug(string $base): string
+    {
+        $base = $base !== '' ? $base : 'report';
+        $slug = $base;
+        $counter = 1;
+
+        while (static::withTrashed()->where('slug', $slug)->exists()) {
+            $counter++;
+            $slug = $base.'-'.$counter;
+        }
+
+        return $slug;
+    }
+
+    /**
+     * Race-safe insert. The uniqueSlug() pre-check closes the soft-delete hole, but a
+     * check-then-insert is still a race: two reports created at the same instant can
+     * pick the same slug and one hits the unique index. Rather than 500, catch a slug
+     * uniqueness violation and retry with a fresh, randomly-suffixed slug (bounded).
+     * Centralised here so EVERY creation path — the wizard, ReportGeneration, tests —
+     * is protected without touching call sites.
+     */
+    protected function performInsert(Builder $query)
+    {
+        for ($attempt = 0; ; $attempt++) {
+            try {
+                return parent::performInsert($query);
+            } catch (QueryException $e) {
+                if ($attempt >= 5 || ! $this->isSlugUniqueViolation($e)) {
+                    throw $e;
+                }
+                // Regenerate from the current slug plus a short random token, so the
+                // retry can't pick the same value the race just lost on.
+                $this->slug = static::uniqueSlug(Str::slug($this->slug.'-'.Str::lower(Str::random(4))));
+            }
+        }
+    }
+
+    /** Whether a query exception is a uniqueness violation on the slug index
+     *  (matches MySQL's "reports_slug_unique" and SQLite's "reports.slug"). */
+    protected function isSlugUniqueViolation(QueryException $e): bool
+    {
+        $message = $e->getMessage();
+
+        return str_contains($message, 'reports_slug_unique')
+            || str_contains($message, 'reports.slug');
     }
 
     public function getReportUrlAttribute(): string
