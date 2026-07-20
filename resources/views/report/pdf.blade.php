@@ -300,9 +300,12 @@
         {{-- What each of the three Microbiome Overview scores means. Copy is shared
              with the web view — see app/Support/ReportContent.php. --}}
         @foreach(ReportContent::resultsExplanations() as $explanation)
+            {{-- font-size 11px matches the intro <p> and the PDF body base, so the whole
+                 section is one consistent size (the body text was 10px — 1px smaller —
+                 which looked inconsistent). Bold title + normal body is the hierarchy. --}}
             <div style="margin-top: 10px;">
                 <div style="font-size: 11px; font-weight: bold; color: #301C47;">{{ $explanation['title'] }}</div>
-                <div style="font-size: 10px; color: #55505A; margin-top: 2px; line-height: 1.6;">{{ $explanation['text'] }}</div>
+                <div style="font-size: 11px; color: #55505A; margin-top: 2px; line-height: 1.6;">{{ $explanation['text'] }}</div>
             </div>
         @endforeach
     </div>
@@ -671,28 +674,21 @@
             </table>
         </div>
 
-        {{-- Kibble-diet nutritionist CTA (mirrors the web view's block). DomPDF-safe:
-             single-cell table, tinted bg, square corners, border-left accent,
-             inline-block link-button. No flexbox / emoji / inline SVG. --}}
-        @if($report->recommendsNutritionist())
+        {{-- Nutritionist diet-review recommendation (mirrors the web view). Shown ONLY
+             for kibble-fed AND Imbalanced / Imbalanced & Depleted (recommendsDietReview());
+             a stable kibble-fed dog and every other case show NOTHING. DomPDF-safe:
+             single-cell table, tinted bg, border-left accent, inline-block link (DomPDF
+             renders <a href> as a real clickable link). No flexbox / emoji / inline SVG. --}}
+        @if($report->recommendsDietReview())
         <div style="page-break-inside: avoid; margin-top: 18px;">
             <table style="width: 100%; border-collapse: collapse;" cellspacing="0" cellpadding="0">
                 <tr>
                     <td style="background-color: #F3F8FC; border-left: 4px solid #4654A4; padding: 22px 24px; vertical-align: top;">
                         <div style="font-size: 11px; color: #4654A4; text-transform: uppercase; letter-spacing: 2px; font-weight: bold; margin-bottom: 8px;">Nutrition support</div>
                         <div style="font-size: 17px; font-weight: bold; color: #301C47; margin-bottom: 8px;">We recommend speaking to a nutritionist</div>
-                        @if($report->recommendsDietReview())
-                            {{-- Kibble-fed AND Imbalanced / Imbalanced & Depleted: the client's
-                                 diet-review recommendation REPLACES the generic nudge. Copy +
-                                 link shared with the web view (ReportContent), so the two can't
-                                 drift. DomPDF renders <a href> as a real clickable link. --}}
-                            <div style="font-size: 12px; color: #4b5563; line-height: 1.6; margin-bottom: 16px;">{{ ReportContent::dietReviewText() }}</div>
-                            <a href="{{ \App\Support\Utm::report(ReportContent::DIET_REVIEW_URL, 'nutritionist', 'diet_review_cta') }}" style="background-color: #4654A4; color: #ffffff; font-size: 13px; font-weight: bold; text-decoration: none; padding: 12px 24px; display: inline-block;">{{ ReportContent::dietReviewLinkLabel() }} &raquo;</a>
-                            <div style="font-size: 11px; color: #6b7280; line-height: 1.6; margin-top: 12px;">{{ ReportContent::dietReviewLoyaltyNote() }}</div>
-                        @else
-                            <div style="font-size: 12px; color: #4b5563; line-height: 1.6; margin-bottom: 16px;">Pets on a kibble diet can benefit from tailored guidance on supporting gut health. Our nutritionists can help you build a plan suited to {{ $petName }}'s individual results.</div>
-                            <a href="{{ \App\Support\Utm::report('https://biome4pets.com/nutritionists', 'nutritionist', 'nutritionist_cta') }}" style="background-color: #4654A4; color: #ffffff; font-size: 13px; font-weight: bold; text-decoration: none; padding: 12px 24px; display: inline-block;">View recommendations &raquo;</a>
-                        @endif
+                        <div style="font-size: 12px; color: #4b5563; line-height: 1.6; margin-bottom: 16px;">{{ ReportContent::dietReviewText() }}</div>
+                        <a href="{{ \App\Support\Utm::report(ReportContent::DIET_REVIEW_URL, 'nutritionist', 'diet_review_cta') }}" style="background-color: #4654A4; color: #ffffff; font-size: 13px; font-weight: bold; text-decoration: none; padding: 12px 24px; display: inline-block;">{{ ReportContent::dietReviewLinkLabel() }} &raquo;</a>
+                        <div style="font-size: 11px; color: #6b7280; line-height: 1.6; margin-top: 12px;">{{ ReportContent::dietReviewLoyaltyNote() }}</div>
                     </td>
                 </tr>
             </table>

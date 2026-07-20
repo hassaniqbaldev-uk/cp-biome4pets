@@ -14,13 +14,14 @@ use Illuminate\Support\Facades\DB;
 use Tests\TestCase;
 
 /**
- * The GENERIC "speak to a nutritionist" CTA: triggered off the report's FROZEN diet
- * snapshot (Kibble only), rendered in both the web report and the PDF, absent
- * otherwise. Guards the trigger helper and the dual-maintained templates.
+ * The nutritionist-diet predicate + the RETIREMENT of the old generic CTA.
  *
- * NB: these fixtures deliberately use a "Stable" classification. Kibble + Imbalanced /
- * Imbalanced & Depleted now swaps this generic copy for the client's diet-review
- * recommendation — that path is covered by NutritionistDietReviewTest.
+ * recommendsNutritionist() (Kibble-only) is still the diet half of the trigger, so it
+ * is guarded here. But the old "kibble → generic nutritionist nudge" no longer renders:
+ * the client's rule is now "leave a stable kibble-fed dog be", so the nutritionist block
+ * shows ONLY for kibble + Imbalanced / Imbalanced & Depleted (recommendsDietReview()) —
+ * covered in full by NutritionistDietReviewTest. These fixtures use a "Stable"
+ * classification to assert the generic CTA is gone and nothing renders.
  */
 class NutritionistCtaTest extends TestCase
 {
@@ -93,21 +94,21 @@ class NutritionistCtaTest extends TestCase
         }
     }
 
-    public function test_cta_renders_in_both_web_and_pdf_when_kibble(): void
+    public function test_kibble_stable_shows_no_nutritionist_block(): void
     {
-        $report = $this->makeReport('Kibble');
+        // The client's change: a stable kibble-fed dog is left be — the old generic
+        // CTA (heading + the generic /nutritionists link) must NOT render.
+        $report = $this->makeReport('Kibble', 'Stable');
 
         $web = view('report.show', ['report' => $report])->render();
-        $this->assertStringContainsString(self::HEADING, $web);
-        $this->assertStringContainsString(self::LINK, $web);
-        // Personalised with the (snapshot) pet name.
-        $this->assertStringContainsString("Biscuit's individual results", $web);
+        $this->assertStringNotContainsString(self::HEADING, $web);
+        $this->assertStringNotContainsString(self::LINK, $web);
 
         $pdfHtml = view('report.pdf', ['report' => $report])->render();
-        $this->assertStringContainsString(self::HEADING, $pdfHtml);
-        $this->assertStringContainsString(self::LINK, $pdfHtml);
+        $this->assertStringNotContainsString(self::HEADING, $pdfHtml);
+        $this->assertStringNotContainsString(self::LINK, $pdfHtml);
 
-        // DomPDF renders the (DomPDF-safe) box without error.
+        // The PDF still renders fine with the block absent.
         $pdf = Pdf::loadView('report.pdf', ['report' => $report])->setPaper('a4', 'portrait')->output();
         $this->assertSame('%PDF', substr($pdf, 0, 4));
     }

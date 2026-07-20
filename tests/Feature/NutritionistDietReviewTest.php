@@ -153,35 +153,36 @@ class NutritionistDietReviewTest extends TestCase
 
     /** Every non-triggering combination keeps the existing copy, on both templates. */
     #[DataProvider('nonTriggering')]
-    public function test_non_triggering_combinations_keep_the_existing_copy(?string $diet, ?string $classification, bool $kibble): void
+    public function test_non_triggering_combinations_show_no_nutritionist_block(?string $diet, ?string $classification): void
     {
         $report = $this->makeReport($diet, $classification);
         $web = $this->get('/report/'.$report->public_token)->assertOk()->getContent();
         $pdf = $this->pdfHtml($report);
 
         foreach (['web' => $web, 'pdf' => $pdf] as $where => $html) {
-            // The diet-review copy and its product link must NOT appear.
+            // The client's rule: the nutritionist block shows ONLY for kibble + unwell.
+            // Every other combination — including kibble + Stable, which used to show a
+            // generic nudge — must render NOTHING here.
+            $this->assertStringNotContainsString('We recommend speaking to a nutritionist', $html, "{$where}: heading must not show");
             $this->assertStringNotContainsString(e(ReportContent::dietReviewText()), $html, "{$where}: diet-review copy must not show");
             $this->assertStringNotContainsString('microbiome-diet-review-optimisation-60-minutes', $html, "{$where}: product link must not show");
-
-            // Kibble pets still get the existing generic nutritionist nudge;
-            // non-kibble pets get no nutritionist block at all (unchanged behaviour).
-            if ($kibble) {
-                $this->assertStringContainsString(self::GENERIC, $html, "{$where}: generic copy expected");
-            } else {
-                $this->assertStringNotContainsString(self::GENERIC, $html, "{$where}: no nutritionist block expected");
-            }
+            // The retired generic nudge must not reappear either.
+            $this->assertStringNotContainsString(self::GENERIC, $html, "{$where}: generic copy must not show");
         }
     }
 
     public static function nonTriggering(): array
     {
         return [
-            'kibble + Stable' => ['Kibble', 'Stable', true],
-            'kibble + missing classification' => ['Kibble', null, true],
-            'raw + Imbalanced' => ['Raw', 'Imbalanced', false],
-            'raw + Stable' => ['Raw', 'Stable', false],
-            'missing diet + Imbalanced' => [null, 'Imbalanced', false],
+            // The behaviour change: a stable kibble-fed dog now shows nothing.
+            'kibble + Stable' => ['Kibble', 'Stable'],
+            'kibble + missing classification' => ['Kibble', null],
+            'kibble + Unknown' => ['Kibble', 'Unknown'],
+            'raw + Imbalanced' => ['Raw', 'Imbalanced'],
+            'raw + Stable' => ['Raw', 'Stable'],
+            'home cooked + Imbalanced & Depleted' => ['Home Cooked', 'Imbalanced & Depleted'],
+            'missing diet + Imbalanced' => [null, 'Imbalanced'],
+            'both missing' => [null, null],
         ];
     }
 

@@ -57,6 +57,10 @@ class UtmTaggingTest extends TestCase
         $test = Test::create([
             'pet_id' => $pet->id, 'client_id' => $client->id, 'order_id' => 'ORD-U', 'sample_id' => 'ORD-U',
             'report_date' => '2026-06-17', 'phylum_data' => ['Firmicutes' => 45], 'diversity_score' => 2.4,
+            // Kibble + Imbalanced → the nutritionist diet-review block renders, so its
+            // UTM-tagged link is present to assert on (the block now shows only for
+            // kibble + Imbalanced / Imbalanced & Depleted).
+            'microbiome_classification' => 'Imbalanced',
             'csv_data' => ['phylum_totals' => []],
         ]);
         $report = Report::create([

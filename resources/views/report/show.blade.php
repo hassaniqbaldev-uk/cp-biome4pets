@@ -256,7 +256,11 @@
                 <h2 class="text-lg font-bold tracking-tight">Understanding Your Dog's Results</h2>
             </div>
             <div class="report-body">
-                <p class="text-gray-700 leading-relaxed">This section explains the current state of your dog's microbiome, including how stable, diverse, and resilient it is &mdash; key factors that influence gut health and overall wellbeing.</p>
+                {{-- text-sm: this intro was missing a size class, so it rendered at
+                     16px while the explanations below (and the rest of the report body)
+                     are 14px — that size jump read as a different font. Matched to the
+                     report body's text-sm so the whole section is consistent. --}}
+                <p class="text-sm text-gray-700 leading-relaxed">This section explains the current state of your dog's microbiome, including how stable, diverse, and resilient it is &mdash; key factors that influence gut health and overall wellbeing.</p>
 
                 {{-- What each of the three Microbiome Overview scores means. Copy is
                      shared with the PDF — see app/Support/ReportContent.php. --}}
@@ -871,9 +875,13 @@
                 </div>
                 @endif
 
-                {{-- Kibble-diet nutritionist CTA. A gentle optimisation nudge (not a
-                     warning), shown only when the report's frozen diet is Kibble. --}}
-                @if($report->recommendsNutritionist())
+                {{-- Nutritionist diet-review recommendation. Shown ONLY when the pet is
+                     kibble-fed AND its classification is Imbalanced / Imbalanced &
+                     Depleted (recommendsDietReview()). A stable kibble-fed dog — and any
+                     non-kibble or missing-data case — shows NOTHING here: "some dogs are
+                     fine on kibble and if their microbiome is stable then leave them be".
+                     Copy + link shared with the PDF — see app/Support/ReportContent.php. --}}
+                @if($report->recommendsDietReview())
                 <div style="margin-top:22px; background:#F3F8FC; border:1px solid #D9E6F2; border-left:4px solid #4654A4; border-radius:14px; padding:22px 24px;">
                     <div style="display:flex; align-items:flex-start; gap:14px;">
                         <div style="flex:0 0 auto; width:40px; height:40px; border-radius:9999px; background:#E3F0FF; display:flex; align-items:center; justify-content:center;">
@@ -881,18 +889,9 @@
                         </div>
                         <div>
                             <h3 style="font-size:17px; font-weight:700; color:#301C47; margin:0 0 6px;">We recommend speaking to a nutritionist</h3>
-                            @if($report->recommendsDietReview())
-                                {{-- Kibble-fed AND Imbalanced / Imbalanced & Depleted: the
-                                     client's diet-review recommendation REPLACES the generic
-                                     nudge below. Copy + link shared with the PDF — see
-                                     app/Support/ReportContent.php. --}}
-                                <p style="font-size:14px; color:#4b5563; line-height:1.6; margin:0 0 16px; max-width:60ch;">{{ \App\Support\ReportContent::dietReviewText() }}</p>
-                                <a href="{{ \App\Support\Utm::report(\App\Support\ReportContent::DIET_REVIEW_URL, 'nutritionist', 'diet_review_cta') }}" target="_blank" rel="noopener noreferrer" style="display:inline-block; background:#4654A4; color:#fff; font-weight:600; font-size:14px; text-decoration:none; padding:11px 22px; border-radius:9px;">{{ \App\Support\ReportContent::dietReviewLinkLabel() }} &rarr;</a>
-                                <p style="font-size:13px; color:#6b7280; line-height:1.6; margin:12px 0 0;">{{ \App\Support\ReportContent::dietReviewLoyaltyNote() }}</p>
-                            @else
-                                <p style="font-size:14px; color:#4b5563; line-height:1.6; margin:0 0 16px; max-width:60ch;">Pets on a kibble diet can benefit from tailored guidance on supporting gut health. Our nutritionists can help you build a plan suited to {{ $petName }}'s individual results.</p>
-                                <a href="{{ \App\Support\Utm::report('https://biome4pets.com/nutritionists', 'nutritionist', 'nutritionist_cta') }}" target="_blank" rel="noopener noreferrer" style="display:inline-block; background:#4654A4; color:#fff; font-weight:600; font-size:14px; text-decoration:none; padding:11px 22px; border-radius:9px;">View recommendations &rarr;</a>
-                            @endif
+                            <p style="font-size:14px; color:#4b5563; line-height:1.6; margin:0 0 16px; max-width:60ch;">{{ \App\Support\ReportContent::dietReviewText() }}</p>
+                            <a href="{{ \App\Support\Utm::report(\App\Support\ReportContent::DIET_REVIEW_URL, 'nutritionist', 'diet_review_cta') }}" target="_blank" rel="noopener noreferrer" style="display:inline-block; background:#4654A4; color:#fff; font-weight:600; font-size:14px; text-decoration:none; padding:11px 22px; border-radius:9px;">{{ \App\Support\ReportContent::dietReviewLinkLabel() }} &rarr;</a>
+                            <p style="font-size:13px; color:#6b7280; line-height:1.6; margin:12px 0 0;">{{ \App\Support\ReportContent::dietReviewLoyaltyNote() }}</p>
                         </div>
                     </div>
                 </div>
