@@ -4,7 +4,7 @@
     (ReportController@subscribe). Frames the wait as "preparing your plan"
     with a progress bar, then AUTO-REDIRECTS to the report's resolved Loop checkout
     ($checkoutUrl = the variant-or-base url frozen on the report, with the live plan
-    url as fallback) after 15s. The CTA still hands off immediately on click.
+    url as fallback) after 4.5s. The CTA still hands off immediately on click.
     Compacted for mobile (no header bar, thumbnail-beside-text layout).
 --}}
 <!DOCTYPE html>
@@ -75,7 +75,7 @@
             <p class="sub-lede">One plan that adapts to {{ $petName }} every month — we switch to the right supplement at each phase, so there's nothing to reorder or remember.</p>
 
             {{-- "Preparing your plan" — visible progress bar + cycling status as one
-                 unit; fills over 15s, then the page auto-redirects to checkout. --}}
+                 unit; fills over 4.5s, then the page auto-redirects to checkout. --}}
             <div class="prep">
                 <div class="prep-status">
                     <span class="prep-dot"></span>
@@ -163,7 +163,7 @@
             </div>
 
             {{-- CTA — same tab (this is the checkout); clicking goes immediately,
-                 without waiting for the 15s timer. The label states the auto-redirect;
+                 without waiting for the 4.5s timer. The label states the auto-redirect;
                  the arrow + button styling keep it an obvious, clickable button.
                  NOTE: the Loop checkout URL is left CLEAN (no UTMs) so nothing can
                  interfere with Loop/Shopify checkout. The report→interstitial link
@@ -182,7 +182,7 @@
         </div>
     </footer>
 
-    {{-- Auto-redirect: fill the bar over 15s, cycle status copy, then hand off to
+    {{-- Auto-redirect: fill the bar over 4.5s, cycle status copy, then hand off to
          the live Loop checkout (same tab). Clicking the CTA navigates immediately.
          Reduced-motion users skip the animation but are still redirected. --}}
     <script>
@@ -190,15 +190,17 @@
             var target = @json($checkoutUrl);
             if (!target) return; // Guard: no checkout URL → never auto-redirect.
 
-            var DURATION = 15000;
+            var DURATION = 4500;
             var petName = @json($petName);
             var bar = document.getElementById('prep-bar');
             var status = document.getElementById('prep-status');
 
+            // Three messages pace naturally over ~4.5s (1.5s each) — a complete
+            // sequence ending on "Almost ready…" as the redirect fires. Four felt
+            // rushed in the shorter window.
             var messages = [
                 'Preparing ' + petName + "'s plan…",
                 'Matching supplements to ' + petName + "'s results…",
-                'Setting up the first delivery…',
                 'Almost ready…',
             ];
 

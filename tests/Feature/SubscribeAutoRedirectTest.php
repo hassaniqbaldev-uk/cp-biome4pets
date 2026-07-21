@@ -15,7 +15,7 @@ use Tests\TestCase;
 
 /**
  * The subscribe interstitial re-enables the "preparing your plan" auto-redirect:
- * a progress bar fills over 15s, then the page hands off to the LIVE plan's Loop
+ * a progress bar fills over 4.5s, then the page hands off to the LIVE plan's Loop
  * checkout (same tab). The CTA still navigates immediately on click. When the
  * server already redirected (no checkout URL), the interstitial never renders, so
  * the timer can never fire to a broken URL.
@@ -80,7 +80,7 @@ class SubscribeAutoRedirectTest extends TestCase
         $res->assertOk()
             ->assertSee('window.location.href', false)          // a JS redirect is present
             ->assertSee(self::LIVE_URL, false)                  // targeting the live plan URL
-            ->assertSee('15000', false);                        // over the 15-second window
+            ->assertSee('4500', false);                         // over the ~4.5-second window
     }
 
     public function test_progress_bar_renders_inside_the_card_with_status_copy(): void

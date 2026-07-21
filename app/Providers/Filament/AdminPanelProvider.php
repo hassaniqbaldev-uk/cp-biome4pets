@@ -28,9 +28,17 @@ class AdminPanelProvider extends PanelProvider
             ->id('admin')
             ->path('admin')
             ->login()
-            // Custom reset/SET-password page: shows the password requirements
-            // upfront (helperText) for both the welcome-link and forgot-password flows.
-            ->passwordReset(\App\Filament\Pages\Auth\ResetPassword::class)
+            // Custom reset/SET-password page: shows the password requirements upfront
+            // (helperText) for both the welcome-link and forgot-password flows.
+            //
+            // MUST use the named `resetAction:` argument. passwordReset()'s FIRST
+            // positional param is the REQUEST (forgot-password) page; passing the
+            // custom ResetPassword there wired the set-password form — whose email
+            // field is intentionally DISABLED (the account is fixed by the token) —
+            // onto the forgot-password route, so users couldn't type their email to
+            // request a link. The request page must stay Filament's default
+            // (RequestPasswordReset, editable email); only the reset page is custom.
+            ->passwordReset(resetAction: \App\Filament\Pages\Auth\ResetPassword::class)
             ->brandName('Biome4Pets Portal')
             // The white logo is invisible on the light panel. Use the coloured
             // logo for light mode and the white one for dark mode so it reads in

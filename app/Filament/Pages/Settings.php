@@ -142,6 +142,7 @@ class Settings extends Page implements HasForms
             Setting::REPORT_ABOUT_TEXT => Setting::get(Setting::REPORT_ABOUT_TEXT) ?: Setting::REPORT_ABOUT_TEXT_DEFAULT,
             Setting::REPORT_APPROACH_TEXT => Setting::get(Setting::REPORT_APPROACH_TEXT) ?: Setting::REPORT_APPROACH_TEXT_DEFAULT,
             Setting::REPORT_SUPPORT_TEXT => Setting::get(Setting::REPORT_SUPPORT_TEXT) ?: Setting::REPORT_SUPPORT_TEXT_DEFAULT,
+            Setting::DIET_REVIEW_TEXT => Setting::get(Setting::DIET_REVIEW_TEXT) ?: Setting::DIET_REVIEW_TEXT_DEFAULT,
         ];
 
         // The six health-insight descriptions — each pre-filled to its stored value or
@@ -540,6 +541,12 @@ class Settings extends Page implements HasForms
                     ->rows(5)
                     ->default(Setting::REPORT_SUPPORT_TEXT_DEFAULT)
                     ->helperText('The "Support & Next Steps" contact block. Plain text; line breaks are preserved.'),
+
+                Textarea::make(Setting::DIET_REVIEW_TEXT)
+                    ->label('Nutritionist diet-review statement')
+                    ->rows(5)
+                    ->default(Setting::DIET_REVIEW_TEXT_DEFAULT)
+                    ->helperText('Shown on a kibble-fed report whose microbiome is Imbalanced or Imbalanced & Depleted, recommending a nutritionist diet review. This is the STATEMENT text only — the "Book a microbiome diet review" button/link and the 10% loyalty note are added automatically and are not editable here. Blank restores the default wording.'),
 
                 Section::make('Health Insight Descriptions')
                     ->description('The explanatory paragraph shown under each of the six "Microbiome-Driven Health Insights" cards, on both the web report and the PDF. These describe what each insight measures; they do NOT change any score, band or result. Leave a field blank to restore its original wording.')
@@ -1092,6 +1099,7 @@ class Settings extends Page implements HasForms
         Setting::set(Setting::REPORT_ABOUT_TEXT, $data[Setting::REPORT_ABOUT_TEXT] ?? '');
         Setting::set(Setting::REPORT_APPROACH_TEXT, $data[Setting::REPORT_APPROACH_TEXT] ?? '');
         Setting::set(Setting::REPORT_SUPPORT_TEXT, $data[Setting::REPORT_SUPPORT_TEXT] ?? '');
+        Setting::set(Setting::DIET_REVIEW_TEXT, $data[Setting::DIET_REVIEW_TEXT] ?? '');
 
         // The six health-insight descriptions — same contract: stored verbatim, and a
         // blank field reverts to the config default at render time

@@ -162,10 +162,17 @@ class ReportContent
     /** The nutritionist diet-review product the recommendation links to. */
     public const DIET_REVIEW_URL = 'https://biome4pets.com/products/microbiome-diet-review-optimisation-60-minutes';
 
-    /** The client's EXACT wording for the recommendation — do not paraphrase. */
+    /**
+     * The nutritionist diet-review statement body. Admin-editable in Settings →
+     * Report Text; a blank setting falls back to the client's original wording
+     * (Setting::DIET_REVIEW_TEXT_DEFAULT), so it can never render empty. Same
+     * blank-falls-back-to-default contract as the other report-text blocks. Only the
+     * PROSE is editable — the product link, its button label and the loyalty note are
+     * templated (below) so they can't be broken from Settings. Shared by web + PDF.
+     */
     public static function dietReviewText(): string
     {
-        return "We recommend speaking with one of our nutritionists, as your dog's diet may be contributing to their microbiome imbalance. Gut health and nutrition go hand in hand, and by reviewing your dog's microbiome results alongside their current diet, our nutritionists can identify foods and feeding strategies that better support a healthy, balanced microbiome and help optimise long-term gut health.";
+        return self::reportText(Setting::DIET_REVIEW_TEXT, Setting::DIET_REVIEW_TEXT_DEFAULT);
     }
 
     /** The loyalty/subscription discount note shown beside the link. */

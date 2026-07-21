@@ -224,25 +224,25 @@
                 @if(filled($report->goal))
                     <h3 class="font-bold text-navy text-base">Goal</h3>
                     <div class="border-l-4 border-teal pl-4">
-                        <p class="text-sm text-gray-700 leading-relaxed whitespace-pre-line">{{ $report->goal }}</p>
+                        <p class="text-gray-700 leading-relaxed whitespace-pre-line">{{ $report->goal }}</p>
                     </div>
                 @endif
 
                 @if(!empty($report->recommended_actions))
                     <h3 class="font-bold text-navy text-base">Recommended Actions</h3>
                     <div class="border-l-4 border-teal pl-4">
-                        <p class="text-sm text-gray-700 leading-relaxed whitespace-pre-line">{{ $report->recommended_actions }}</p>
+                        <p class="text-gray-700 leading-relaxed whitespace-pre-line">{{ $report->recommended_actions }}</p>
                     </div>
                 @endif
 
                 @if(filled($report->vet_notes))
                     <h3 class="font-bold text-navy text-base">Additional Notes</h3>
-                    <p class="text-sm text-gray-700 whitespace-pre-line">{{ $report->vet_notes }}</p>
+                    <p class="text-gray-700 leading-relaxed whitespace-pre-line">{{ $report->vet_notes }}</p>
                 @endif
 
                 @if($signsOfStability !== '')
                     <h3 class="font-bold text-navy text-base">Signs of Stability</h3>
-                    <p class="text-sm text-gray-700 leading-relaxed whitespace-pre-line">{{ $signsOfStability }}</p>
+                    <p class="text-gray-700 leading-relaxed whitespace-pre-line">{{ $signsOfStability }}</p>
                 @endif
             </div>
         </section>
@@ -256,19 +256,22 @@
                 <h2 class="text-lg font-bold tracking-tight">Understanding Your Dog's Results</h2>
             </div>
             <div class="report-body">
-                {{-- text-sm: this intro was missing a size class, so it rendered at
-                     16px while the explanations below (and the rest of the report body)
-                     are 14px — that size jump read as a different font. Matched to the
-                     report body's text-sm so the whole section is consistent. --}}
-                <p class="text-sm text-gray-700 leading-relaxed">This section explains the current state of your dog's microbiome, including how stable, diverse, and resilient it is &mdash; key factors that influence gut health and overall wellbeing.</p>
+                {{-- Body prose standardised to the reference (the "Direct Links"
+                     section): text-gray-700 leading-relaxed at the base 16px. mb-5 gives
+                     a clear gap before the explanations — the old mt-5 on the <dl> below
+                     was a DEAD class (never compiled into report.css), so the intro and
+                     the first "Diversity" heading were running together at 0px. --}}
+                <p class="text-gray-700 leading-relaxed mb-5">This section explains the current state of your dog's microbiome, including how stable, diverse, and resilient it is &mdash; key factors that influence gut health and overall wellbeing.</p>
 
                 {{-- What each of the three Microbiome Overview scores means. Copy is
-                     shared with the PDF — see app/Support/ReportContent.php. --}}
-                <dl class="mt-5 space-y-4">
+                     shared with the PDF — see app/Support/ReportContent.php. The <dt>
+                     titles are deliberate bold labels; only the <dd> body prose is
+                     normalised to the reference. --}}
+                <dl class="space-y-4">
                     @foreach(\App\Support\ReportContent::resultsExplanations() as $explanation)
                         <div>
                             <dt class="font-bold text-navy text-sm">{{ $explanation['title'] }}</dt>
-                            <dd class="text-sm text-gray-700 leading-relaxed mt-1">{{ $explanation['text'] }}</dd>
+                            <dd class="text-gray-700 leading-relaxed mt-1">{{ $explanation['text'] }}</dd>
                         </div>
                     @endforeach
                 </dl>
@@ -522,7 +525,7 @@
                         </div>
 
                         @if($microbe['interpretation'])
-                            <p class="text-sm text-gray-700 leading-relaxed">{{ $microbe['interpretation'] }}</p>
+                            <p class="text-gray-700 leading-relaxed">{{ $microbe['interpretation'] }}</p>
                         @endif
 
                         <div class="chart-frame relative" style="height: 232px;">
@@ -594,7 +597,7 @@
                                 </span>
                             </div>
                             @if(!empty($insight['comment']))
-                                <p class="text-sm text-gray-700 mt-3 leading-relaxed">{{ $insight['comment'] }}</p>
+                                <p class="text-gray-700 mt-3 leading-relaxed">{{ $insight['comment'] }}</p>
                             @endif
                             @if(!empty($insight['shared_note']))
                                 <p class="text-xs text-gray-500 mt-3 pt-3 border-t border-gray-100 italic">{{ $insight['shared_note'] }}</p>
@@ -750,7 +753,7 @@
                 @else
                     <div class="text-center max-w-3xl mx-auto">
                         <h3 class="text-xl font-bold text-navy mb-3">Balance the Gut Microbiome</h3>
-                        <p class="text-sm text-gray-700 leading-relaxed">Gut dysbiosis can manifest in a variety of physical conditions and symptoms. Restoring balance within the microbiome has the potential to enhance {{ $petName }}'s overall well-being. Below you will find interventions tailored to {{ $petName }}'s microbiome data.</p>
+                        <p class="text-gray-700 leading-relaxed">Gut dysbiosis can manifest in a variety of physical conditions and symptoms. Restoring balance within the microbiome has the potential to enhance {{ $petName }}'s overall well-being. Below you will find interventions tailored to {{ $petName }}'s microbiome data.</p>
                     </div>
                 @endif
 
@@ -915,7 +918,7 @@
             <div class="report-body space-y-6">
                 <div>
                     <h3 class="text-lg font-bold text-navy mb-2">Product Protocol</h3>
-                    <p class="text-sm text-gray-700">Based on your dog's microbiome analysis, a structured and phased approach is recommended.</p>
+                    <p class="text-gray-700 leading-relaxed">Based on your dog's microbiome analysis, a structured and phased approach is recommended.</p>
                 </div>
                 <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
                     @foreach($report->catalogProducts as $product)
@@ -970,7 +973,7 @@
                      resolved via ReportContent so the PDF shows identical copy. --}}
                 <div>
                     <h3 class="font-bold text-navy text-base mb-2">About This Report</h3>
-                    <p class="text-sm text-gray-700 leading-relaxed">{!! nl2br(e(\App\Support\ReportContent::reportAboutText())) !!}</p>
+                    <p class="text-gray-700 leading-relaxed">{!! nl2br(e(\App\Support\ReportContent::reportAboutText())) !!}</p>
                 </div>
 
                 <div>
@@ -984,7 +987,7 @@
 
                 <div>
                     <h3 class="font-bold text-navy text-base mb-2">Support &amp; Next Steps</h3>
-                    <p class="text-sm text-gray-700 leading-relaxed">{!! nl2br(e(\App\Support\ReportContent::reportSupportText())) !!}</p>
+                    <p class="text-gray-700 leading-relaxed">{!! nl2br(e(\App\Support\ReportContent::reportSupportText())) !!}</p>
                 </div>
             </div>
         </section>

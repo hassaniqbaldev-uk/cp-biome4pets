@@ -8,8 +8,10 @@ use App\Models\Pet;
 use App\Models\Plan;
 use App\Models\Report;
 use App\Models\ReportStep;
+use App\Models\Setting;
 use App\Models\Test;
 use App\Support\ReportContent;
+use App\Support\ReportGeneration;
 use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\DB;
 use PHPUnit\Framework\Attributes\DataProvider;
@@ -210,5 +212,73 @@ class NutritionistDietReviewTest extends TestCase
             'https://biome4pets.com/products/microbiome-diet-review-optimisation-60-minutes',
             ReportContent::DIET_REVIEW_URL,
         );
+    }
+
+    // ── PART A: a diet change is picked up on regenerate ─────────────────────
+
+    public function test_regenerating_after_changing_diet_to_kibble_surfaces_the_statement(): void
+    {
+        // Generated while the pet was NON-kibble → the frozen snapshot says non-kibble,
+        // so an imbalanced report does not yet qualify for the diet-review statement.
+        $report = $this->makeReport('Raw', 'Imbalanced');
+        $this->assertFalse($report->recommendsDietReview());
+
+        // The pet's diet is corrected to Kibble on the LIVE pet. The report reads the
+        // FROZEN snapshot, so nothing changes until it is re-snapshotted — this is the
+        // reported bug: the statement never appears from the diet change alone.
+        $report->pet->update(['diet' => 'Kibble']);
+        $this->assertFalse(
+            $report->fresh()->recommendsDietReview(),
+            'stale snapshot: report still reads the old diet until regenerated',
+        );
+
+        // Regenerate rebuilds the snapshot from the current pet → the statement now
+        // qualifies. (No API key here, so the AI half returns "failed"; the snapshot
+        // refresh is deterministic and happens regardless.)
+        ReportGeneration::regenerateReport($report->fresh());
+
+        $fresh = $report->fresh();
+        $this->assertSame('Kibble', $fresh->petField('diet'), 'snapshot diet refreshed to the live value');
+        $this->assertTrue($fresh->recommendsDietReview(), 'statement now qualifies after regenerate');
+
+        // …and it actually renders on the report.
+        $web = $this->get('/report/'.$fresh->public_token)->assertOk()->getContent();
+        $this->assertStringContainsString(e(ReportContent::dietReviewText()), $web);
+    }
+
+    // ── PART B: the statement text is editable in Settings ───────────────────
+
+    public function test_statement_text_is_editable_in_settings_with_a_safe_fallback(): void
+    {
+        // Unset → the client's original wording (the seeded default).
+        $this->assertSame(Setting::DIET_REVIEW_TEXT_DEFAULT, ReportContent::dietReviewText());
+        $this->assertStringStartsWith('We recommend speaking with one of our nutritionists', ReportContent::dietReviewText());
+
+        // Edited → the Settings value wins.
+        Setting::set(Setting::DIET_REVIEW_TEXT, 'Bespoke nutritionist statement.');
+        $this->assertSame('Bespoke nutritionist statement.', ReportContent::dietReviewText());
+
+        // Blank / whitespace-only → falls back to the default (never renders empty).
+        Setting::set(Setting::DIET_REVIEW_TEXT, "   \n ");
+        $this->assertSame(Setting::DIET_REVIEW_TEXT_DEFAULT, ReportContent::dietReviewText());
+    }
+
+    public function test_edited_statement_renders_on_web_and_pdf_with_the_templated_link(): void
+    {
+        Setting::set(Setting::DIET_REVIEW_TEXT, 'EDITED nutritionist statement for the report.');
+        $report = $this->makeReport('Kibble', 'Imbalanced');
+
+        $web = $this->get('/report/'.$report->public_token)->assertOk()->getContent();
+        $pdf = $this->pdfHtml($report);
+
+        foreach (['web' => $web, 'pdf' => $pdf] as $where => $html) {
+            // The edited body shows…
+            $this->assertStringContainsString('EDITED nutritionist statement for the report.', $html, "{$where}: edited text missing");
+            // …the old default is gone…
+            $this->assertStringNotContainsString('We recommend speaking with one of our nutritionists, as your dog', $html, "{$where}: default text should be replaced");
+            // …and the TEMPLATED link + loyalty note are still present (not editable).
+            $this->assertStringContainsString('microbiome-diet-review-optimisation-60-minutes', $html, "{$where}: product link missing");
+            $this->assertStringContainsString(e(ReportContent::dietReviewLoyaltyNote()), $html, "{$where}: loyalty note missing");
+        }
     }
 }

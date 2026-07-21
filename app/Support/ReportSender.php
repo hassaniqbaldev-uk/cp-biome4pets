@@ -81,6 +81,11 @@ class ReportSender
             // a same-second double-fire still collapses to one. Also used as the
             // event `time`, keeping the recorded time and the dedupe key consistent.
             'time' => Carbon::now()->toIso8601String(),
+            // Flat, null-safe plan summary (has_plan, plan_name, subscription_price/url,
+            // phase/product counts, and a flat product-name list) from the report's
+            // FROZEN plan data. A report with no plan contributes has_plan=false, nulls,
+            // 0 counts and []. The EventRegistry builder emits these as event properties.
+            ...$report->klaviyoPlanProperties(),
         ]);
 
         // Rate-limited → record NOTHING, flag retryable (leave it cleanly retriable).

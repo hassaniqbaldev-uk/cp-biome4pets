@@ -396,6 +396,67 @@ class Report extends Model
     }
 
     /**
+     * A FLAT, snake_case summary of this report's plan for the Klaviyo "Report
+     * Published" event — key plan fields plus a simple list of product names, chosen
+     * to be easy to use in email templates and segments (no deep nested tree).
+     *
+     * NULL-SAFE by construction: plan_id is nullable and many reports have no plan,
+     * so a report with no plan applied returns has_plan=false, null strings, 0 counts
+     * and an empty product list — never an error. Read entirely from the report's
+     * FROZEN data (subscription_snapshot for price/url; the report_steps /
+     * report_step_products for the phases + product names), so it matches exactly what
+     * the report itself renders and can't drift with a later live-plan edit. The plan
+     * NAME comes from the plan relation, the same source the report's plan section
+     * displays (the name isn't part of the snapshot).
+     *
+     * plan_products / plan_product_count include EVERY product attached to the plan's
+     * steps (both 'included' and 'optional' add-ons), i.e. everything shown in the
+     * plan section. Filter to inclusion==='included' here if only protocol products
+     * are ever wanted.
+     *
+     * @return array{has_plan:bool, plan_name:?string, subscription_price:?string, subscription_url:?string, plan_phase_count:int, plan_product_count:int, plan_products:array<int,string>}
+     */
+    public function klaviyoPlanProperties(): array
+    {
+        // No plan applied → the safe, empty shape. Guarded first so nothing below can
+        // surface stray steps/snapshot data for a planless report.
+        if ($this->plan_id === null) {
+            return [
+                'has_plan' => false,
+                'plan_name' => null,
+                'subscription_price' => null,
+                'subscription_url' => null,
+                'plan_phase_count' => 0,
+                'plan_product_count' => 0,
+                'plan_products' => [],
+            ];
+        }
+
+        // Frozen at apply-plan time (never the live plan).
+        $snapshot = is_array($this->subscription_snapshot) ? $this->subscription_snapshot : [];
+
+        // Frozen phases + their products. loadMissing so a single send doesn't N+1
+        // and a caller that already eager-loaded steps.products.catalogProduct reuses it.
+        $this->loadMissing('steps.products.catalogProduct');
+
+        $productNames = $this->steps
+            ->flatMap(fn (ReportStep $step) => $step->products->map(fn ($p) => $p->catalogProduct?->name))
+            ->filter(fn (?string $name): bool => filled($name))
+            ->values()
+            ->all();
+
+        return [
+            'has_plan' => true,
+            'plan_name' => $this->plan?->name,
+            'subscription_price' => $snapshot['price'] ?? null,
+            'subscription_url' => $snapshot['url'] ?? null,
+            'plan_phase_count' => $this->steps->count(),
+            'plan_product_count' => count($productNames),
+            'plan_products' => $productNames,
+        ];
+    }
+
+    /**
      * Has this report been successfully sent to Klaviyo at least once? (A failed
      * attempt stamps klaviyo_last_sent_at but must NOT count.) Used to surface the
      * "already sent — send again?" confirmation on a repeat Klaviyo send.

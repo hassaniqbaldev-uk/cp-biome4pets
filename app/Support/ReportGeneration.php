@@ -492,10 +492,12 @@ class ReportGeneration
      * now band-aware) + gradeAndLog() (the validator) — and OVERWRITES the report's
      * stored AI content (ai_*, score_*) plus re-applies needs_review / review_flags.
      *
-     * It does NOT touch the plan, products, subscription snapshot, pet snapshot or
-     * status — only the AI interpretation is regenerated. Raw lab data is read from
-     * the linked Test (the report's source of truth), grounded AS OF the original
-     * report date so the copy is consistent with how it was first generated.
+     * It does NOT touch the plan, products, subscription snapshot or status. It DOES
+     * refresh the frozen pet_snapshot from the current pet (unconditionally, even if
+     * the AI step fails — so a diet/name/breed edit made after generation is picked
+     * up), while keeping the AI copy grounded in the linked Test's raw lab data AS OF
+     * the original report date so the interpretation is consistent with how it was
+     * first generated.
      *
      * SAFETY: if the AI call errors or returns an all-empty result, the existing
      * stored content is KEPT (never wiped by a transient API failure) and the
@@ -518,6 +520,17 @@ class ReportGeneration
         $pet = $report->pet;
         // Ground notes AS OF the report's date, mirroring createReportFromTest.
         $asOf = $test->report_date ?? $test->collected_at;
+
+        // Refresh the FROZEN pet snapshot from the current pet FIRST — before the AI
+        // step, so it applies even if the AI call fails (the snapshot is deterministic
+        // pet FACTS, not AI content, so refreshing it never wipes good prose). The
+        // report reads pet fields (diet, name, breed, …) from this snapshot, not the
+        // live pet, so a pet edited after generation — e.g. diet corrected to Kibble —
+        // would otherwise never surface. Regenerate is the "rebuild from current data"
+        // action: change the diet, regenerate, and the nutritionist diet-review
+        // statement appears. Notes stay grounded AS OF the report date via $asOf.
+        $report->update(['pet_snapshot' => Report::buildPetSnapshot($pet, $asOf)]);
+
         $deterministic = [
             'species_richness' => $test->species_richness,
             'dysbiosis_score' => $test->dysbiosis_score,

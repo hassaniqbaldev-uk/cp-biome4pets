@@ -144,6 +144,17 @@ class Setting extends Model
     public const REPORT_SUPPORT_TEXT_DEFAULT = "If you would like help interpreting your dog's results or guidance on next steps, we are here to support you.\nEmail: info@biome4pets.com\nWebsite: www.biome4pets.com\nConsultations are available if you would like to discuss your dog's results in more detail, please book through the website.";
 
     /**
+     * The nutritionist DIET-REVIEW statement body — shown on a kibble-fed + imbalanced
+     * report. Editable so the wording can change without a deploy; blank falls back to
+     * the default below. ONLY the prose is editable: the product link, its button label
+     * and the 10% loyalty note stay templated (see ReportContent) so they can't be
+     * broken here.
+     */
+    public const DIET_REVIEW_TEXT = 'diet_review_text';
+
+    public const DIET_REVIEW_TEXT_DEFAULT = "We recommend speaking with one of our nutritionists, as your dog's diet may be contributing to their microbiome imbalance. Gut health and nutrition go hand in hand, and by reviewing your dog's microbiome results alongside their current diet, our nutritionists can identify foods and feeding strategies that better support a healthy, balanced microbiome and help optimise long-term gut health.";
+
+    /**
      * Klaviyo integration (server-side Events API). The private API key is
      * stored encrypted (same mechanism as the OpenAI key — setEncrypted /
      * getDecrypted). Revision and base URL are config-driven so they can be
