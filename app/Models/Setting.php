@@ -176,6 +176,19 @@ class Setting extends Model
     public const HEALTH_INSIGHT_TARGET_TOLERANCE = 'health_insight_target_tolerance';
 
     /**
+     * Plan-routing policy: when NO product trigger fires and the pet is classified
+     * unwell (Imbalanced / Imbalanced & Depleted), assign the fallback plan
+     * (Maintain & Protect) instead of leaving the report with no plan for manual
+     * selection. The default is TRUE (the client's desired behaviour). Blank/unset
+     * → the default. Read via unwellNoTriggerUsesFallback(); consumed by
+     * ReportResource::recommendPlanWithReason(). Does NOT affect classification or
+     * the product-trigger evaluation — only the plan SELECTION policy.
+     */
+    public const UNWELL_NO_TRIGGER_USES_FALLBACK = 'unwell_no_trigger_uses_fallback';
+
+    public const UNWELL_NO_TRIGGER_USES_FALLBACK_DEFAULT = true;
+
+    /**
      * Klaviyo integration (server-side Events API). The private API key is
      * stored encrypted (same mechanism as the OpenAI key — setEncrypted /
      * getDecrypted). Revision and base URL are config-driven so they can be
@@ -288,6 +301,19 @@ class Setting extends Model
     public static function setEncrypted(string $key, string $value): void
     {
         static::set($key, encrypt($value));
+    }
+
+    /**
+     * Whether an unwell pet that fires no product trigger is auto-assigned the
+     * fallback (maintenance) plan. Blank/unset falls back to the default (TRUE).
+     */
+    public static function unwellNoTriggerUsesFallback(): bool
+    {
+        $raw = static::get(self::UNWELL_NO_TRIGGER_USES_FALLBACK);
+
+        return blank($raw)
+            ? self::UNWELL_NO_TRIGGER_USES_FALLBACK_DEFAULT
+            : filter_var($raw, FILTER_VALIDATE_BOOLEAN);
     }
 
     /** The configured display currency code (blank falls back to GBP). */

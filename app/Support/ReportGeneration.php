@@ -127,7 +127,7 @@ class ReportGeneration
      * Fire the product rules for the raw inputs and return the matched catalog
      * product ids + the recommended plan id (both derived from the same triggers).
      *
-     * @return array{triggered: array<int,string>, catalog_product_ids: array<int,int>, plan_id: ?int}
+     * @return array{triggered: array<int,string>, catalog_product_ids: array<int,int>, plan_id: ?int, reason_code: string, reason: array{code:string,text:string}}
      */
     public static function productSelection(array $phylumData, ?float $diversity, ?string $classification = null): array
     {
@@ -141,12 +141,18 @@ class ReportGeneration
             ->pluck('id')
             ->all();
 
+        // The plan decision + WHY it was chosen. The unwell + no-trigger case now
+        // routes to the fallback (maintenance) plan when the toggle is on (default),
+        // else stays null; the reason is captured for the admin "why this plan" line
+        // and to drive the soft auto_assigned_maintenance review flag.
+        $selection = ReportResource::recommendPlanWithReason($triggered, $classification);
+
         return [
             'triggered' => $triggered,
             'catalog_product_ids' => $catalogProductIds,
-            // The classification gates the maintenance fallback: an unwell pet that
-            // fires no trigger gets null (→ manual selection) rather than maintenance.
-            'plan_id' => ReportResource::recommendPlanId($triggered, $classification),
+            'plan_id' => $selection['plan_id'],
+            'reason_code' => $selection['reason_code'],
+            'reason' => ['code' => $selection['reason_code'], 'text' => $selection['reason_text']],
         ];
     }
 
@@ -179,6 +185,9 @@ class ReportGeneration
                 'species' => $deterministic['species'] ?? [],
                 'triggered' => $selection['triggered'] ?? [],
                 'plan_id' => $selection['plan_id'] ?? null,
+                // Lets the grader tell an unwell + no-trigger AUTO-assigned fallback
+                // (soft auto_assigned_maintenance flag) apart from a real match.
+                'plan_reason_code' => $selection['reason_code'] ?? null,
                 'generation_error' => $generationError,
             ]);
 
@@ -471,6 +480,7 @@ class ReportGeneration
                 'pet_snapshot' => Report::buildPetSnapshot($pet, $asOf),
                 'needs_review' => $verdict['needs_review'],
                 'review_flags' => self::reviewFlagsFromVerdict($verdict),
+                'recommendation_reason' => $selection['reason'] ?? null,
             ]));
 
             if (! empty($selection['catalog_product_ids'])) {

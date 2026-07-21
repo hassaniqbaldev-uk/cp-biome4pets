@@ -212,6 +212,7 @@ class ReportResource extends Resource
                 // saved with the report. needs_review is deterministic-only.
                 Forms\Components\Hidden::make('needs_review')->default(false)->dehydrated(),
                 Forms\Components\Hidden::make('review_flags')->dehydrated(),
+                Forms\Components\Hidden::make('recommendation_reason')->dehydrated(),
 
                 Forms\Components\Wizard::make([
                     Forms\Components\Wizard\Step::make('Client & Pet Details')
@@ -406,6 +407,7 @@ class ReportResource extends Resource
                                         );
                                         $set('catalog_product_ids', $selection['catalog_product_ids']);
                                         $set('plan_id', $selection['plan_id']);
+                                        $set('recommendation_reason', $selection['reason'] ?? null);
 
                                         // Phase 2: grade the generation (observe-only; logged + returned).
                                         // Phase 3: persist the verdict via the hidden fields so it saves
@@ -621,6 +623,7 @@ class ReportResource extends Resource
                                         );
                                         $set('catalog_product_ids', $selection['catalog_product_ids']);
                                         $set('plan_id', $selection['plan_id']);
+                                        $set('recommendation_reason', $selection['reason'] ?? null);
 
                                         // Phase 2: grade the generation (observe-only; logged + returned).
                                         // Phase 3: persist the verdict via the hidden fields so it saves
@@ -765,6 +768,17 @@ class ReportResource extends Resource
                                 ->getOptionLabelUsing(fn ($value): ?string => Plan::find($value)?->name)
                                 ->live()
                                 ->helperText('Pick the plan for this pet, then click "Apply plan" to load its steps. A recommendation is pre-selected from the fired triggers when a CSV has been processed. (Species filtering is inactive — the app is dog-only.)'),
+
+                            // Admin-only "why this plan" line — the reason captured at
+                            // generation time (ReportResource::recommendPlanWithReason).
+                            // Never shown on the customer-facing report.
+                            Forms\Components\Placeholder::make('recommendation_reason_display')
+                                ->label('Why this plan')
+                                ->visible(fn (?Report $record): bool => filled($record?->recommendation_reason['text'] ?? null))
+                                ->content(fn (?Report $record): HtmlString => new HtmlString(
+                                    '<span style="color:#374151;">'.e($record->recommendation_reason['text'] ?? '').'</span>'
+                                    .'<span style="color:#9ca3af;font-size:.72rem;"> — '.e($record->recommendation_reason['code'] ?? '').'</span>'
+                                )),
 
                             Forms\Components\Toggle::make('hide_subscribe')
                                 ->label('Hide subscribe section')
@@ -1106,20 +1120,65 @@ class ReportResource extends Resource
 
     public static function recommendPlanId(array $triggers, ?string $classification = null): ?int
     {
+        return static::recommendPlanWithReason($triggers, $classification)['plan_id'];
+    }
+
+    /**
+     * The plan decision PLUS a machine reason_code and a human reason_text, captured
+     * at decision time so admins can see WHY a plan was (or wasn't) chosen. The
+     * selection logic — first-match-wins by match_priority — is unchanged; this only
+     * also records which branch/match won.
+     *
+     * The one policy change: when NO trigger fires and the pet is unwell, the
+     * fallback (maintenance) plan is now assigned IF the configurable toggle
+     * Setting::unwellNoTriggerUsesFallback() is ON (default). When OFF, the original
+     * behaviour is kept (no plan → the unwell_no_plan review flag). Unknown/null
+     * classification keeps the plain fallback behaviour, as before.
+     *
+     * @return array{plan_id: ?int, reason_code: string, reason_text: string}
+     */
+    public static function recommendPlanWithReason(array $triggers, ?string $classification = null): array
+    {
         $plans = static::recommendationPlans();
 
-        // No triggers fired. The fallback (maintenance) plan is only a valid
-        // recommendation for a NON-unwell result: a pet classified Imbalanced /
-        // Imbalanced & Depleted that simply matched no rule must NOT be silently
-        // routed to maintenance. Return null so a human selects the plan (and the
-        // quality grader raises unwell_no_plan → needs_review). Unknown/null
-        // classification keeps the original fallback behaviour (back-compatible).
         if (empty($triggers)) {
+            $fallback = $plans->firstWhere('is_fallback', true);
+            $fallbackName = $fallback?->name ?? 'the fallback plan';
+
             if (\App\Support\ReportContent::isUnwellClassification($classification)) {
-                return null;
+                // NEW (toggle, default ON): route unwell + no-trigger to the fallback
+                // (Maintain & Protect) instead of leaving it planless.
+                if ($fallback && \App\Models\Setting::unwellNoTriggerUsesFallback()) {
+                    return static::planReason(
+                        $fallback->id,
+                        'fallback_unwell',
+                        $fallbackName.' — fallback (unwell, no specific trigger fired)',
+                    );
+                }
+
+                // Toggle OFF (or no fallback configured): no plan, original behaviour
+                // — the quality grader raises unwell_no_plan → needs_review.
+                return static::planReason(
+                    null,
+                    'unwell_no_plan',
+                    'No plan — unwell but no trigger matched (manual selection needed)',
+                );
             }
 
-            return $plans->firstWhere('is_fallback', true)?->id;
+            // Not unwell (Stable / unknown / null): the plain fallback, as before.
+            if ($fallback) {
+                return static::planReason(
+                    $fallback->id,
+                    'fallback_not_unwell',
+                    $fallbackName.' — fallback (no triggers fired, not unwell)',
+                );
+            }
+
+            return static::planReason(
+                null,
+                'no_fallback_configured',
+                'No plan — no triggers fired and no fallback plan is configured',
+            );
         }
 
         // First plan (by match_priority, then id) with ANY satisfied condition wins.
@@ -1129,13 +1188,29 @@ class ReportResource extends Resource
 
                 // AND within a row; an empty set never auto-matches (guard).
                 if ($required !== [] && array_diff($required, $triggers) === []) {
-                    return $plan->id;
+                    return static::planReason(
+                        $plan->id,
+                        'condition_match',
+                        ($plan->name ?? 'Plan').' — matched trigger condition: '.implode(' + ', $required),
+                    );
                 }
             }
         }
 
         // Triggers fired but matched no plan → no recommendation.
-        return null;
+        return static::planReason(
+            null,
+            'triggers_no_match',
+            'No plan — triggers fired ('.implode(', ', $triggers).") but no plan's conditions matched",
+        );
+    }
+
+    /**
+     * @return array{plan_id: ?int, reason_code: string, reason_text: string}
+     */
+    protected static function planReason(?int $planId, string $code, string $text): array
+    {
+        return ['plan_id' => $planId, 'reason_code' => $code, 'reason_text' => $text];
     }
 
     /**
@@ -1259,8 +1334,11 @@ class ReportResource extends Resource
      */
     public static function planRecommendationExplainerHtml(): HtmlString
     {
+        $fallbackName = 'Maintain & Protect';
         try {
             $names = Plan::query()->pluck('name', 'key')->all();
+            $fallbackKey = Plan::query()->where('is_fallback', true)->value('key');
+            $fallbackName = $names[$fallbackKey] ?? $fallbackName;
         } catch (\Throwable) {
             $names = [];
         }
@@ -1274,11 +1352,17 @@ class ReportResource extends Resource
             $rows .= '<li style="margin:4px 0;"><strong>'.e($rule['condition']).'</strong> &rarr; '.$target.'</li>';
         }
 
+        $unwellUsesFallback = \App\Models\Setting::unwellNoTriggerUsesFallback();
+
+        $unwellLine = $unwellUsesFallback
+            ? 'When <strong>no triggers fire at all</strong>, the default (fallback) plan applies — <strong>including for unwell pets</strong>, which now receive <strong>'.e($fallbackName).'</strong> (fallback) instead of being left for manual selection.'
+            : 'The default (fallback) plan applies only when <strong>no triggers fire</strong> and the pet is <strong>not</strong> classified unwell; an unwell pet that fires no trigger is left blank for manual selection.';
+
         return new HtmlString(
             '<div style="font-size:13px; color:#374151; line-height:1.6;">'
             .'<p style="margin:0 0 8px;">After the product triggers above fire, the report builder selects <strong>one</strong> plan using the rules below, <strong>checked top to bottom — the first match wins</strong>. This order is the recommendation precedence (each plan&rsquo;s <em>match priority</em>); it is <em>not</em> the same as a plan&rsquo;s display position.</p>'
             .'<ol style="margin:0 0 8px 18px; padding:0;">'.$rows.'</ol>'
-            .'<p style="margin:0; color:#6b7280;">If triggers fire but match none of the condition rules above, <strong>no plan is auto-recommended</strong> — the report is left blank for manual selection. The default (fallback) plan applies only when <strong>no triggers fire at all</strong>.</p>'
+            .'<p style="margin:0; color:#6b7280;">If triggers fire but match none of the condition rules above, <strong>no plan is auto-recommended</strong> — the report is left blank for manual selection. '.$unwellLine.'</p>'
             .'</div>'
         );
     }

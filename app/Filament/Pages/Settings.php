@@ -97,6 +97,8 @@ class Settings extends Page implements HasForms
             Setting::OPENAI_DIRECTIVE_PHYLA => Setting::get(Setting::OPENAI_DIRECTIVE_PHYLA, ''),
             Setting::OPENAI_DIRECTIVE_SCORES => Setting::get(Setting::OPENAI_DIRECTIVE_SCORES, ''),
             Setting::SIGNS_OF_STABILITY => Setting::get(Setting::SIGNS_OF_STABILITY, ''),
+            // Plan-routing policy toggle (Trigger Rules tab). Blank → default TRUE.
+            Setting::UNWELL_NO_TRIGGER_USES_FALLBACK => Setting::unwellNoTriggerUsesFallback(),
             ...$this->loadPlansGeneration(),
             ...$this->loadReportText(),
             ...$this->loadDisplayThresholds(),
@@ -691,6 +693,11 @@ class Settings extends Page implements HasForms
                     ->columnSpanFull()
                     ->content(fn (): HtmlString => ReportResource::planRecommendationExplainerHtml()),
 
+                Toggle::make(Setting::UNWELL_NO_TRIGGER_USES_FALLBACK)
+                    ->label('Unwell + no trigger → fallback plan')
+                    ->default(Setting::UNWELL_NO_TRIGGER_USES_FALLBACK_DEFAULT)
+                    ->helperText('When no product triggers fire and the pet is classified unwell, assign the fallback plan (Maintain & Protect) instead of leaving it for manual selection. Default ON. The report is still soft-flagged for a quick "confirm" review. Turn OFF to keep the old behaviour (no plan, flagged for manual selection).'),
+
                 Repeater::make('product_rules')
                     ->label('Product Trigger Rules')
                     ->helperText('Each rule fires its trigger when the metric meets the condition. Rules sharing a trigger name are OR-ed together.')
@@ -1206,6 +1213,9 @@ class Settings extends Page implements HasForms
         Setting::set(Setting::DISPLAY_RICHNESS_HEALTHY_MIN, $data[Setting::DISPLAY_RICHNESS_HEALTHY_MIN] ?? '');
         Setting::set(Setting::HEALTH_INSIGHT_TARGET_TOLERANCE, $data[Setting::HEALTH_INSIGHT_TARGET_TOLERANCE] ?? '');
 
+        // Plan-routing policy toggle (stored '1'/'0'; blank read falls back to default TRUE).
+        Setting::set(Setting::UNWELL_NO_TRIGGER_USES_FALLBACK, ! empty($data[Setting::UNWELL_NO_TRIGGER_USES_FALLBACK]) ? '1' : '0');
+
         // ── Klaviyo ──────────────────────────────────────────────────────────
         // Only overwrite the key when a new value was entered (same guard as the
         // OpenAI key) so saving never wipes the stored secret.
@@ -1249,6 +1259,8 @@ class Settings extends Page implements HasForms
             Setting::OPENAI_DIRECTIVE_PHYLA => Setting::get(Setting::OPENAI_DIRECTIVE_PHYLA, ''),
             Setting::OPENAI_DIRECTIVE_SCORES => Setting::get(Setting::OPENAI_DIRECTIVE_SCORES, ''),
             Setting::SIGNS_OF_STABILITY => Setting::get(Setting::SIGNS_OF_STABILITY, ''),
+            // Plan-routing policy toggle (Trigger Rules tab). Blank → default TRUE.
+            Setting::UNWELL_NO_TRIGGER_USES_FALLBACK => Setting::unwellNoTriggerUsesFallback(),
             ...$this->loadPlansGeneration(),
             ...$this->loadReportText(),
             ...$this->loadDisplayThresholds(),

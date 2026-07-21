@@ -191,13 +191,23 @@ class ReportQualityValidator
             $issues[] = self::issue('plan_unmatched', self::SEVERITY_WARNING, self::TIER_DETERMINISTIC, 'Triggers fired ('.count($triggered).') but no plan matched.');
         }
 
-        // 6. Safety net for the classification-gated router: an UNWELL pet that
-        //    ended with no plan (e.g. fired no trigger and so was NOT routed to
-        //    maintenance) must be surfaced loudly for manual selection, not left
-        //    silently planless. Deterministic ⇒ drives needs_review.
+        // 6. Unwell-pet plan safety nets. Two mutually-exclusive cases, both soft
+        //    (warning) but deterministic so they surface in the "needs review" queue:
+        //      • toggle OFF / no fallback → no plan at all: the original unwell_no_plan
+        //        flag ("choose a plan manually").
+        //      • toggle ON → the pet was AUTO-assigned the fallback (Maintain &
+        //        Protect) because no specific trigger fired: a soft
+        //        auto_assigned_maintenance "please confirm" flag — there IS a plan,
+        //        but the borderline case is worth an eyeball.
+        //    Distinguished by the plan-selection reason_code (fallback_unwell).
         $classification = $context['microbiome_classification'] ?? null;
-        if ($planId === null && ReportContent::isUnwellClassification($classification)) {
-            $issues[] = self::issue('unwell_no_plan', self::SEVERITY_WARNING, self::TIER_DETERMINISTIC, "Classified {$classification} but no plan matched — needs manual plan selection.");
+        $reasonCode = $context['plan_reason_code'] ?? null;
+        if (ReportContent::isUnwellClassification($classification)) {
+            if ($planId === null) {
+                $issues[] = self::issue('unwell_no_plan', self::SEVERITY_WARNING, self::TIER_DETERMINISTIC, "Classified {$classification} but no plan matched — needs manual plan selection.");
+            } elseif ($reasonCode === 'fallback_unwell') {
+                $issues[] = self::issue('auto_assigned_maintenance', self::SEVERITY_WARNING, self::TIER_DETERMINISTIC, "Classified {$classification} and auto-assigned the fallback plan (no specific trigger fired) — confirm this is appropriate.");
+            }
         }
 
         // 7. RETIRED — panel_contradiction. This flag fired when the classification

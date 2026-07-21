@@ -66,6 +66,8 @@ class Report extends Model
         'review_flags',
         'reviewed_at',
         'reviewed_by',
+        // Admin-only "why this plan" reason, captured at plan-selection time.
+        'recommendation_reason',
     ];
 
     protected $casts = [
@@ -83,6 +85,8 @@ class Report extends Model
         'needs_review' => 'boolean',
         'review_flags' => 'array',
         'reviewed_at' => 'datetime',
+        // {code, text} — the plan-selection reason (admin-only display).
+        'recommendation_reason' => 'array',
     ];
 
     /**

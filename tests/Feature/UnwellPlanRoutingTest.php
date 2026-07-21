@@ -4,6 +4,7 @@ namespace Tests\Feature;
 
 use App\Filament\Resources\ReportResource;
 use App\Models\Plan;
+use App\Models\Setting;
 use App\Support\ReportGeneration;
 use Database\Seeders\CatalogProductSeeder;
 use Database\Seeders\PlanSeeder;
@@ -13,10 +14,12 @@ use Illuminate\Support\Facades\DB;
 use Tests\TestCase;
 
 /**
- * FIX C — the maintenance (is_fallback) plan may only be auto-recommended for a
- * NON-unwell result. An Imbalanced / Imbalanced & Depleted pet that fires no
- * trigger must NOT be silently routed to maintenance: it gets no plan (→ manual
- * selection) and is flagged for review. Trigger-firing cases are unchanged.
+ * Plan routing for the unwell + no-trigger case, now governed by the configurable
+ * Setting::UNWELL_NO_TRIGGER_USES_FALLBACK toggle (default ON):
+ *   - ON (default): an unwell pet that fires no trigger is auto-assigned the
+ *     fallback (Maintain & Protect) — the sample-4366 fix — with a soft review flag.
+ *   - OFF: the original behaviour — no plan (→ manual selection), unwell_no_plan flag.
+ * Stable/unknown always get the fallback; trigger-firing cases are unchanged.
  */
 class UnwellPlanRoutingTest extends TestCase
 {
@@ -47,8 +50,17 @@ class UnwellPlanRoutingTest extends TestCase
         return (int) Plan::where('key', $key)->value('id');
     }
 
-    public function test_no_triggers_unwell_returns_null_not_maintenance(): void
+    public function test_no_triggers_unwell_routes_to_maintenance_by_default(): void
     {
+        // Toggle defaults ON: unwell + no trigger → the fallback (Maintain & Protect).
+        $this->assertSame($this->planId('maintain-protect'), ReportResource::recommendPlanId([], 'Imbalanced & Depleted'));
+        $this->assertSame($this->planId('maintain-protect'), ReportResource::recommendPlanId([], 'Imbalanced'));
+    }
+
+    public function test_no_triggers_unwell_returns_null_when_toggle_off(): void
+    {
+        Setting::set(Setting::UNWELL_NO_TRIGGER_USES_FALLBACK, '0');
+
         $this->assertNull(ReportResource::recommendPlanId([], 'Imbalanced & Depleted'));
         $this->assertNull(ReportResource::recommendPlanId([], 'Imbalanced'));
     }
@@ -74,10 +86,11 @@ class UnwellPlanRoutingTest extends TestCase
         );
     }
 
-    public function test_product_selection_gates_the_bug_sample(): void
+    public function test_product_selection_routes_the_bug_sample_to_maintenance_by_default(): void
     {
         // The real failing sample: Fusobacteria-dominant, depleted by richness,
-        // diversity 2.89 (no FMT). No rule fires → previously maintenance, now null.
+        // diversity 2.89 (no FMT). No rule fires → NOW routed to the fallback
+        // (Maintain & Protect) by default, with the reason captured.
         $selection = ReportGeneration::productSelection(
             ['Fusobacteria' => 54.4, 'Firmicutes' => 26.2, 'Bacteroidetes' => 15.8],
             2.89,
@@ -85,7 +98,23 @@ class UnwellPlanRoutingTest extends TestCase
         );
 
         $this->assertSame([], $selection['triggered'], 'no trigger should fire for this sample');
-        $this->assertNull($selection['plan_id'], 'unwell + no trigger must not get the maintenance plan');
+        $this->assertSame($this->planId('maintain-protect'), $selection['plan_id'], 'unwell + no trigger now gets the fallback');
+        $this->assertSame('fallback_unwell', $selection['reason_code']);
+    }
+
+    public function test_product_selection_gates_the_bug_sample_when_toggle_off(): void
+    {
+        Setting::set(Setting::UNWELL_NO_TRIGGER_USES_FALLBACK, '0');
+
+        $selection = ReportGeneration::productSelection(
+            ['Fusobacteria' => 54.4, 'Firmicutes' => 26.2, 'Bacteroidetes' => 15.8],
+            2.89,
+            'Imbalanced & Depleted',
+        );
+
+        $this->assertSame([], $selection['triggered']);
+        $this->assertNull($selection['plan_id'], 'toggle OFF preserves the old no-plan behaviour');
+        $this->assertSame('unwell_no_plan', $selection['reason_code']);
     }
 
     public function test_product_selection_stable_no_trigger_still_maintenance(): void
