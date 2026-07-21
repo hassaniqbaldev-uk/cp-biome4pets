@@ -58,6 +58,22 @@ class Test extends Model
 
     protected static function booted(): void
     {
+        // Enforce the sample_id ↔ order_id invariant at the MODEL level, on EVERY
+        // path (form, service, import, console, future code). sample_id is the value
+        // the Reports search matches; historically it was only mirrored from order_id
+        // at save time by the form/service, so any row created outside that mirror was
+        // left with an empty sample_id and became unfindable until edited. Filling it
+        // here (when blank) removes that whole class of bug at the source.
+        //
+        // Only fills a BLANK sample_id, and only when order_id is present — so a
+        // deliberately-different sample_id is never overwritten, and a row with no
+        // order_id is left untouched. Runs on saving (covers create AND update).
+        static::saving(function (Test $test): void {
+            if (blank($test->sample_id) && filled($test->order_id)) {
+                $test->sample_id = $test->order_id;
+            }
+        });
+
         // No orphaned PII: delete the private lab CSV when its Test is permanently
         // removed. forceDeleted (NOT deleting) so a SOFT delete keeps the CSV — the
         // test can be restored with its data intact; only a real force-delete wipes

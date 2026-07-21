@@ -757,6 +757,15 @@
                     </div>
                 @endif
 
+                @if($report->recommendsDietReview())
+                    {{-- Nutritionist recommendation sits BETWEEN the "Where to focus first"
+                         intro and the first step box — after the intro, before Step 1's card,
+                         not inside any step. Same trigger + copy as before; the no-plan
+                         fallback (below the section) still shows it when a qualifying report
+                         has no plan/Phase 1, and the two stay mutually exclusive. --}}
+                    @include('report.partials._diet-review')
+                @endif
+
                 {{-- The full protocol — stepped cards --}}
                 <div class="space-y-6">
                     @foreach($report->steps as $step)
@@ -878,27 +887,21 @@
                 </div>
                 @endif
 
-                {{-- Nutritionist diet-review recommendation. Shown ONLY when the pet is
-                     kibble-fed AND its classification is Imbalanced / Imbalanced &
-                     Depleted (recommendsDietReview()). A stable kibble-fed dog — and any
-                     non-kibble or missing-data case — shows NOTHING here: "some dogs are
-                     fine on kibble and if their microbiome is stable then leave them be".
-                     Copy + link shared with the PDF — see app/Support/ReportContent.php. --}}
-                @if($report->recommendsDietReview())
-                <div style="margin-top:22px; background:#F3F8FC; border:1px solid #D9E6F2; border-left:4px solid #4654A4; border-radius:14px; padding:22px 24px;">
-                    <div style="display:flex; align-items:flex-start; gap:14px;">
-                        <div style="flex:0 0 auto; width:40px; height:40px; border-radius:9999px; background:#E3F0FF; display:flex; align-items:center; justify-content:center;">
-                            <svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#4654A4" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M11 20A7 7 0 0 1 9.8 6.1C15.5 5 17 4.48 19 2c1 2 2 4.18 2 8 0 5.5-4.78 10-10 10Z"/><path d="M2 21c0-3 1.85-5.36 5.08-6"/></svg>
-                        </div>
-                        <div>
-                            <h3 style="font-size:17px; font-weight:700; color:#301C47; margin:0 0 6px;">We recommend speaking to a nutritionist</h3>
-                            <p style="font-size:14px; color:#4b5563; line-height:1.6; margin:0 0 16px; max-width:60ch;">{{ \App\Support\ReportContent::dietReviewText() }}</p>
-                            <a href="{{ \App\Support\Utm::report(\App\Support\ReportContent::DIET_REVIEW_URL, 'nutritionist', 'diet_review_cta') }}" target="_blank" rel="noopener noreferrer" style="display:inline-block; background:#4654A4; color:#fff; font-weight:600; font-size:14px; text-decoration:none; padding:11px 22px; border-radius:9px;">{{ \App\Support\ReportContent::dietReviewLinkLabel() }} &rarr;</a>
-                            <p style="font-size:13px; color:#6b7280; line-height:1.6; margin:12px 0 0;">{{ \App\Support\ReportContent::dietReviewLoyaltyNote() }}</p>
-                        </div>
-                    </div>
-                </div>
-                @endif
+            </div>
+        </section>
+        @endif
+
+        {{-- Nutritionist diet-review — NO-PLAN FALLBACK. The block normally renders
+             inside Phase 1 above, but that whole section only shows when a plan with
+             steps exists and the subscribe pitch isn't hidden. So when a QUALIFYING
+             report (recommendsDietReview) has no plan / no steps, render the block here
+             as its own card so it can never disappear. Mutually exclusive with the
+             in-Phase-1 placement (that requires plan_id + steps). Staff-hidden reports
+             (hide_subscribe) stay suppressed, matching the existing behaviour. --}}
+        @if($report->recommendsDietReview() && ! $report->hide_subscribe && (! $report->plan_id || $report->steps->isEmpty()))
+        <section data-reveal class="report-card">
+            <div class="report-body">
+                @include('report.partials._diet-review')
             </div>
         </section>
         @endif

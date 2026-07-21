@@ -64,7 +64,12 @@ class ReportResource extends Resource
     {
         // sample_id now lives on the linked Test; search the relationship path
         // (Filament JOINs to tests), and the title resolves via getRecordTitle().
-        return ['pet.name', 'test.sample_id', 'client.email'];
+        //
+        // test.order_id is searched too: it is the value admins actually see and
+        // enter (the "Order / Test ID"), is NOT NULL, and is populated on every Test.
+        // sample_id is a mirror of it that some legacy rows left empty — so searching
+        // order_id directly finds those records even before the sample_id backfill.
+        return ['pet.name', 'test.sample_id', 'test.order_id', 'client.email'];
     }
 
     /**
@@ -1403,6 +1408,13 @@ class ReportResource extends Resource
                 Tables\Columns\TextColumn::make('test.sample_id')
                     ->label('Sample ID')
                     ->searchable(),
+                // Searchable but toggled off by default: the value admins search by
+                // ("Order / Test ID"). Always populated (NOT NULL), so records with an
+                // empty/divergent sample_id are still found by their order id here.
+                Tables\Columns\TextColumn::make('test.order_id')
+                    ->label('Order / Test ID')
+                    ->searchable()
+                    ->toggleable(isToggledHiddenByDefault: true),
                 Tables\Columns\TextColumn::make('client.name')
                     ->label('Client')
                     ->searchable()

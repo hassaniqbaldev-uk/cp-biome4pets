@@ -655,10 +655,19 @@
 <div class="section">
     <div class="section-bar">Recommended Next Steps</div>
     <div class="section-body">
-        {{-- Compact summary + view-online block; kept together on one page. --}}
-        <div style="page-break-inside: avoid;">
-            <p style="margin-bottom: 16px;">Based on {{ $petName }}'s microbiome results we've built a personalised protocol, <b style="color: #301C47;">{{ $planName }}</b>{{ $phaseClause }}, with products and dosing matched to {{ $petName }}'s results{{ $subClause }}.</p>
+        <p style="margin-bottom: 16px;">Based on {{ $petName }}'s microbiome results we've built a personalised protocol, <b style="color: #301C47;">{{ $planName }}</b>{{ $phaseClause }}, with products and dosing matched to {{ $petName }}'s results{{ $subClause }}.</p>
 
+        {{-- The nutritionist recommendation sits BETWEEN the plan intro and the "view plan
+             online" CTA — mirroring the web, where it now sits after the "Where to focus
+             first" intro and before the first step box. The PDF has no per-phase cards
+             (the full protocol lives on the online report). Same trigger + copy as before
+             — only its position moved. The no-plan fallback below stays mutually exclusive. --}}
+        @if($report->recommendsDietReview())
+            @include('report.partials._diet-review-pdf')
+        @endif
+
+        {{-- Compact "view plan online" block; kept together on one page. --}}
+        <div style="page-break-inside: avoid; margin-top: 18px;">
             <table style="width: 100%; border-collapse: collapse;" cellspacing="0" cellpadding="0">
                 <tr>
                     <td style="background-color: #301C47; padding: 26px 28px; vertical-align: middle;">
@@ -673,27 +682,6 @@
                 </tr>
             </table>
         </div>
-
-        {{-- Nutritionist diet-review recommendation (mirrors the web view). Shown ONLY
-             for kibble-fed AND Imbalanced / Imbalanced & Depleted (recommendsDietReview());
-             a stable kibble-fed dog and every other case show NOTHING. DomPDF-safe:
-             single-cell table, tinted bg, border-left accent, inline-block link (DomPDF
-             renders <a href> as a real clickable link). No flexbox / emoji / inline SVG. --}}
-        @if($report->recommendsDietReview())
-        <div style="page-break-inside: avoid; margin-top: 18px;">
-            <table style="width: 100%; border-collapse: collapse;" cellspacing="0" cellpadding="0">
-                <tr>
-                    <td style="background-color: #F3F8FC; border-left: 4px solid #4654A4; padding: 22px 24px; vertical-align: top;">
-                        <div style="font-size: 11px; color: #4654A4; text-transform: uppercase; letter-spacing: 2px; font-weight: bold; margin-bottom: 8px;">Nutrition support</div>
-                        <div style="font-size: 17px; font-weight: bold; color: #301C47; margin-bottom: 8px;">We recommend speaking to a nutritionist</div>
-                        <div style="font-size: 12px; color: #4b5563; line-height: 1.6; margin-bottom: 16px;">{{ ReportContent::dietReviewText() }}</div>
-                        <a href="{{ \App\Support\Utm::report(ReportContent::DIET_REVIEW_URL, 'nutritionist', 'diet_review_cta') }}" style="background-color: #4654A4; color: #ffffff; font-size: 13px; font-weight: bold; text-decoration: none; padding: 12px 24px; display: inline-block;">{{ ReportContent::dietReviewLinkLabel() }} &raquo;</a>
-                        <div style="font-size: 11px; color: #6b7280; line-height: 1.6; margin-top: 12px;">{{ ReportContent::dietReviewLoyaltyNote() }}</div>
-                    </td>
-                </tr>
-            </table>
-        </div>
-        @endif
     </div>
 </div>
 
@@ -721,6 +709,20 @@
                 @endif
             </div>
         @endforeach
+    </div>
+</div>
+@endif
+
+{{-- Nutritionist diet-review — NO-PLAN FALLBACK (mirrors the web). The block normally
+     renders within Recommended Next Steps above, but that section only shows for a plan
+     with steps (and when not hidden). For a QUALIFYING report with no plan/steps, render
+     it here so it can never disappear. Mutually exclusive with the in-section placement;
+     hide_subscribe stays suppressed, matching the existing behaviour. --}}
+@if($report->recommendsDietReview() && ! $report->hide_subscribe && (! $report->plan_id || $report->steps->isEmpty()))
+<div class="section">
+    <div class="section-bar">Nutrition Support</div>
+    <div class="section-body">
+        @include('report.partials._diet-review-pdf')
     </div>
 </div>
 @endif
