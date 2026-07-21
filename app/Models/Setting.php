@@ -155,6 +155,27 @@ class Setting extends Model
     public const DIET_REVIEW_TEXT_DEFAULT = "We recommend speaking with one of our nutritionists, as your dog's diet may be contributing to their microbiome imbalance. Gut health and nutrition go hand in hand, and by reviewing your dog's microbiome results alongside their current diet, our nutritionists can identify foods and feeding strategies that better support a healthy, balanced microbiome and help optimise long-term gut health.";
 
     /**
+     * DISPLAY-ONLY scientific band boundaries (Tier A of the classification-rules
+     * audit). These change only what BAND LABEL a report prints — they do NOT feed
+     * classify(), plan routing or the nutritionist trigger, so editing them cannot
+     * break anything downstream. Each holds ONLY the setting key; the default is the
+     * domain constant (ReportContent / HealthInsightRules), read with a sane-range
+     * fallback so an unset/blank/out-of-range value is IDENTICAL to today's behaviour.
+     * (This deliberately excludes the CLASSIFICATION thresholds — DIVERSITY_LOW_MAX,
+     * DIVERSITY_STABLE_MIN, RICHNESS_LOW_MAX, DYSBIOSIS_HEALTHY_MIN/MAX — which stay
+     * in code because a non-expert changing them would mislabel real samples.)
+     *
+     *  - DISPLAY_DIVERSITY_HIGH_MIN   → ReportContent::diversityHighMin()  (default 2.5)
+     *  - DISPLAY_RICHNESS_HEALTHY_MIN → ReportContent::richnessHealthyMin() (default 650)
+     *  - HEALTH_INSIGHT_TARGET_TOLERANCE → HealthInsightRules::targetTolerance() (default 0.25)
+     */
+    public const DISPLAY_DIVERSITY_HIGH_MIN = 'display_diversity_high_min';
+
+    public const DISPLAY_RICHNESS_HEALTHY_MIN = 'display_richness_healthy_min';
+
+    public const HEALTH_INSIGHT_TARGET_TOLERANCE = 'health_insight_target_tolerance';
+
+    /**
      * Klaviyo integration (server-side Events API). The private API key is
      * stored encrypted (same mechanism as the OpenAI key — setEncrypted /
      * getDecrypted). Revision and base URL are config-driven so they can be

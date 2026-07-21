@@ -364,7 +364,7 @@
             <div style="font-size: 12px; font-weight: bold; color: {{ $dsColor }}; margin-bottom: 8px;">{{ $dsLabel }}</div>
             <div style="text-align: center;">{!! ChartSvg::slider($dsPercent) !!}</div>
             <table style="width: 520px; margin: 4px auto 0 auto;" cellspacing="0" cellpadding="0">
-                @php $dLow = ReportContent::num(ReportContent::DIVERSITY_LOW_MAX); $dHigh = ReportContent::num(ReportContent::DIVERSITY_HIGH_MIN); @endphp
+                @php $dLow = ReportContent::num(ReportContent::DIVERSITY_LOW_MAX); $dHigh = ReportContent::num(ReportContent::diversityHighMin()); @endphp
                 <tr>
                     <td style="text-align: left; font-size: 10px; color: #dc2626; font-weight: bold;">Low (&lt;{{ $dLow }})</td>
                     <td style="text-align: center; font-size: 10px; color: #d97706; font-weight: bold;">Medium ({{ $dLow }}-{{ $dHigh }})</td>

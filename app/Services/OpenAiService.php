@@ -400,7 +400,7 @@ PROMPT;
         $diversityBand = \App\Support\ReportContent::diversityBand($diversityScore)['label']; // Low | Medium | High
         $bandLines[] = '- The Shannon diversity score '.$diversityScore.' is '.strtoupper($diversityBand)
             .' (diversity bands: Low below '.\App\Support\ReportContent::num(\App\Support\ReportContent::DIVERSITY_LOW_MAX)
-            .', Medium up to '.\App\Support\ReportContent::num(\App\Support\ReportContent::DIVERSITY_HIGH_MIN)
+            .', Medium up to '.\App\Support\ReportContent::num(\App\Support\ReportContent::diversityHighMin())
             .', High above that).';
         $bandBlock = "Level assessment (these band verdicts are FIXED — already computed from the exact figures; state each one EXACTLY as given and never re-judge it):\n"
             .implode("\n", $bandLines)."\n";

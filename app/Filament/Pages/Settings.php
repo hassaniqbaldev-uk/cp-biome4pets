@@ -99,6 +99,7 @@ class Settings extends Page implements HasForms
             Setting::SIGNS_OF_STABILITY => Setting::get(Setting::SIGNS_OF_STABILITY, ''),
             ...$this->loadPlansGeneration(),
             ...$this->loadReportText(),
+            ...$this->loadDisplayThresholds(),
             ...$this->loadKlaviyo(),
             ...$this->loadSmtp(),
             'openai_token_rates' => $this->loadTokenRates(),
@@ -153,6 +154,23 @@ class Settings extends Page implements HasForms
         }
 
         return $values;
+    }
+
+    /**
+     * The three DISPLAY-ONLY scientific band thresholds, each pre-filled to its stored
+     * value or the code default (so the field is never blank). These affect the printed
+     * band LABEL only — never classification, plan routing or the nutritionist trigger.
+     */
+    protected function loadDisplayThresholds(): array
+    {
+        return [
+            Setting::DISPLAY_DIVERSITY_HIGH_MIN => Setting::get(Setting::DISPLAY_DIVERSITY_HIGH_MIN)
+                ?: ReportContent::num(ReportContent::DIVERSITY_HIGH_MIN),
+            Setting::DISPLAY_RICHNESS_HEALTHY_MIN => Setting::get(Setting::DISPLAY_RICHNESS_HEALTHY_MIN)
+                ?: ReportContent::num(ReportContent::RICHNESS_HEALTHY_MIN),
+            Setting::HEALTH_INSIGHT_TARGET_TOLERANCE => Setting::get(Setting::HEALTH_INSIGHT_TARGET_TOLERANCE)
+                ?: ReportContent::num(HealthInsightRules::TARGET_TOLERANCE),
+        ];
     }
 
     protected function loadKlaviyo(): array
@@ -552,7 +570,78 @@ class Settings extends Page implements HasForms
                     ->description('The explanatory paragraph shown under each of the six "Microbiome-Driven Health Insights" cards, on both the web report and the PDF. These describe what each insight measures; they do NOT change any score, band or result. Leave a field blank to restore its original wording.')
                     ->collapsible()
                     ->schema(static::healthInsightDescriptionFields()),
+
+                Section::make('Report Display Thresholds')
+                    ->description('DISPLAY BANDS ONLY. These change which band LABEL a report prints for the boundaries below — they do NOT feed the microbiome classification, plan routing or the nutritionist trigger, so they are safe to adjust. (The classification thresholds themselves stay in code.) Leave a field blank to restore its default.')
+                    ->collapsible()
+                    ->collapsed()
+                    ->schema(static::displayThresholdFields()),
             ]);
+    }
+
+    /**
+     * The three display-only band-boundary fields (Tier A of the classification-rules
+     * audit). Each is numeric, range-bounded, and — for the two banded metrics —
+     * guarded so the value can't cross the fixed Low cutoff and invert the bands.
+     * Blank reverts to the code default at render time (the resolvers), never blank.
+     */
+    protected static function displayThresholdFields(): array
+    {
+        $divLow = ReportContent::num(ReportContent::DIVERSITY_LOW_MAX);       // 1.9
+        $richLow = ReportContent::num(ReportContent::RICHNESS_LOW_MAX);        // 400
+        $divDefault = ReportContent::num(ReportContent::DIVERSITY_HIGH_MIN);   // 2.5
+        $richDefault = ReportContent::num(ReportContent::RICHNESS_HEALTHY_MIN); // 650
+        $tolDefault = ReportContent::num(HealthInsightRules::TARGET_TOLERANCE); // 0.25
+
+        return [
+            TextInput::make(Setting::DISPLAY_DIVERSITY_HIGH_MIN)
+                ->label('Diversity: Medium / High band boundary')
+                ->numeric()
+                ->minValue(0)
+                ->maxValue(5)
+                ->step('0.01')
+                ->default($divDefault)
+                // Ordering guard: must stay ABOVE the fixed Low cutoff, else the bands invert.
+                ->rule(static function (): \Closure {
+                    return static function (string $attribute, $value, \Closure $fail): void {
+                        if (blank($value) || ! is_numeric($value)) {
+                            return;
+                        }
+                        if ((float) $value <= ReportContent::DIVERSITY_LOW_MAX) {
+                            $fail('Must be above the Low cutoff ('.ReportContent::num(ReportContent::DIVERSITY_LOW_MAX).') so the display bands cannot invert.');
+                        }
+                    };
+                })
+                ->helperText('Diversity scores at/below this show "Medium"; above it show "High". DISPLAY LABEL ONLY — does not affect classification or plan routing. Must be above the fixed Low cutoff ('.$divLow.'). Default '.$divDefault.'. Blank restores the default.'),
+
+            TextInput::make(Setting::DISPLAY_RICHNESS_HEALTHY_MIN)
+                ->label('Species richness: Moderate / Healthy band boundary')
+                ->numeric()
+                ->minValue(0)
+                ->maxValue(5000)
+                ->step('1')
+                ->default($richDefault)
+                ->rule(static function (): \Closure {
+                    return static function (string $attribute, $value, \Closure $fail): void {
+                        if (blank($value) || ! is_numeric($value)) {
+                            return;
+                        }
+                        if ((float) $value <= ReportContent::RICHNESS_LOW_MAX) {
+                            $fail('Must be above the Low cutoff ('.ReportContent::num(ReportContent::RICHNESS_LOW_MAX).') so the display bands cannot invert.');
+                        }
+                    };
+                })
+                ->helperText('Richness counts at/below this show "Moderate"; above it show "Healthy". DISPLAY LABEL ONLY — does not affect classification or plan routing. Must be above the fixed Low cutoff ('.$richLow.'). Default '.$richDefault.'. Blank restores the default.'),
+
+            TextInput::make(Setting::HEALTH_INSIGHT_TARGET_TOLERANCE)
+                ->label('Health insight: point-target tolerance')
+                ->numeric()
+                ->minValue(0)
+                ->maxValue(2)
+                ->step('0.01')
+                ->default($tolDefault)
+                ->helperText('The ± window around a point target that still counts as "Target" for the two point-target health insights (Skin & Allergy, Behaviour & Mood). DISPLAY LABEL ONLY — does not affect classification or plan routing. Default '.$tolDefault.'. Blank restores the default.'),
+        ];
     }
 
     /**
@@ -1109,6 +1198,14 @@ class Settings extends Page implements HasForms
             Setting::set($key, $data[$key] ?? '');
         }
 
+        // Display-only band thresholds — stored verbatim; the form validated them,
+        // and the resolvers (ReportContent::diversityHighMin / richnessHealthyMin,
+        // HealthInsightRules::targetTolerance) fall back to the code constant for any
+        // blank/out-of-range value, so wiping one safely restores today's behaviour.
+        Setting::set(Setting::DISPLAY_DIVERSITY_HIGH_MIN, $data[Setting::DISPLAY_DIVERSITY_HIGH_MIN] ?? '');
+        Setting::set(Setting::DISPLAY_RICHNESS_HEALTHY_MIN, $data[Setting::DISPLAY_RICHNESS_HEALTHY_MIN] ?? '');
+        Setting::set(Setting::HEALTH_INSIGHT_TARGET_TOLERANCE, $data[Setting::HEALTH_INSIGHT_TARGET_TOLERANCE] ?? '');
+
         // ── Klaviyo ──────────────────────────────────────────────────────────
         // Only overwrite the key when a new value was entered (same guard as the
         // OpenAI key) so saving never wipes the stored secret.
@@ -1154,6 +1251,7 @@ class Settings extends Page implements HasForms
             Setting::SIGNS_OF_STABILITY => Setting::get(Setting::SIGNS_OF_STABILITY, ''),
             ...$this->loadPlansGeneration(),
             ...$this->loadReportText(),
+            ...$this->loadDisplayThresholds(),
             ...$this->loadKlaviyo(),
             ...$this->loadSmtp(),
             'openai_token_rates' => $this->loadTokenRates(),

@@ -2,6 +2,8 @@
 
 namespace App\Support;
 
+use App\Models\Setting;
+
 /**
  * STAGE 2 of the deterministic health-insights rework: the RULES ENGINE.
  *
@@ -249,6 +251,29 @@ class HealthInsightRules
     }
 
     /**
+     * The admin-editable point-target tolerance (Settings value when a sane number,
+     * else the TARGET_TOLERANCE constant). DISPLAY-ONLY: it widens/narrows the
+     * on-target window for the two 'target' insights, changing only which BAND LABEL
+     * they show — it does not feed classification, plan routing or the nutritionist
+     * trigger. Blank/unset/out-of-range → the constant, so behaviour is IDENTICAL to
+     * today until edited. The 0–2 guard mirrors the Settings validation so the read
+     * path is defensive on its own.
+     */
+    public static function targetTolerance(): float
+    {
+        $raw = Setting::get(Setting::HEALTH_INSIGHT_TARGET_TOLERANCE);
+
+        if (is_numeric($raw)) {
+            $value = (float) $raw;
+            if ($value >= 0.0 && $value <= 2.0) {
+                return $value;
+            }
+        }
+
+        return self::TARGET_TOLERANCE;
+    }
+
+    /**
      * The Settings key holding the admin-editable description for one insight, e.g.
      * "health_insight_desc_score_gut_wall". Derived from the field so the six settings
      * and the six insights can never drift apart (add an insight → it gets a field).
@@ -361,7 +386,7 @@ class HealthInsightRules
             return true;
         }
         if ($when === 'target') {
-            return abs($value - $target) <= self::TARGET_TOLERANCE;
+            return abs($value - $target) <= self::targetTolerance();
         }
         if (isset($when['gt'])) {
             return $value > $when['gt'];

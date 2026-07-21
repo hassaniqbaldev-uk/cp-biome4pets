@@ -260,13 +260,53 @@ class ReportContent
 
     public const TONE_GOOD = 'good';
 
+    /**
+     * DISPLAY-ONLY band-boundary resolvers. Each returns the admin-editable Settings
+     * value when it is a sane number, otherwise the code constant above — so the
+     * output is IDENTICAL to today until someone edits it, and a malformed/inverted
+     * stored value can NEVER invert the bands (it falls back to the constant). These
+     * feed only the printed band LABEL, the legend and the gauge scale; classify()
+     * and its cutoffs are untouched, so nothing downstream can move.
+     *
+     * The sane-range guard mirrors the Settings validation (diversity high must sit
+     * above the Low cutoff and ≤ 5; richness healthy above the Low cutoff and ≤ 5000)
+     * so the read path is defensive on its own even if a bad value ever reaches it.
+     */
+    public static function diversityHighMin(): float
+    {
+        $raw = Setting::get(Setting::DISPLAY_DIVERSITY_HIGH_MIN);
+
+        if (is_numeric($raw)) {
+            $value = (float) $raw;
+            if ($value > self::DIVERSITY_LOW_MAX && $value <= 5.0) {
+                return $value;
+            }
+        }
+
+        return self::DIVERSITY_HIGH_MIN;
+    }
+
+    public static function richnessHealthyMin(): float
+    {
+        $raw = Setting::get(Setting::DISPLAY_RICHNESS_HEALTHY_MIN);
+
+        if (is_numeric($raw)) {
+            $value = (float) $raw;
+            if ($value > self::RICHNESS_LOW_MAX && $value <= 5000.0) {
+                return $value;
+            }
+        }
+
+        return self::RICHNESS_HEALTHY_MIN;
+    }
+
     /** Diversity band (label + tone) for a score. */
     public static function diversityBand(float $score): array
     {
         if ($score < self::DIVERSITY_LOW_MAX) {
             return ['label' => 'Low', 'tone' => self::TONE_BAD];
         }
-        if ($score <= self::DIVERSITY_HIGH_MIN) {
+        if ($score <= self::diversityHighMin()) {
             return ['label' => 'Medium', 'tone' => self::TONE_WARN];
         }
 
@@ -279,7 +319,7 @@ class ReportContent
         if ($richness < self::RICHNESS_LOW_MAX) {
             return ['label' => 'Low', 'tone' => self::TONE_BAD];
         }
-        if ($richness <= self::RICHNESS_HEALTHY_MIN) {
+        if ($richness <= self::richnessHealthyMin()) {
             return ['label' => 'Moderate', 'tone' => self::TONE_WARN];
         }
 
@@ -343,8 +383,8 @@ class ReportContent
     {
         return [
             ['label' => 'Low', 'tone' => self::TONE_BAD, 'range' => '< '.self::num(self::DIVERSITY_LOW_MAX)],
-            ['label' => 'Medium', 'tone' => self::TONE_WARN, 'range' => self::num(self::DIVERSITY_LOW_MAX).' - '.self::num(self::DIVERSITY_HIGH_MIN)],
-            ['label' => 'High', 'tone' => self::TONE_GOOD, 'range' => '> '.self::num(self::DIVERSITY_HIGH_MIN)],
+            ['label' => 'Medium', 'tone' => self::TONE_WARN, 'range' => self::num(self::DIVERSITY_LOW_MAX).' - '.self::num(self::diversityHighMin())],
+            ['label' => 'High', 'tone' => self::TONE_GOOD, 'range' => '> '.self::num(self::diversityHighMin())],
         ];
     }
 
@@ -353,8 +393,8 @@ class ReportContent
     {
         return [
             ['label' => 'Low', 'tone' => self::TONE_BAD, 'range' => '< '.self::num(self::RICHNESS_LOW_MAX)],
-            ['label' => 'Moderate', 'tone' => self::TONE_WARN, 'range' => self::num(self::RICHNESS_LOW_MAX).' - '.self::num(self::RICHNESS_HEALTHY_MIN)],
-            ['label' => 'Healthy', 'tone' => self::TONE_GOOD, 'range' => '> '.self::num(self::RICHNESS_HEALTHY_MIN)],
+            ['label' => 'Moderate', 'tone' => self::TONE_WARN, 'range' => self::num(self::RICHNESS_LOW_MAX).' - '.self::num(self::richnessHealthyMin())],
+            ['label' => 'Healthy', 'tone' => self::TONE_GOOD, 'range' => '> '.self::num(self::richnessHealthyMin())],
         ];
     }
 

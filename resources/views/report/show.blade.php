@@ -367,7 +367,7 @@
                             </div>
                         </div>
                         {{-- Band labels --}}
-                        @php $dLow = \App\Support\ReportContent::num(\App\Support\ReportContent::DIVERSITY_LOW_MAX); $dHigh = \App\Support\ReportContent::num(\App\Support\ReportContent::DIVERSITY_HIGH_MIN); @endphp
+                        @php $dLow = \App\Support\ReportContent::num(\App\Support\ReportContent::DIVERSITY_LOW_MAX); $dHigh = \App\Support\ReportContent::num(\App\Support\ReportContent::diversityHighMin()); @endphp
                         <div class="slider-band-labels flex justify-between mt-2.5 text-sm text-gray-500">
                             <span class="text-red-600 font-bold">Low (&lt;{{ $dLow }})</span>
                             <span class="text-amber-600 font-bold">Medium ({{ $dLow }}–{{ $dHigh }})</span>
