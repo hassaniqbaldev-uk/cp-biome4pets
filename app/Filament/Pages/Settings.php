@@ -126,6 +126,9 @@ class Settings extends Page implements HasForms
             // Blank ⇒ default ON (sensible default for the master switch).
             Setting::SUBSCRIPTIONS_ENABLED => blank($subsRaw) ? true : filter_var($subsRaw, FILTER_VALIDATE_BOOLEAN),
             Setting::CURRENCY => Setting::get(Setting::CURRENCY) ?: 'GBP',
+            // Flat subscription loyalty discount — prefilled to the resolved rate
+            // (stored value when valid, else the code default 15) so it's never blank.
+            Setting::SUBSCRIPTION_DISCOUNT_PERCENT => Setting::subscriptionDiscountPercent(),
             Setting::REVIEW_RATING => Setting::get(Setting::REVIEW_RATING) ?: Setting::REVIEW_RATING_DEFAULT,
             Setting::REVIEW_COUNT => Setting::get(Setting::REVIEW_COUNT) ?: Setting::REVIEW_COUNT_DEFAULT,
         ];
@@ -515,6 +518,19 @@ class Settings extends Page implements HasForms
                     ->maxLength(8)
                     ->default('GBP')
                     ->helperText('Display currency code. Stored for display use; blank falls back to "GBP".'),
+                Section::make('Subscription pricing')
+                    ->description('The flat subscription loyalty discount. One rate, applied everywhere.')
+                    ->schema([
+                        TextInput::make(Setting::SUBSCRIPTION_DISCOUNT_PERCENT)
+                            ->label('Subscription loyalty discount')
+                            ->numeric()
+                            ->suffix('% off')
+                            ->minValue(0)
+                            ->maxValue(100)
+                            ->step('1')
+                            ->default(Setting::SUBSCRIPTION_DISCOUNT_PERCENT_DEFAULT)
+                            ->helperText('The flat subscription loyalty discount applied to every INCLUDED subscription product on every plan (e.g. Gut Renew £130 → £110.50, the £35 products → £29.75), and shown in the loyalty note. Optional add-ons (e.g. the retest kit) keep their own per-product discount and are not affected. Numeric 0–100; blank falls back to the default ('.Setting::SUBSCRIPTION_DISCOUNT_PERCENT_DEFAULT.'%).'),
+                    ]),
                 Section::make('Reviews')
                     ->description('Social-proof figures shown on the subscribe page. Blank falls back to the defaults.')
                     ->schema([
@@ -1183,6 +1199,9 @@ class Settings extends Page implements HasForms
         Setting::set(Setting::DEFAULT_DOSE, $data[Setting::DEFAULT_DOSE] ?? '');
         Setting::set(Setting::SUBSCRIPTIONS_ENABLED, ! empty($data[Setting::SUBSCRIPTIONS_ENABLED]) ? '1' : '0');
         Setting::set(Setting::CURRENCY, $data[Setting::CURRENCY] ?? '');
+        // Flat subscription loyalty discount — stored verbatim; the resolver falls
+        // back to the code default (15) for any blank/out-of-range value.
+        Setting::set(Setting::SUBSCRIPTION_DISCOUNT_PERCENT, $data[Setting::SUBSCRIPTION_DISCOUNT_PERCENT] ?? '');
         Setting::set(Setting::REVIEW_RATING, $data[Setting::REVIEW_RATING] ?? '');
         Setting::set(Setting::REVIEW_COUNT, $data[Setting::REVIEW_COUNT] ?? '');
 

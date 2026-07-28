@@ -798,6 +798,17 @@
                                             // No discount configured ⇒ no line (the plain price above still
                                             // shows), so a product can never display a price that isn't its own.
                                             $subDiscounted = $product->inclusion === 'optional' ? $catalog?->discountedPrice() : null;
+
+                                            // INCLUDED subscription products get the flat, subscription-wide
+                                            // loyalty rate (Setting::subscriptionDiscountPercent, default 15%),
+                                            // computed PER PRODUCT from its own price so each card shows its own
+                                            // figure (e.g. Gut Renew £130 → £110.50; £35 products → £29.75) —
+                                            // not the whole-plan flat string. Optional add-ons keep their OWN
+                                            // per-product rate above (unchanged).
+                                            $subRate = \App\Models\Setting::subscriptionDiscountPercent();
+                                            $includedDiscounted = $product->inclusion !== 'optional'
+                                                ? $catalog?->discountedPriceAt($subRate)
+                                                : null;
                                         @endphp
                                         <div class="lift plan-product" style="display:flex; flex-wrap:wrap; gap:20px; padding:20px; border:1px solid #e3e9ef; border-radius:14px; background:#fff; box-shadow:0 1px 2px rgba(48,28,71,.06),0 8px 24px rgba(48,28,71,.06);">
                                             @if($catalog?->image_path)
@@ -815,14 +826,20 @@
                                                 <h4 class="text-navy" style="font-weight:600; font-size:18px; margin:0;">{{ $catalog?->name }}</h4>
                                                 @php
                                                     // Plan-included products (NOT optional add-ons) are covered by the
-                                                    // monthly subscription. The "on the plan" price is the WHOLE-plan
-                                                    // monthly figure ($subPrice), never a per-product price, so it only
-                                                    // shows for subscription-included items when a subscription exists.
+                                                    // monthly subscription. Each included product now shows its OWN
+                                                    // discounted "on the plan" price (the flat loyalty rate applied
+                                                    // per product — $includedDiscounted), not the whole-plan string.
                                                     $isPlanIncluded = $product->inclusion !== 'optional';
                                                 @endphp
                                                 @if(! is_null($catalog?->price))
-                                                    @if($isPlanIncluded && $subAvailable && filled($subPrice))
-                                                        <div style="font-size:14px; color:#55505A; margin:2px 0 12px; line-height:1.5;"><b style="color:#55505A;">£{{ number_format($catalog->price, 2) }}</b> individually <span style="color:#4654A4; font-weight:600;">· {{ $subPrice }} on the plan{{ $savingLine ? ' ('.$savingLine.')' : '' }}</span></div>
+                                                    @if($isPlanIncluded && $subAvailable && ! is_null($includedDiscounted))
+                                                        {{-- Included subscription product: the ORIGINAL single-line
+                                                             "£X individually · £Y / month on the subscription plan"
+                                                             format — ONLY the "on the plan" figure changes, now showing
+                                                             this product's OWN discounted price (catalog price × the flat
+                                                             loyalty rate) instead of the plan's flat $subPrice string.
+                                                             No struck price / "% off" note (that's the optional path). --}}
+                                                        <div style="font-size:14px; color:#55505A; margin:2px 0 12px; line-height:1.5;"><b style="color:#55505A;">£{{ number_format($catalog->price, 2) }}</b> individually <span style="color:#4654A4; font-weight:600;">· £{{ number_format($includedDiscounted, 2) }} / month on the subscription plan</span></div>
                                                     @elseif(! is_null($subDiscounted))
                                                         {{-- Optional add-on with a subscription discount (e.g. the retest
                                                              kit): show the DISCOUNTED price prominently with the full price

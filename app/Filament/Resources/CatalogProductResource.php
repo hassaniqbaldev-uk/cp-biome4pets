@@ -47,14 +47,20 @@ class CatalogProductResource extends Resource
                     ->numeric()
                     ->prefix('£')
                     ->minValue(0)
-                    ->nullable()
-                    ->maxLength(20),
+                    ->maxValue(100000)
+                    // 2-dp currency step + a decimal:0,2 rule. Fixes the bug where the
+                    // old maxLength(20) counted a float tail as "digits" and rejected
+                    // clean values like 130.00 / 110.50 while whole numbers saved.
+                    ->step('0.01')
+                    ->rule('decimal:0,2')
+                    ->nullable(),
                 Forms\Components\TextInput::make('subscription_discount_percent')
                     ->label('Subscription discount')
                     ->numeric()
                     ->suffix('% off')
                     ->minValue(1)
                     ->maxValue(100)
+                    ->step('1')
                     ->nullable()
                     ->helperText('Optional. When set, optional add-ons of this product show "£price, or £discounted with the 6-month subscription discount (n% off)". Leave blank to show the plain price with no discount line.'),
                 Forms\Components\Toggle::make('is_active')

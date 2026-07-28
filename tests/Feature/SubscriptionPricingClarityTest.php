@@ -15,10 +15,13 @@ use Tests\TestCase;
 
 /**
  * The subscription pricing relationship is shown clearly and consistently: a
- * plan-INCLUDED product shows its individual price AND the whole-plan monthly
- * price ("£35.00 individually · £29.75 / month on the plan (15% off)"), while an
- * OPTIONAL add-on (e.g. the retest kit) keeps its OWN pricing and is NEVER tagged
- * with the £29.75/mo plan line. All values are derived from the frozen snapshot.
+ * plan-INCLUDED product keeps the original single-line format ("£35.00 individually ·
+ * £29.75 / month on the subscription plan"), where only the "on the plan" figure is
+ * now the product's OWN discounted price — the flat loyalty rate
+ * (Setting::subscriptionDiscountPercent, default 15%) applied to its catalog price
+ * (£35 → £29.75), NOT the whole-plan flat string. An OPTIONAL add-on (e.g. the retest
+ * kit) keeps its OWN per-product discount (30%) and struck-price presentation. Price
+ * and rate are read live off the catalog, so the figures are always current.
  */
 class SubscriptionPricingClarityTest extends TestCase
 {
@@ -73,19 +76,21 @@ class SubscriptionPricingClarityTest extends TestCase
         return $report->fresh()->load(['client', 'pet.client', 'test', 'plan', 'catalogProducts', 'steps.products.catalogProduct']);
     }
 
-    public function test_plan_included_product_shows_individual_and_plan_price(): void
+    public function test_plan_included_product_shows_its_own_discounted_price(): void
     {
         $amr = CatalogProduct::create(['name' => 'PetBiome AMR', 'price' => 35, 'is_active' => true]);
         $report = $this->makeReport($amr, 'included', includes: [['name' => 'PetBiome AMR', 'price' => 35]]);
 
         $web = view('report.show', ['report' => $report])->render();
 
-        // The combined, derived line on the product card.
+        // Original single-line format, only the "on the plan" figure changed to the
+        // product's OWN discounted price (£35 × 85% = £29.75) — no struck price/% note.
         $this->assertStringContainsString('£35.00 individually', $web);
-        $this->assertStringContainsString('£29.75 / month on the plan (15% off)', $web);
+        $this->assertStringContainsString('£29.75 / month on the subscription plan', $web);
+        $this->assertStringNotContainsString('normally £', $web);
+        $this->assertStringNotContainsString('subscription loyalty discount', $web);
 
-        // The subscribe-box list clarifies the individual prices roll up into one sub.
-        $this->assertStringContainsString('£35.00 individually', $web);
+        // The subscribe box still rolls the individual prices up into the one monthly sub.
         $this->assertStringContainsString('All included in the', $web);
         $this->assertStringContainsString('£29.75 / month', $web);
         $this->assertStringContainsString('15% off vs buying each separately', $web);

@@ -155,6 +155,21 @@ class Setting extends Model
     public const DIET_REVIEW_TEXT_DEFAULT = "We recommend speaking with one of our nutritionists, as your dog's diet may be contributing to their microbiome imbalance. Gut health and nutrition go hand in hand, and by reviewing your dog's microbiome results alongside their current diet, our nutritionists can identify foods and feeding strategies that better support a healthy, balanced microbiome and help optimise long-term gut health.";
 
     /**
+     * The flat, subscription-wide loyalty discount (whole percent) applied to EVERY
+     * included subscription product on EVERY plan. Single source of truth for the
+     * per-product "on the plan" price on report cards AND the customer-facing loyalty
+     * note — so the two can never disagree. Blank/unset falls back to the code default
+     * (15), so behaviour is IDENTICAL to today until edited. Read via
+     * subscriptionDiscountPercent(). NB: this is the GLOBAL rate; a product may still
+     * carry its OWN catalog_products.subscription_discount_percent for optional add-ons
+     * (e.g. the retest kit at 30%), which is independent of and takes precedence in the
+     * optional-add-on path.
+     */
+    public const SUBSCRIPTION_DISCOUNT_PERCENT = 'subscription_discount_percent';
+
+    public const SUBSCRIPTION_DISCOUNT_PERCENT_DEFAULT = 15;
+
+    /**
      * DISPLAY-ONLY scientific band boundaries (Tier A of the classification-rules
      * audit). These change only what BAND LABEL a report prints — they do NOT feed
      * classify(), plan routing or the nutritionist trigger, so editing them cannot
@@ -314,6 +329,25 @@ class Setting extends Model
         return blank($raw)
             ? self::UNWELL_NO_TRIGGER_USES_FALLBACK_DEFAULT
             : filter_var($raw, FILTER_VALIDATE_BOOLEAN);
+    }
+
+    /**
+     * The flat subscription loyalty discount as a numeric percent. Blank/unset or an
+     * out-of-range value (must be 0–100) falls back to the code default (15), so an
+     * unconfigured install already yields the intended figures.
+     */
+    public static function subscriptionDiscountPercent(): float
+    {
+        $raw = static::get(self::SUBSCRIPTION_DISCOUNT_PERCENT);
+
+        if (is_numeric($raw)) {
+            $value = (float) $raw;
+            if ($value >= 0.0 && $value <= 100.0) {
+                return $value;
+            }
+        }
+
+        return (float) self::SUBSCRIPTION_DISCOUNT_PERCENT_DEFAULT;
     }
 
     /** The configured display currency code (blank falls back to GBP). */

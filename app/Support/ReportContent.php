@@ -175,10 +175,17 @@ class ReportContent
         return self::reportText(Setting::DIET_REVIEW_TEXT, Setting::DIET_REVIEW_TEXT_DEFAULT);
     }
 
-    /** The loyalty/subscription discount note shown beside the link. */
+    /**
+     * The loyalty/subscription discount note shown beside the link. The percentage is
+     * read from the SAME global setting that drives the per-product discounted prices
+     * (Setting::subscriptionDiscountPercent, default 15%), so this copy can never
+     * disagree with the computed figures again (it used to hardcode "10%").
+     */
     public static function dietReviewLoyaltyNote(): string
     {
-        return 'If you are on a subscription or part of the loyalty programme, you get 10% off.';
+        $rate = self::num(Setting::subscriptionDiscountPercent());
+
+        return "If you are on a subscription or part of the loyalty programme, you get {$rate}% off.";
     }
 
     /** Call-to-action label for the diet-review link. */

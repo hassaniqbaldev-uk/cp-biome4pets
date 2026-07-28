@@ -45,6 +45,22 @@ class CatalogProduct extends Model
             && $this->subscription_discount_percent > 0;
     }
 
+    /**
+     * The price after an ARBITRARY subscription discount rate (whole percent) — used
+     * for the flat, subscription-wide loyalty rate applied to INCLUDED products
+     * (Setting::subscriptionDiscountPercent). Returns null when there is no price or
+     * the rate isn't positive, so the caller can fall back to the plain price. Same
+     * rounding (whole pence) as discountedPrice(); e.g. £130 @ 15% → £110.50.
+     */
+    public function discountedPriceAt(float $percent): ?float
+    {
+        if (is_null($this->price) || $percent <= 0) {
+            return null;
+        }
+
+        return round((float) $this->price * (100 - $percent) / 100, 2);
+    }
+
     public function triggerEntries(): HasMany
     {
         return $this->hasMany(CatalogProductTrigger::class);
