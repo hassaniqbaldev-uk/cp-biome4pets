@@ -52,6 +52,9 @@ class Report extends Model
         'vet_summary',
         'goal',
         'recommended_actions',
+        // AI-generated "Personalised Diet Guidance" boxes (snapshot, like ai_*).
+        'ai_diet_include',
+        'ai_diet_avoid',
         'plan_id',
         'plan_intro',
         'subscription_snapshot',

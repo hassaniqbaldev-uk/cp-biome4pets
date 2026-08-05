@@ -114,8 +114,10 @@ class AiUsageTrackingTest extends TestCase
 
         $this->assertStringContainsString('$this->recordUsage(AiUsageEvent::TYPE_INTERPRETATION, $model, $decoded[\'usage\'] ?? null, $reportId)', $src);
         $this->assertStringContainsString('$this->recordUsage(AiUsageEvent::TYPE_PLAN_COPY, $model, $decoded[\'usage\'] ?? null, $reportId)', $src);
-        // Only recorded on a non-error response (skips failed calls).
-        $this->assertSame(2, substr_count($src, "if (! isset(\$decoded['error'])) {\n                \$this->recordUsage("));
+        // Only recorded on a non-error response (skips failed calls). THREE generation
+        // methods now wire it: interpretations + diet guidance (both TYPE_INTERPRETATION)
+        // and plan copy (TYPE_PLAN_COPY).
+        $this->assertSame(3, substr_count($src, "if (! isset(\$decoded['error'])) {\n                \$this->recordUsage("));
         // Logging is kept (tracking is additive, not a replacement).
         $this->assertStringContainsString("Log::info('OpenAI raw API response'", $src);
         $this->assertStringContainsString("Log::info('Plan copy generation: raw API response'", $src);

@@ -739,4 +739,244 @@ PROMPT;
 
         return $scaffold;
     }
+
+    /**
+     * System instruction for the diet-guidance call: STRICT JSON, exactly two string
+     * keys. PLAIN TEXT (no HTML/markdown/fences) so the render layer can escape it and
+     * there is no XSS surface. One food per line as "Food: reason" (a colon, not a
+     * dash, matching the report's no-dash style).
+     */
+    public const DIET_GUIDANCE_SYSTEM_PROMPT = 'You are a veterinary microbiome and nutrition expert writing for pet owners. Return STRICT JSON only: a single object with EXACTLY two keys, "include" and "avoid". Each value is a STRING of warm, client-friendly PLAIN TEXT (no HTML, no markdown, no code fences, no dashes): a short one-sentence intro, then one food per line written as "Food: brief microbiome-linked reason". Across the two sections together, list between 8 and 12 foods. Base every item on this dog\'s actual findings and the guidance rules provided. Include no keys other than "include" and "avoid". Return ONLY the JSON object.';
+
+    /**
+     * Generate the two "Personalised Diet Guidance" boxes ("Foods to Include" /
+     * "Foods to Avoid") from this dog's findings. Mirrors generatePlanCopy() /
+     * generateReportInterpretations() exactly — same key resolution, resolveModel(),
+     * requestChatCompletion() HTTP style, fence-stripping, PII-safe logging and usage
+     * tracking. On ANY failure or missing key it returns ['include' => '', 'avoid' => '']
+     * and sets lastErrorCode; it NEVER throws, so the rest of report generation is
+     * unaffected. Both returned values are guaranteed strings (non-strings are coerced
+     * to empty and logged), so the render layer never sees junk.
+     *
+     * The findings inputs are the SAME arrays the interpretation call receives
+     * ($phylumTotals, $diversityScore, $petContext, $deterministic) — no parallel
+     * findings derivation. The editable prompt + rules come from Settings.
+     *
+     * @return array{include: string, avoid: string}
+     */
+    public function generateDietGuidance(array $phylumTotals, float $diversityScore, array $petContext = [], array $deterministic = [], ?int $reportId = null): array
+    {
+        $this->lastErrorCode = null;
+        $empty = ['include' => '', 'avoid' => ''];
+
+        $apiKey = Setting::getDecrypted(Setting::OPENAI_API_KEY);
+        if (empty($apiKey)) {
+            $apiKey = config('services.openai.api_key', env('OPENAI_API_KEY'));
+        }
+
+        if (empty($apiKey)) {
+            Log::error('Diet guidance generation: OpenAI API key is not configured.');
+            $this->lastErrorCode = 'api_failed';
+
+            return $empty;
+        }
+
+        // Same single-source model as the other calls (guarded → gpt-4o default).
+        $model = self::resolveModel();
+        // Reasonable creativity for descriptive food copy; kept simple (no Setting).
+        $temperature = 0.5;
+
+        $userMessage = $this->buildDietGuidancePrompt($phylumTotals, $diversityScore, $petContext, $deterministic);
+
+        $payload = json_encode([
+            'model' => $model,
+            'messages' => [
+                ['role' => 'system', 'content' => self::DIET_GUIDANCE_SYSTEM_PROMPT],
+                ['role' => 'user', 'content' => $userMessage],
+            ],
+            'temperature' => $temperature,
+        ]);
+
+        try {
+            $response = $this->requestChatCompletion($apiKey, $payload);
+
+            if ($response === false) {
+                Log::error('Diet guidance generation: OpenAI API request failed.');
+                $this->lastErrorCode = 'api_failed';
+
+                return $empty;
+            }
+
+            $decoded = json_decode($response, true);
+
+            // PII-safe: log only non-identifying metadata, never the body/content.
+            Log::info('Diet guidance generation: raw API response', [
+                'has_choices' => isset($decoded['choices']),
+                'usage' => $decoded['usage'] ?? null,
+                'error_type' => $decoded['error']['type'] ?? null,
+            ]);
+
+            if (! isset($decoded['error'])) {
+                $this->recordUsage(AiUsageEvent::TYPE_INTERPRETATION, $model, $decoded['usage'] ?? null, $reportId);
+            }
+
+            if (isset($decoded['error'])) {
+                Log::error('Diet guidance generation: OpenAI API returned error.', [
+                    'error_type' => $decoded['error']['type'] ?? null,
+                    'error_code' => $decoded['error']['code'] ?? null,
+                ]);
+                $this->lastErrorCode = 'api_failed';
+
+                return $empty;
+            }
+
+            if (! isset($decoded['choices'][0]['message']['content'])) {
+                Log::error('Diet guidance generation: unexpected OpenAI response structure.', ['response_length' => strlen($response)]);
+                $this->lastErrorCode = 'api_failed';
+
+                return $empty;
+            }
+
+            $content = trim($decoded['choices'][0]['message']['content']);
+
+            // Strip markdown code fences if present.
+            if (str_starts_with($content, '```')) {
+                $content = preg_replace('/^```(?:json)?\s*/', '', $content);
+                $content = preg_replace('/\s*```$/', '', $content);
+            }
+
+            $parsed = json_decode($content, true);
+
+            if (! is_array($parsed)) {
+                Log::error('Diet guidance generation: failed to parse response as JSON.', ['content_length' => strlen($content)]);
+                $this->lastErrorCode = 'json_parse_failed';
+
+                return $empty;
+            }
+
+            // VALIDATION: both keys must be present and STRINGS; coerce anything else
+            // to empty (never render junk).
+            $include = $parsed['include'] ?? '';
+            $avoid = $parsed['avoid'] ?? '';
+            if (! is_string($include)) {
+                Log::warning('Diet guidance generation: "include" was not a string; coerced to empty.');
+                $include = '';
+            }
+            if (! is_string($avoid)) {
+                Log::warning('Diet guidance generation: "avoid" was not a string; coerced to empty.');
+                $avoid = '';
+            }
+
+            return ['include' => trim($include), 'avoid' => trim($avoid)];
+        } catch (\Throwable $e) {
+            Log::error('Diet guidance generation error: '.$e->getMessage());
+            $this->lastErrorCode = 'api_failed';
+
+            return $empty;
+        }
+    }
+
+    /**
+     * Build the diet-guidance USER message: the editable prompt (Setting::
+     * dietGuidancePrompt) + the finding→food rules (Setting::dietGuidanceRules) as a
+     * readable guidance list + THIS dog's findings (the SAME inputs the interpretation
+     * call receives — phylum totals, diversity, richness, dysbiosis, classification,
+     * notable taxa, genus insight taxa, plus the pet's diet + health notes from the
+     * shared petContext mapper). Public so tests can assert its contents without HTTP.
+     */
+    public function buildDietGuidancePrompt(array $phylumTotals, float $diversityScore, array $petContext = [], array $deterministic = []): string
+    {
+        $phylumLines = [];
+        foreach ($phylumTotals as $name => $pct) {
+            $phylumLines[] = "- {$name}: {$pct}%";
+        }
+        $phylumList = implode("\n", $phylumLines);
+
+        $findings = ["Shannon diversity index: {$diversityScore}"];
+        $richness = $deterministic['species_richness'] ?? null;
+        if ($richness !== null && $richness !== '') {
+            $findings[] = "Species richness: {$richness}";
+        }
+        $dysbiosis = $deterministic['dysbiosis_score'] ?? null;
+        if ($dysbiosis !== null && $dysbiosis !== '') {
+            $findings[] = "Dysbiosis score: {$dysbiosis}";
+        }
+        $classification = trim((string) ($deterministic['microbiome_classification'] ?? ''));
+        if ($classification !== '') {
+            $findings[] = "Overall microbiome classification: {$classification}";
+        }
+        $findingsBlock = implode("\n", $findings);
+
+        // Notable taxa (top_taxa) — the specific bacteria detected in this sample.
+        $taxaBlock = '';
+        $topTaxa = $deterministic['top_taxa'] ?? [];
+        if (is_array($topTaxa) && $topTaxa !== []) {
+            $taxaLines = [];
+            foreach ($topTaxa as $t) {
+                if (! is_array($t)) {
+                    continue;
+                }
+                $name = trim((string) ($t['name'] ?? ''));
+                if ($name === '') {
+                    continue;
+                }
+                $pct = $t['pct'] ?? null;
+                $taxaLines[] = '- '.$name.($pct !== null ? ": {$pct}%" : '');
+            }
+            if ($taxaLines !== []) {
+                $taxaBlock = "\nNotable taxa detected in this sample:\n".implode("\n", $taxaLines)."\n";
+            }
+        }
+
+        // Genus insight taxa (%), same source the deterministic insights use.
+        $insightBlock = '';
+        $insightTaxa = $deterministic['insight_taxa'] ?? [];
+        if (is_array($insightTaxa) && $insightTaxa !== []) {
+            $insightLines = [];
+            foreach ($insightTaxa as $genus => $pct) {
+                if (! is_numeric($pct)) {
+                    continue;
+                }
+                $insightLines[] = "- {$genus}: {$pct}%";
+            }
+            if ($insightLines !== []) {
+                $insightBlock = "\nGenus-level markers:\n".implode("\n", $insightLines)."\n";
+            }
+        }
+
+        // Pet diet + owner health notes (from the shared petContext mapper).
+        $petLines = [];
+        $diet = trim((string) ($petContext['diet'] ?? ''));
+        if ($diet !== '') {
+            $petLines[] = "Current diet: {$diet}";
+        }
+        $notes = trim((string) ($petContext['health_notes'] ?? ''));
+        if ($notes !== '') {
+            $petLines[] = "Owner-reported health notes (context only, not clinical fact): {$notes}";
+        }
+        $petBlock = $petLines === [] ? '' : "\n".implode("\n", $petLines)."\n";
+
+        // Editable finding→food rules (Settings) as guidance.
+        $ruleLines = [];
+        foreach (Setting::dietGuidanceRules() as $rule) {
+            $ruleLines[] = "- {$rule['finding']} => {$rule['recommend']} ({$rule['reason']})";
+        }
+        $rulesBlock = implode("\n", $ruleLines);
+
+        $editablePrompt = Setting::dietGuidancePrompt();
+
+        return <<<PROMPT
+{$editablePrompt}
+
+FINDING TO RECOMMENDATION RULES (use as guidance where this dog's findings match; interpret sensibly, not mechanically):
+{$rulesBlock}
+
+THIS DOG'S MICROBIOME FINDINGS:
+Phylum percentages:
+{$phylumList}
+{$findingsBlock}
+{$taxaBlock}{$insightBlock}{$petBlock}
+Return ONLY the JSON object with exactly the keys "include" and "avoid".
+PROMPT;
+    }
 }

@@ -56,14 +56,35 @@ class ReportGeneration
         // microbiome_classification so the prose is grounded in the SAME findings
         // the badge shows (it was previously blind to depletion). Computation is
         // unchanged — these values are passed through as fixed facts, read-only.
-        $service = new OpenAiService;
+        $ctx = self::petContext($pet, $asOf);
+        // Resolved through the container (same as the plan-copy call site) so the
+        // whole generation path stays testable via a bound fake.
+        $service = app(OpenAiService::class);
         $interp = $service->generateReportInterpretations(
             $phylumData,
             (float) ($diversity ?? 0),
-            self::petContext($pet, $asOf),
+            $ctx,
             $deterministic,
         );
+        // Capture the INTERPRETATION call's failure signal now — the diet-guidance
+        // call below resets lastErrorCode, and $generationError (which the caller +
+        // quality validator rely on, and which aiTextIsEmpty guards) must reflect the
+        // interpretation call, not the diet one.
         $generationError = $service->lastErrorCode;
+
+        // Diet guidance — a SEPARATE report-AI call, generated ALONGSIDE the
+        // interpretations from the SAME findings and snapshotted like them (ai_diet_*).
+        // Failure is isolated: it returns empty strings and never throws, so it can
+        // never break the rest of the report. Because it's folded in here, every
+        // generation path (create, regenerate, both wizard actions) captures it via
+        // the same array_merge / $set — including regenerate, which refreshes it with
+        // the other interpretations (it's report-AI copy, unlike the plan copy).
+        $diet = $service->generateDietGuidance(
+            $phylumData,
+            (float) ($diversity ?? 0),
+            $ctx,
+            $deterministic,
+        );
 
         // Stage 2: the six health-insight score_* values are computed
         // DETERMINISTICALLY from the bacteria percentages (HealthInsightRules), not
@@ -86,6 +107,9 @@ class ReportGeneration
             'vet_summary' => $interp['vet_summary'],
             'goal' => $interp['goal'],
             'recommended_actions' => $interp['recommended_actions'],
+            // AI diet-guidance boxes — snapshot columns, peers of the ai_* fields.
+            'ai_diet_include' => $diet['include'],
+            'ai_diet_avoid' => $diet['avoid'],
         ], $scores);
     }
 

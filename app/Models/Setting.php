@@ -155,6 +155,42 @@ class Setting extends Model
     public const DIET_REVIEW_TEXT_DEFAULT = "We recommend speaking with one of our nutritionists, as your dog's diet may be contributing to their microbiome imbalance. Gut health and nutrition go hand in hand, and by reviewing your dog's microbiome results alongside their current diet, our nutritionists can identify foods and feeding strategies that better support a healthy, balanced microbiome and help optimise long-term gut health.";
 
     /**
+     * The AI prompt that generates the two "Personalised Diet Guidance" boxes ("Foods
+     * to Include" / "Foods to Avoid") from the dog's microbiome findings. Admin-editable
+     * in Settings; blank/unset falls back to the coded default below (same
+     * blank-falls-back-to-default contract as PLAN_GENERATION_SYSTEM_PROMPT /
+     * DIET_REVIEW_TEXT). Read via Setting::dietGuidancePrompt(). The finding→food rules
+     * (DIET_GUIDANCE_RULES) are supplied to the AI alongside this prompt as guidance.
+     * (Wired into generation in a later step — nothing reads it at generation time yet.)
+     */
+    public const DIET_GUIDANCE_PROMPT = 'diet_guidance_prompt';
+
+    public const DIET_GUIDANCE_PROMPT_DEFAULT = "Using this dog's microbiome findings, generate two sections for the report: a 'Foods to Include' section and a 'Foods to Avoid' section. Base every recommendation on the dog's actual microbiome findings rather than generic nutrition advice. For each food, briefly explain why it is recommended or avoided, linking it to the relevant bacterial finding. Recommend between 8 and 12 foods across the two sections. For foods to avoid, focus on items to avoid for at least the first three months while the microbiome repairs. Write in a professional, warm, client-friendly style suitable for a pet owner. Use the finding→recommendation rules provided as guidance, applying them where the dog's findings match, but interpret sensibly rather than mechanically.";
+
+    /**
+     * The finding→food guidance rules passed to the diet-guidance AI (DIET_GUIDANCE_PROMPT
+     * above). Stored as a JSON array of {finding, recommend, reason} rows, edited via a
+     * Filament Repeater on the Settings page — same JSON-in-a-Setting pattern as
+     * OPENAI_TOKEN_RATES. Blank/unset/malformed falls back to the coded default rows
+     * below, so the guidance is never empty. Read via Setting::dietGuidanceRules().
+     *
+     * @var array<int, array{finding: string, recommend: string, reason: string}>
+     */
+    public const DIET_GUIDANCE_RULES = 'diet_guidance_rules';
+
+    public const DIET_GUIDANCE_RULES_DEFAULT = [
+        ['finding' => 'High Proteobacteria', 'recommend' => 'White fish, bone broth, pumpkin', 'reason' => 'Reduce gut stress and support recovery'],
+        ['finding' => 'Low diversity', 'recommend' => 'Colourful vegetables, mushrooms, blueberries', 'reason' => 'Increase microbial diversity'],
+        ['finding' => 'Low butyrate producers', 'recommend' => 'Pumpkin, leafy greens, mushrooms', 'reason' => 'Feed fibre-fermenting bacteria'],
+        ['finding' => 'High protein fermentation', 'recommend' => 'Lean proteins, reduce fatty meats', 'reason' => 'Reduce putrefactive fermentation'],
+        ['finding' => 'High inflammatory bacteria', 'recommend' => 'Sardines, blueberries', 'reason' => 'Support anti-inflammatory pathways'],
+        ['finding' => 'Low bile acid bacteria', 'recommend' => 'Moderate fat, soluble fibre', 'reason' => 'Support bile metabolism'],
+        ['finding' => 'High Prevotella', 'recommend' => 'Increase varied plant fibres, moderate starch', 'reason' => 'Improve fermentation balance'],
+        ['finding' => 'High Sutterella', 'recommend' => 'Polyphenol-rich foods, diverse fibres', 'reason' => 'Help rebalance microbial ecology'],
+        ['finding' => 'Low carbohydrate fermenters', 'recommend' => 'Pumpkin, apple, squash', 'reason' => 'Increase fermentable carbohydrates'],
+    ];
+
+    /**
      * The flat, subscription-wide loyalty discount (whole percent) applied to EVERY
      * included subscription product on EVERY plan. Single source of truth for the
      * per-product "on the plan" price on report cards AND the customer-facing loyalty
@@ -348,6 +384,54 @@ class Setting extends Model
         }
 
         return (float) self::SUBSCRIPTION_DISCOUNT_PERCENT_DEFAULT;
+    }
+
+    /**
+     * The diet-guidance AI prompt: the admin-editable Settings value when set, else the
+     * coded default. Whitespace-only is treated as blank (never renders an empty prompt).
+     */
+    public static function dietGuidancePrompt(): string
+    {
+        $value = trim((string) static::get(self::DIET_GUIDANCE_PROMPT));
+
+        return $value !== '' ? $value : self::DIET_GUIDANCE_PROMPT_DEFAULT;
+    }
+
+    /**
+     * The finding→food guidance rules as a clean list of {finding, recommend, reason}
+     * rows. Decodes the JSON Setting; blank / unset / malformed / all-blank-rows falls
+     * back to the coded default rows, so the guidance is never empty. Fully-blank rows
+     * are dropped. Exposed for the diet-guidance generator (wired up in a later step).
+     *
+     * @return array<int, array{finding: string, recommend: string, reason: string}>
+     */
+    public static function dietGuidanceRules(): array
+    {
+        $stored = static::get(self::DIET_GUIDANCE_RULES);
+
+        if (filled($stored)) {
+            $decoded = json_decode((string) $stored, true);
+            if (is_array($decoded)) {
+                $rows = [];
+                foreach ($decoded as $row) {
+                    if (! is_array($row)) {
+                        continue;
+                    }
+                    $finding = trim((string) ($row['finding'] ?? ''));
+                    $recommend = trim((string) ($row['recommend'] ?? ''));
+                    $reason = trim((string) ($row['reason'] ?? ''));
+                    if ($finding === '' && $recommend === '' && $reason === '') {
+                        continue; // drop fully-blank rows
+                    }
+                    $rows[] = ['finding' => $finding, 'recommend' => $recommend, 'reason' => $reason];
+                }
+                if ($rows !== []) {
+                    return $rows;
+                }
+            }
+        }
+
+        return self::DIET_GUIDANCE_RULES_DEFAULT;
     }
 
     /** The configured display currency code (blank falls back to GBP). */

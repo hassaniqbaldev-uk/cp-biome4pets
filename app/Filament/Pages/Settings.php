@@ -105,6 +105,8 @@ class Settings extends Page implements HasForms
             ...$this->loadKlaviyo(),
             ...$this->loadSmtp(),
             'openai_token_rates' => $this->loadTokenRates(),
+            Setting::DIET_GUIDANCE_PROMPT => Setting::dietGuidancePrompt(),
+            'diet_guidance_rules' => $this->loadDietGuidanceRules(),
             'product_rules' => $this->loadRules(),
         ]);
     }
@@ -226,6 +228,18 @@ class Settings extends Page implements HasForms
         return $rows;
     }
 
+    /**
+     * The diet-guidance rules repeater state — the stored rows or, when unset/blank,
+     * the coded default rows (Setting::dietGuidanceRules resolves both), so the editor
+     * is never empty.
+     *
+     * @return array<int, array{finding: string, recommend: string, reason: string}>
+     */
+    protected function loadDietGuidanceRules(): array
+    {
+        return Setting::dietGuidanceRules();
+    }
+
     protected function loadRules(): array
     {
         try {
@@ -331,6 +345,36 @@ class Settings extends Page implements HasForms
                     ->label('Signs of Stability (report boilerplate)')
                     ->rows(6)
                     ->helperText('Shown in the report\'s "Your Dog\'s Personal Summary". Use {pet} where the pet\'s name should appear. Same text for all reports.'),
+                Section::make('Diet Guidance (AI)')
+                    ->description('The prompt and finding→food rules used to generate the two "Personalised Diet Guidance" boxes ("Foods to Include" / "Foods to Avoid") on the report.')
+                    ->collapsible()
+                    ->collapsed()
+                    ->schema([
+                        Textarea::make(Setting::DIET_GUIDANCE_PROMPT)
+                            ->label('Diet guidance prompt')
+                            ->rows(10)
+                            ->default(Setting::DIET_GUIDANCE_PROMPT_DEFAULT)
+                            ->helperText('The prompt used to generate the diet-guidance boxes from the dog\'s microbiome findings. The finding→food rules below are supplied to the AI alongside this prompt as guidance. Blank resets to the built-in default.'),
+                        Repeater::make('diet_guidance_rules')
+                            ->label('Finding → food rules')
+                            ->helperText('Each row maps a microbiome finding to suggested foods and the reason. These rows are passed to the AI as finding→food guidance for the diet boxes; edit or extend them as needed. Clearing all rows restores the built-in defaults.')
+                            ->schema([
+                                TextInput::make('finding')
+                                    ->label('Finding')
+                                    ->maxLength(255),
+                                TextInput::make('recommend')
+                                    ->label('Recommend')
+                                    ->maxLength(255),
+                                TextInput::make('reason')
+                                    ->label('Reason')
+                                    ->maxLength(255),
+                            ])
+                            ->columns(3)
+                            ->itemLabel(fn (array $state): ?string => $state['finding'] ?? 'New rule')
+                            ->addActionLabel('Add rule')
+                            ->reorderable()
+                            ->columnSpanFull(),
+                    ]),
                 Section::make('Usage')
                     ->description('Tokens used by report generation, recorded per call. Read-only.')
                     ->collapsible()
@@ -1190,6 +1234,12 @@ class Settings extends Page implements HasForms
         Setting::set(Setting::OPENAI_DIRECTIVE_SCORES, $data[Setting::OPENAI_DIRECTIVE_SCORES] ?? '');
         Setting::set(Setting::SIGNS_OF_STABILITY, $data[Setting::SIGNS_OF_STABILITY] ?? '');
 
+        // Diet guidance (AI) — prompt stored verbatim (blank → coded default at read
+        // time via dietGuidancePrompt); the finding→food rules encoded to a JSON map
+        // like the token rates (blank/empty → coded default rows via dietGuidanceRules).
+        Setting::set(Setting::DIET_GUIDANCE_PROMPT, $data[Setting::DIET_GUIDANCE_PROMPT] ?? '');
+        $this->saveDietGuidanceRules($data['diet_guidance_rules'] ?? []);
+
         // Plans / Generation — store verbatim; blanks are tolerated because
         // every consumer falls back to its own default when the value is blank.
         // PLAN_GENERATION_MODEL retired — the model is saved once as OPENAI_MODEL
@@ -1286,6 +1336,8 @@ class Settings extends Page implements HasForms
             ...$this->loadKlaviyo(),
             ...$this->loadSmtp(),
             'openai_token_rates' => $this->loadTokenRates(),
+            Setting::DIET_GUIDANCE_PROMPT => Setting::dietGuidancePrompt(),
+            'diet_guidance_rules' => $this->loadDietGuidanceRules(),
             'product_rules' => $this->loadRules(),
         ]);
     }
@@ -1317,6 +1369,32 @@ class Settings extends Page implements HasForms
         }
 
         Setting::set(Setting::OPENAI_TOKEN_RATES, json_encode($map));
+    }
+
+    /**
+     * Encode the diet-guidance repeater rows to the JSON list stored under
+     * Setting::DIET_GUIDANCE_RULES. Fully-blank rows are dropped; each kept row is
+     * normalised to {finding, recommend, reason}. If nothing survives, the stored
+     * value becomes an empty list and dietGuidanceRules() falls back to the coded
+     * defaults — so the guidance is never empty. Mirrors saveTokenRates().
+     */
+    protected function saveDietGuidanceRules(array $rows): void
+    {
+        $list = [];
+
+        foreach ($rows as $row) {
+            $finding = trim((string) ($row['finding'] ?? ''));
+            $recommend = trim((string) ($row['recommend'] ?? ''));
+            $reason = trim((string) ($row['reason'] ?? ''));
+
+            if ($finding === '' && $recommend === '' && $reason === '') {
+                continue;
+            }
+
+            $list[] = ['finding' => $finding, 'recommend' => $recommend, 'reason' => $reason];
+        }
+
+        Setting::set(Setting::DIET_GUIDANCE_RULES, json_encode($list));
     }
 
     /**

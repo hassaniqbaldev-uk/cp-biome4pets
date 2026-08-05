@@ -728,6 +728,92 @@
 @endif
 
 {{-- ================================================================ --}}
+{{-- PERSONALISED DIET GUIDANCE — DomPDF-safe mirror of the web section --}}
+{{-- (show.blade.php): tables + inline styles, no flex/grid. GATED on   --}}
+{{-- the AI diet copy: the WHOLE section (incl. its page-break) renders  --}}
+{{-- only when there is content, and is omitted entirely — no blank     --}}
+{{-- page — when BOTH ai_diet_* are empty.                              --}}
+{{-- ================================================================ --}}
+@php
+    // Same static timeline copy as the web view (kept in step by construction).
+    $dietSteps = [
+        ['Days 1–2 · Start with a pinch', "Add only a very small amount to your dog's usual food."],
+        ['Days 3–4 · Increase slowly', 'Build gradually towards a quarter dose, then half the recommended dose.'],
+        ['Days 5–7 · Reach the full dose', 'Increase to the full dose only if your dog remains comfortable and interested in food.'],
+    ];
+    // Step 3: AI-generated diet copy (snapshot). Gates the whole section below.
+    $dietInclude = trim((string) $report->ai_diet_include);
+    $dietAvoid = trim((string) $report->ai_diet_avoid);
+@endphp
+@if($dietInclude !== '' || $dietAvoid !== '')
+{{-- page-break INSIDE the @if so an absent section never leaves a blank page. --}}
+<div style="page-break-before: always;"></div>
+<div class="section">
+    <div class="section-bar">Your Dog's Personalised Diet Guidance</div>
+    <div class="section-body">
+        <p style="font-size: 12px; color: #55505A; margin: 0 0 16px; line-height: 1.6;">Using microbiome insight to identify what your dog may digest well, what may be less suitable, and how to introduce support safely.</p>
+
+        {{-- Two-column AI section — EMPTY injection containers (Step 3). --}}
+        <table style="width: 100%; border-collapse: collapse; page-break-inside: avoid;" cellspacing="0" cellpadding="0">
+            <tr>
+                <td style="width: 49%; vertical-align: top; background-color: #F3F8FC; border: 1px solid #D9E6F2; border-left: 4px solid #4654A4; padding: 16px 18px;">
+                    <div style="font-size: 13px; font-weight: bold; color: #301C47; margin-bottom: 6px;">+ What your dog can digest</div>
+                    <div style="font-size: 11px; color: #55505A; line-height: 1.6; margin-bottom: 12px;">This section will be interpreted from your dog's microbiome results and health notes.</div>
+                    {{-- "can digest" copy. Partial case (only the other box has content)
+                         → render NOTHING here (no placeholder). nl2br(e()) = XSS-safe. --}}
+                    @if($dietInclude !== '')
+                        <div style="border: 1px solid #E3F0FF; background-color: #ffffff; padding: 12px 14px; font-size: 11px; color: #55505A; line-height: 1.6;">{!! nl2br(e($dietInclude)) !!}</div>
+                    @endif
+                </td>
+                <td style="width: 2%;">&nbsp;</td>
+                <td style="width: 49%; vertical-align: top; background-color: #F3F8FC; border: 1px solid #D9E6F2; border-left: 4px solid #4654A4; padding: 16px 18px;">
+                    <div style="font-size: 13px; font-weight: bold; color: #301C47; margin-bottom: 6px;">&ndash; What your dog should avoid</div>
+                    <div style="font-size: 11px; color: #55505A; line-height: 1.6; margin-bottom: 12px;">This section will highlight foods or ingredients that may be less suitable for your dog's current microbiome.</div>
+                    {{-- "avoid" copy. Partial case → render NOTHING here. XSS-safe. --}}
+                    @if($dietAvoid !== '')
+                        <div style="border: 1px solid #E3F0FF; background-color: #ffffff; padding: 12px 14px; font-size: 11px; color: #55505A; line-height: 1.6;">{!! nl2br(e($dietAvoid)) !!}</div>
+                    @endif
+                </td>
+            </tr>
+        </table>
+
+        <h3 style="margin-top: 18px;">Diet and supplements work side by side to support gut health</h3>
+        <p style="font-size: 12px; color: #4654A4; font-weight: bold; margin: 0 0 8px;">Introduce changes gradually so your dog's microbiome has time to adapt.</p>
+        <p style="font-size: 12px; color: #55505A; line-height: 1.6; margin: 0 0 16px;">A new diet provides the daily foundation, while carefully selected supplements can support the specific areas identified in your dog's microbiome report. For the clearest response, avoid introducing several new products at the same time unless this has been recommended as part of your plan.</p>
+
+        {{-- 3-step gradual-introduction timeline --}}
+        <table style="width: 100%; border-collapse: collapse; page-break-inside: avoid;" cellspacing="0" cellpadding="0">
+            <tr>
+                @foreach($dietSteps as $i => $dietStep)
+                    <td style="width: 32%; vertical-align: top; background-color: #ffffff; border: 1px solid #e6e6ea; padding: 14px 16px;">
+                        <div style="width: 22px; height: 22px; background-color: #4654A4; color: #ffffff; font-weight: bold; font-size: 12px; text-align: center; line-height: 22px; margin-bottom: 8px;">{{ $i + 1 }}</div>
+                        <div style="font-size: 12px; font-weight: bold; color: #301C47; margin-bottom: 4px;">{{ $dietStep[0] }}</div>
+                        <div style="font-size: 11px; color: #55505A; line-height: 1.5;">{{ $dietStep[1] }}</div>
+                    </td>
+                    @if(! $loop->last)<td style="width: 2%;">&nbsp;</td>@endif
+                @endforeach
+            </tr>
+        </table>
+
+        {{-- Sensitive-dog callout --}}
+        <div style="background-color: #FAF8FF; border: 1px solid #E3F0FF; border-left: 4px solid #4654A4; padding: 14px 16px; margin-top: 16px; page-break-inside: avoid;">
+            <div style="font-size: 12px; font-weight: bold; color: #301C47; margin-bottom: 4px;">For dogs that are sensitive to change</div>
+            <div style="font-size: 11px; color: #55505A; line-height: 1.6;">Introduce the supplement more gradually over two weeks. Monitor appetite, interest in food, behaviour and stool quality throughout the transition.</div>
+        </div>
+
+        <h3 style="margin-top: 18px;">What to watch for</h3>
+        <p style="font-size: 12px; color: #55505A; line-height: 1.6; margin: 0 0 16px;">Loose stools can occur when introducing a new diet or supplement while the microbiome adjusts. This should be monitored alongside your dog's appetite, behaviour and interest in food. If symptoms are persistent, marked, or you are concerned at any point, please pause the new addition and contact us for guidance.</p>
+
+        {{-- Important disclaimer --}}
+        <div style="background-color: #FFFBEB; border: 1px solid #FDE68A; padding: 12px 14px; page-break-inside: avoid;">
+            <div style="font-size: 11px; font-weight: bold; color: #92400e; margin-bottom: 4px;">Important</div>
+            <div style="font-size: 11px; color: #92400e; line-height: 1.6;">Please use this information alongside guidance from your nutritionist or veterinary professional. These suggestions are intended to be built into a complete diet plan and should not be taken in isolation.</div>
+        </div>
+    </div>
+</div>
+@endif
+
+{{-- ================================================================ --}}
 {{-- SECTION 13: HELP AND CONTACTS --}}
 {{-- ================================================================ --}}
 <div style="page-break-before: always;"></div>

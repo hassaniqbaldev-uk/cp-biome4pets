@@ -924,6 +924,112 @@
         @endif
 
         {{-- ============================================================ --}}
+        {{-- PERSONALISED DIET GUIDANCE (Step 1 of 3 — STATIC scaffold).      --}}
+        {{-- Unconditional: renders on every report, after the subscription   --}}
+        {{-- options block. The two AI boxes below are EMPTY injection         --}}
+        {{-- containers ([data-diet-ai]) that Step 3 fills from the AI call —  --}}
+        {{-- the same empty state is the AI-failure state, so it must read     --}}
+        {{-- correctly showing nothing. All copy here is static this step.     --}}
+        {{-- >>> Mirror any change in resources/views/report/pdf.blade.php. <<< --}}
+        {{-- ============================================================ --}}
+        @php
+            // Shared static copy for the gradual-introduction timeline (web + PDF
+            // keep their own copy of this array; identical wording by construction).
+            $dietSteps = [
+                ['Days 1–2 · Start with a pinch', "Add only a very small amount to your dog's usual food."],
+                ['Days 3–4 · Increase slowly', 'Build gradually towards a quarter dose, then half the recommended dose.'],
+                ['Days 5–7 · Reach the full dose', 'Increase to the full dose only if your dog remains comfortable and interested in food.'],
+            ];
+            // Step 3: the AI-generated diet copy (snapshot columns). The WHOLE section
+            // is GATED on these — it renders only when there is diet content to show,
+            // and is omitted entirely when BOTH are empty (never generated / a failed
+            // AI call), rather than showing an empty static scaffold.
+            $dietInclude = trim((string) $report->ai_diet_include);
+            $dietAvoid = trim((string) $report->ai_diet_avoid);
+        @endphp
+        @if($dietInclude !== '' || $dietAvoid !== '')
+        <section data-reveal class="report-card">
+            <div class="report-head">
+                <h2 class="text-lg font-bold tracking-tight">Your Dog's Personalised Diet Guidance</h2>
+            </div>
+            <div class="report-body space-y-8">
+                <p class="text-gray-700 leading-relaxed">Using microbiome insight to identify what your dog may digest well, what may be less suitable, and how to introduce support safely.</p>
+
+                {{-- TWO-COLUMN AI SECTION — 2 cols on desktop, stacks on mobile/print.
+                     The .diet-ai-box divs are EMPTY containers; Step 3 injects the AI
+                     copy into them by their data-diet-ai hook. Empty by design here.
+                     The panel tint (#F3F8FC / #D9E6F2) has no utility-class equivalent,
+                     so the container keeps inline styling — matching the pattern in
+                     resources/views/report/partials/_diet-review.blade.php. Typography
+                     inside uses the report's utility classes. --}}
+                <div class="grid grid-cols-1 sm:grid-cols-2 gap-6">
+                    <div style="background:#F3F8FC; border:1px solid #D9E6F2; border-left:4px solid #4654A4; border-radius:14px; padding:20px 22px; break-inside:avoid;">
+                        <h3 class="font-bold text-navy text-base mb-2"><span style="display:inline-block; width:22px; height:22px; line-height:22px; text-align:center; border-radius:9999px; background:#E3F0FF; color:#4654A4; font-weight:800; vertical-align:middle; margin-right:8px;">+</span>What your dog can digest</h3>
+                        <p class="text-gray-700 leading-relaxed mb-4">This section will be interpreted from your dog's microbiome results and health notes.</p>
+                        {{-- The "can digest" AI copy. In the PARTIAL case (only the OTHER
+                             box has content) this side renders NOTHING — no empty box — so
+                             there is never a broken placeholder beside real content. The
+                             all-empty case can't reach here (the section is gated above).
+                             nl2br(e()) → plain text escaped THEN line-broken: XSS-safe. --}}
+                        @if($dietInclude !== '')
+                            <div class="diet-ai-box" data-diet-ai="include" style="background:#ffffff; border:1px solid #E3F0FF; border-radius:10px; padding:14px 16px;"><div class="text-gray-700 leading-relaxed">{!! nl2br(e($dietInclude)) !!}</div></div>
+                        @endif
+                    </div>
+                    <div style="background:#F3F8FC; border:1px solid #D9E6F2; border-left:4px solid #4654A4; border-radius:14px; padding:20px 22px; break-inside:avoid;">
+                        <h3 class="font-bold text-navy text-base mb-2"><span style="display:inline-block; width:22px; height:22px; line-height:22px; text-align:center; border-radius:9999px; background:#F3E3E3; color:#B4544B; font-weight:800; vertical-align:middle; margin-right:8px;">–</span>What your dog should avoid</h3>
+                        <p class="text-gray-700 leading-relaxed mb-4">This section will highlight foods or ingredients that may be less suitable for your dog's current microbiome.</p>
+                        {{-- The "avoid" AI copy. Same partial-case rule: empty → NOTHING
+                             (no placeholder box). nl2br(e()) → XSS-safe. --}}
+                        @if($dietAvoid !== '')
+                            <div class="diet-ai-box" data-diet-ai="avoid" style="background:#ffffff; border:1px solid #E3F0FF; border-radius:10px; padding:14px 16px;"><div class="text-gray-700 leading-relaxed">{!! nl2br(e($dietAvoid)) !!}</div></div>
+                        @endif
+                    </div>
+                </div>
+
+                {{-- Diet + supplements --}}
+                <div style="break-inside:avoid;">
+                    <h3 class="font-bold text-navy text-base mb-2">Diet and supplements work side by side to support gut health</h3>
+                    <p class="text-teal font-semibold mb-2">Introduce changes gradually so your dog's microbiome has time to adapt.</p>
+                    <p class="text-gray-700 leading-relaxed">A new diet provides the daily foundation, while carefully selected supplements can support the specific areas identified in your dog's microbiome report. For the clearest response, avoid introducing several new products at the same time unless this has been recommended as part of your plan.</p>
+                </div>
+
+                {{-- 3-step gradual-introduction timeline — 3 cols desktop, stacks small/print.
+                     Card tint has no utility equivalent, so the container stays inline;
+                     the number badge is a decorative circle (no utility for its size). --}}
+                <div class="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                    @foreach($dietSteps as $i => $dietStep)
+                        <div style="background:#fff; border:1px solid #e3e9ef; border-radius:12px; padding:16px 18px; break-inside:avoid;">
+                            <div style="width:26px; height:26px; line-height:26px; text-align:center; border-radius:9999px; background:#4654A4; color:#fff; font-weight:700; margin-bottom:10px;">{{ $i + 1 }}</div>
+                            <h4 class="font-bold text-navy text-base mb-1">{{ $dietStep[0] }}</h4>
+                            <p class="text-gray-700 leading-relaxed">{{ $dietStep[1] }}</p>
+                        </div>
+                    @endforeach
+                </div>
+
+                {{-- Sensitive-dog callout — the light-blue border + teal left accent has no
+                     single utility equivalent, so the tint container stays inline. --}}
+                <div style="background:#FAF8FF; border:1px solid #E3F0FF; border-left:4px solid #4654A4; border-radius:12px; padding:16px 18px; break-inside:avoid;">
+                    <h4 class="font-bold text-navy text-base mb-1">For dogs that are sensitive to change</h4>
+                    <p class="text-gray-700 leading-relaxed">Introduce the supplement more gradually over two weeks. Monitor appetite, interest in food, behaviour and stool quality throughout the transition.</p>
+                </div>
+
+                {{-- What to watch for --}}
+                <div style="break-inside:avoid;">
+                    <h3 class="font-bold text-navy text-base mb-2">What to watch for</h3>
+                    <p class="text-gray-700 leading-relaxed">Loose stools can occur when introducing a new diet or supplement while the microbiome adjusts. This should be monitored alongside your dog's appetite, behaviour and interest in food. If symptoms are persistent, marked, or you are concerned at any point, please pause the new addition and contact us for guidance.</p>
+                </div>
+
+                {{-- Important disclaimer — maps cleanly to the amber utilities used
+                     elsewhere in the app, so no inline styling is needed. --}}
+                <div class="bg-amber-50 border border-amber-300 rounded-2xl p-4" style="break-inside:avoid;">
+                    <h4 class="font-bold text-amber-700 text-base mb-1">Important</h4>
+                    <p class="text-amber-700 leading-relaxed">Please use this information alongside guidance from your nutritionist or veterinary professional. These suggestions are intended to be built into a complete diet plan and should not be taken in isolation.</p>
+                </div>
+            </div>
+        </section>
+        @endif
+
+        {{-- ============================================================ --}}
         {{-- 8b. MICROBIOME RESTORATION (legacy flat list) --}}
         {{-- Fallback: shown only when the plan layout above is NOT rendered --}}
         {{-- (no plan applied, or no steps), so older reports still render. --}}

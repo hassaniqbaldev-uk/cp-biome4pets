@@ -68,9 +68,9 @@ class OpenAiModelResolutionTest extends TestCase
         // single resolver, not a per-call config/setting read.
         $src = file_get_contents(app_path('Services/OpenAiService.php'));
 
-        // The interpretation call and the plan-copy call each assign the model from
-        // the single resolver (exactly two call sites; modelOptions() also calls it).
-        $this->assertSame(2, substr_count($src, '$model = self::resolveModel();'));
+        // The interpretation, plan-copy AND diet-guidance calls each assign the model
+        // from the single resolver (three call sites; modelOptions() also calls it).
+        $this->assertSame(3, substr_count($src, '$model = self::resolveModel();'));
         // The dead 'gpt-4' literal and the per-call plan_generation_model read are gone.
         $this->assertStringNotContainsString("env('OPENAI_MODEL', 'gpt-4')", $src);
         $this->assertStringNotContainsString('Setting::get(Setting::PLAN_GENERATION_MODEL)', $src);

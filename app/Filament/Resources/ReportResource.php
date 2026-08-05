@@ -213,6 +213,10 @@ class ReportResource extends Resource
                 Forms\Components\Hidden::make('needs_review')->default(false)->dehydrated(),
                 Forms\Components\Hidden::make('review_flags')->dehydrated(),
                 Forms\Components\Hidden::make('recommendation_reason')->dehydrated(),
+                // AI diet-guidance snapshot — set by the generate actions (via the
+                // interpretationColumns() $set loop), saved with the report.
+                Forms\Components\Hidden::make('ai_diet_include')->dehydrated(),
+                Forms\Components\Hidden::make('ai_diet_avoid')->dehydrated(),
 
                 Forms\Components\Wizard::make([
                     Forms\Components\Wizard\Step::make('Client & Pet Details')
