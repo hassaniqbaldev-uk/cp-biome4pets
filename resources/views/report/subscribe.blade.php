@@ -140,6 +140,14 @@
                                     @if(filled($step->stage_label))
                                         <div style="font-size:12px; color:#7a7580; margin-top:2px;">{{ $step->stage_label }}</div>
                                     @endif
+                                    {{-- Optional add-ons (e.g. the retest kit) are NOT part of the
+                                         subscription — mark them so they don't read as an auto-shipped
+                                         phase. Same amber "Optional add-on" tag the plan page uses
+                                         (show.blade.php), keyed off this row's own inclusion. Included
+                                         rows get NO tag (they render exactly as before). --}}
+                                    @if($nextProduct?->inclusion === 'optional')
+                                        <span style="font-size:12.5px; font-weight:600; color:#a06a14; display:inline-flex; align-items:center; gap:6px; margin-top:4px;"><span style="width:8px; height:8px; border-radius:50%; background:#d49a2a; display:inline-block;"></span>Optional add-on</span>
+                                    @endif
                                 </div>
                                 <div style="flex:0 0 auto; color:#9aa3ad; font-size:18px;">&rarr;</div>
                             </div>

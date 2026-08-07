@@ -297,4 +297,54 @@ class SubscribeInterstitialTest extends TestCase
             ->assertSee('PetBiome AMR (Rosemary Free)')
             ->assertDontSee('https://img.test/amr.jpg', false);
     }
+
+    /**
+     * The "What comes next" list marks an OPTIONAL upcoming row (e.g. the retest kit)
+     * with the same amber "Optional add-on" tag the plan page uses, so it doesn't read
+     * as an auto-shipped phase. Included rows get NO tag.
+     */
+    public function test_optional_retest_row_shows_the_optional_add_on_tag_included_rows_do_not(): void
+    {
+        $plan = $this->makePlan();
+        $report = $this->makeReport($plan);
+
+        $amr = CatalogProduct::where('name', 'PetBiome AMR')->first();
+        $antimicrobic = CatalogProduct::create(['name' => 'Antimicrobic', 'price' => 35, 'is_active' => true]);
+        $kit = CatalogProduct::create(['name' => 'PetBiome Gut Microbiome Test Kit', 'price' => 180, 'subscription_discount_percent' => 30, 'is_active' => true]);
+
+        // Report's own product steps: first delivery = AMR (included); "what comes next"
+        // = Antimicrobic (included) then the retest kit (optional).
+        $p1 = ReportStep::create(['report_id' => $report->id, 'title' => 'Step 1: Microbiome Reset', 'type' => 'product', 'stage_label' => 'Phase 1', 'position' => 1]);
+        $p1->products()->create(['catalog_product_id' => $amr->id, 'inclusion' => 'included', 'position' => 0]);
+        $p2 = ReportStep::create(['report_id' => $report->id, 'title' => 'Step 2: Targeted Support', 'type' => 'product', 'stage_label' => 'Phase 2', 'position' => 2]);
+        $p2->products()->create(['catalog_product_id' => $antimicrobic->id, 'inclusion' => 'included', 'position' => 0]);
+        $p3 = ReportStep::create(['report_id' => $report->id, 'title' => 'Retest', 'type' => 'product', 'stage_label' => 'Checkpoint · Around month 6', 'position' => 3]);
+        $p3->products()->create(['catalog_product_id' => $kit->id, 'inclusion' => 'optional', 'position' => 0]);
+
+        $html = $this->get('/report/' . $report->public_token . '/subscribe')->assertOk()->getContent();
+
+        // The optional retest row carries the tag — exactly ONCE (the included
+        // Antimicrobic row is NOT tagged).
+        $this->assertSame(1, substr_count($html, 'Optional add-on'), 'exactly one optional row should be tagged');
+        // Both upcoming products still render (nothing else changed).
+        $this->assertStringContainsString('Antimicrobic', $html);
+        $this->assertStringContainsString('PetBiome Gut Microbiome Test Kit', $html);
+        // Reuses the plan page's amber tag colours verbatim (not a new colour).
+        $this->assertStringContainsString('#a06a14', $html);
+        $this->assertStringContainsString('#d49a2a', $html);
+    }
+
+    public function test_no_optional_add_on_tag_when_there_is_no_optional_step(): void
+    {
+        // Default instantiation has only INCLUDED products (AMR + Prebiotic).
+        $plan = $this->makePlan();
+        $report = $this->makeReport($plan);
+        $amr = CatalogProduct::where('name', 'PetBiome AMR')->first();
+        $prebiotic = CatalogProduct::where('name', 'PetBiome Prebiotic')->first();
+        $this->instantiateSteps($report, $amr, $prebiotic);
+
+        $html = $this->get('/report/' . $report->public_token . '/subscribe')->assertOk()->getContent();
+
+        $this->assertStringNotContainsString('Optional add-on', $html);
+    }
 }
