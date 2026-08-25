@@ -383,6 +383,13 @@
 <div class="section">
     <div class="section-bar">Your Dog vs Healthy Microbiome</div>
     <div class="section-body">
+        {{-- How to read these charts (Carol's explainer, verbatim; mirrors the web). --}}
+        <div style="margin-bottom: 16px;">
+            <h3 style="margin-bottom: 6px;">How to read these charts</h3>
+            <p style="font-size: 12px; color: #55505A; line-height: 1.6; margin: 0 0 8px;">The Healthy Dog pie chart shows the average relative abundance of each bacterial phylum found across our reference group of 200 healthy dogs. This is a comparison profile, not a set of targets or scoring cut-offs. Individual healthy dogs naturally vary, so your dog's microbiome does not need to match the healthy-dog pie chart exactly.</p>
+            <p style="font-size: 12px; color: #55505A; line-height: 1.6; margin: 0 0 8px;">The phylum pages later in the report use separate low, optimal and high thresholds to assess each bacterial group. This means a result may differ from the healthy-dog average while still remaining within a commonly observed range.</p>
+            <p style="font-size: 12px; color: #55505A; line-height: 1.6; margin: 0;">The pie charts provide an overall comparison. The later results pages and Veterinary Summary explain which findings are most relevant to your dog.</p>
+        </div>
         <table style="width: 100%;" cellspacing="0" cellpadding="0">
             <tr>
                 {{-- Healthy Dog pie --}}
@@ -390,6 +397,7 @@
                     <div style="font-size: 14px; font-weight: bold; color: #301C47; margin-bottom: 10px;">Healthy Dog</div>
                     <div style="text-align: center;">{!! ChartSvg::pie($healthyDog) !!}</div>
                     @include('report.partials.pdf-phylum-legend', ['rows' => $healthyDog])
+                    <div style="font-size: 10px; color: #55505A; line-height: 1.5; margin-top: 10px; text-align: left;"><b style="color: #301C47;">Reference average:</b> Based on the mean microbiome profile of 200 healthy dogs. This is a comparison figure, not an individual target.</div>
                 </td>
                 <td style="width: 4%;"></td>
                 {{-- Your Dog pie --}}
@@ -397,6 +405,7 @@
                     <div style="font-size: 14px; font-weight: bold; color: #301C47; margin-bottom: 10px;">Your Dog</div>
                     <div style="text-align: center;">{!! ChartSvg::pie($top6) !!}</div>
                     @include('report.partials.pdf-phylum-legend', ['rows' => $top6])
+                    <div style="font-size: 10px; color: #55505A; line-height: 1.5; margin-top: 10px; text-align: left;"><b style="color: #301C47;">Your dog's profile:</b> The measured relative abundance of each phylum in this sample.</div>
                 </td>
             </tr>
         </table>
@@ -572,7 +581,9 @@
             @foreach(array_values($insights) as $i => $insight)
                 @if($i % 2 === 0)<tr>@endif
                 @php
-                    $label = $insight['label'] ?: 'N/A';
+                    // Reader-facing heading (Carol's wording); falls back to the
+                    // structural label. Colour below still keys off the tone.
+                    $label = ($insight['display_label'] ?? $insight['label']) ?: 'N/A';
                     // Tone → hex (shared with the diversity/richness/dysbiosis bands).
                     $badgeBgColor = $toneHex[$insight['tone']] ?? '#9ca3af';
                 @endphp
@@ -589,6 +600,11 @@
                                 </td>
                             </tr>
                         </table>
+                        {{-- Measured driver value (same value the band was computed from);
+                             omitted when 0 / absent (never "0%"). Mirrors the web card. --}}
+                        @if(($insight['value'] ?? 0) > 0 && filled($insight['driver'] ?? null))
+                            <div style="font-size: 9px; color: #55505A; margin-top: 6px;"><span style="font-weight: bold; color: #301C47;">Measured:</span> {{ $insight['driver'] }} {{ ReportContent::num($insight['value']) }}%</div>
+                        @endif
                         @if(!empty($insight['comment']))
                             <div style="font-size: 9px; color: #33303a; margin-top: 8px; line-height: 1.5;">{{ $insight['comment'] }}</div>
                         @endif

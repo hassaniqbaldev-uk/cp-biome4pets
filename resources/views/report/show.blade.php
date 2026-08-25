@@ -386,19 +386,29 @@
             <div class="report-head">
                 <h2 class="text-lg font-bold tracking-tight">Your Dog vs Healthy Microbiome</h2>
             </div>
-            <div class="report-body">
+            <div class="report-body space-y-6">
+                {{-- How to read these charts (Carol's explainer, verbatim). --}}
+                <div>
+                    <h3 class="font-bold text-navy text-base mb-2">How to read these charts</h3>
+                    <p class="text-gray-700 leading-relaxed">The Healthy Dog pie chart shows the average relative abundance of each bacterial phylum found across our reference group of 200 healthy dogs. This is a comparison profile, not a set of targets or scoring cut-offs. Individual healthy dogs naturally vary, so your dog's microbiome does not need to match the healthy-dog pie chart exactly.</p>
+                    <p class="text-gray-700 leading-relaxed mt-3">The phylum pages later in the report use separate low, optimal and high thresholds to assess each bacterial group. This means a result may differ from the healthy-dog average while still remaining within a commonly observed range.</p>
+                    <p class="text-gray-700 leading-relaxed mt-3">The pie charts provide an overall comparison. The later results pages and Veterinary Summary explain which findings are most relevant to your dog.</p>
+                </div>
+
                 <div class="grid grid-cols-1 md:grid-cols-2 gap-6 sm:gap-8">
                     <div class="text-center chart-frame lift">
                         <h3 class="font-bold text-navy mb-4">Healthy Dog</h3>
                         <div class="relative mx-auto" style="max-width: 300px;">
                             <canvas id="healthyPieChart"></canvas>
                         </div>
+                        <p class="text-gray-700 leading-relaxed text-sm mt-4"><b class="text-navy">Reference average:</b> Based on the mean microbiome profile of 200 healthy dogs. This is a comparison figure, not an individual target.</p>
                     </div>
                     <div class="text-center chart-frame lift">
                         <h3 class="font-bold text-navy mb-4">Your Dog</h3>
                         <div class="relative mx-auto" style="max-width: 300px;">
                             <canvas id="yourDogPieChart"></canvas>
                         </div>
+                        <p class="text-gray-700 leading-relaxed text-sm mt-4"><b class="text-navy">Your dog's profile:</b> The measured relative abundance of each phylum in this sample.</p>
                     </div>
                 </div>
 
@@ -584,7 +594,9 @@
                                 'bad'  => ['bg-red-500', 'text-white'],
                                 default => ['bg-gray-100', 'text-gray-500'],
                             };
-                            $label = $insight['label'] ?: 'N/A';
+                            // Reader-facing heading (Carol's wording); falls back to the
+                            // structural label. Colour above still keys off the tone.
+                            $label = ($insight['display_label'] ?? $insight['label']) ?: 'N/A';
                         @endphp
                         <div class="border border-gray-200 rounded-2xl p-5 flex flex-col lift">
                             <div class="flex items-start justify-between gap-4">
@@ -596,6 +608,13 @@
                                     {{ $label }}
                                 </span>
                             </div>
+                            {{-- The measured driver value behind this assessment (the SAME
+                                 value the band was computed from), so genus figures like
+                                 Blautia / Escherichia-Shigella are locatable, not prose-only.
+                                 Omitted entirely when the value is 0 / absent (never "0%"). --}}
+                            @if(($insight['value'] ?? 0) > 0 && filled($insight['driver'] ?? null))
+                                <p class="text-sm text-gray-700 mt-2"><span class="font-bold text-navy">Measured:</span> {{ $insight['driver'] }} {{ \App\Support\ReportContent::num($insight['value']) }}%</p>
+                            @endif
                             @if(!empty($insight['comment']))
                                 <p class="text-gray-700 mt-3 leading-relaxed">{{ $insight['comment'] }}</p>
                             @endif

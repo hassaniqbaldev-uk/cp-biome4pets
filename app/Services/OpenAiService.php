@@ -877,12 +877,166 @@ PROMPT;
     }
 
     /**
+     * Deterministically decide which diet-guidance rules genuinely FIRE for this dog,
+     * so the AI is handed only rules matched to the dog's real values and can no longer
+     * invoke a "high X" rule for a dog whose X isn't high (the report-149 bug: white
+     * fish "due to high Proteobacteria" when Proteobacteria was 5.12%).
+     *
+     * Each rule's finding is parsed to a direction (High/Low) + subject, then checked
+     * against the SAME thresholds the rest of the report uses:
+     *   - a phylum in ReportContent::PHYLUM_BANDS → fires only when the dog's value is
+     *     above 'high' (for "High X") or below 'low' (for "Low X");
+     *   - "diversity" → the report's diversity band (Low < 1.9 / High > 2.5);
+     *   - "richness"  → RICHNESS_LOW_MAX (Low) / richnessHealthyMin() (High);
+     *   - "dysbiosis" → DYSBIOSIS_HEALTHY_MAX (High) / DYSBIOSIS_HEALTHY_MIN (Low).
+     * FAIL-SAFE: a finding with no parseable High/Low direction, an unknown subject, or
+     * a value that can't be resolved for this dog goes to 'general' (offered as generic
+     * guidance, NEVER fired as a dog-specific claim). Computable rules that do NOT fire
+     * are dropped entirely. Pure array logic — never throws.
+     *
+     * @param  array<int,array{finding:string,recommend:string,reason:string}>  $rules
+     * @return array{matched: array<int,array>, general: array<int,array>}
+     */
+    public function gateDietRules(array $rules, array $phylumTotals, float $diversityScore, array $deterministic = []): array
+    {
+        $matched = [];
+        $general = [];
+
+        $norm = static fn (string $s): string => preg_replace('/[^a-z0-9]/', '', strtolower($s));
+        $insight = $deterministic['insight_taxa'] ?? [];
+
+        // Case/format-insensitive value lookup: phylum totals first, then genus insight
+        // taxa (snake_case keys like 'escherichia_shigella'). Null when not present.
+        $resolve = function (string $subject) use ($phylumTotals, $insight, $norm): ?float {
+            $target = $norm($subject);
+            foreach ($phylumTotals as $k => $v) {
+                if ($norm((string) $k) === $target && is_numeric($v)) {
+                    return (float) $v;
+                }
+            }
+            if (is_array($insight)) {
+                foreach ($insight as $k => $v) {
+                    if ($norm((string) $k) === $target && is_numeric($v)) {
+                        return (float) $v;
+                    }
+                }
+            }
+
+            return null;
+        };
+
+        // Canonical PHYLUM_BANDS key matching the subject, or null.
+        $phylumKey = function (string $subject) use ($norm): ?string {
+            foreach (array_keys(\App\Support\ReportContent::PHYLUM_BANDS) as $k) {
+                if ($norm($k) === $norm($subject)) {
+                    return $k;
+                }
+            }
+
+            return null;
+        };
+
+        foreach ($rules as $rule) {
+            $finding = trim((string) ($rule['finding'] ?? ''));
+            $lower = strtolower($finding);
+            $dir = null;
+            $subject = '';
+            if (str_starts_with($lower, 'high ')) {
+                $dir = 'high';
+                $subject = trim(substr($finding, 5));
+            } elseif (str_starts_with($lower, 'low ')) {
+                $dir = 'low';
+                $subject = trim(substr($finding, 4));
+            }
+
+            // No parseable High/Low direction → general guidance.
+            if ($dir === null || $subject === '') {
+                $general[] = $rule;
+
+                continue;
+            }
+
+            // 1) Phylum-based finding (Proteobacteria, Prevotella, Firmicutes, …).
+            if ($pk = $phylumKey($subject)) {
+                $value = $resolve($pk);
+                if ($value === null) {           // can't resolve this dog's value → fail safe
+                    $general[] = $rule;
+
+                    continue;
+                }
+                $verdict = \App\Support\ReportContent::phylumBandVerdict($pk, $value);
+                if ($verdict === null) {
+                    $general[] = $rule;
+
+                    continue;
+                }
+                if (($dir === 'high' && $verdict['band'] === 'high')
+                    || ($dir === 'low' && $verdict['band'] === 'low')) {
+                    $matched[] = $rule;          // fires
+                }
+                // else: computable but not firing → dropped.
+                continue;
+            }
+
+            // 2) Shannon diversity.
+            if (str_contains(strtolower($subject), 'diversity')) {
+                $band = \App\Support\ReportContent::diversityBand($diversityScore)['label']; // Low|Medium|High
+                if (($dir === 'high' && $band === 'High') || ($dir === 'low' && $band === 'Low')) {
+                    $matched[] = $rule;
+                }
+
+                continue;
+            }
+
+            // 3) Species richness.
+            if (str_contains(strtolower($subject), 'richness')) {
+                $r = $deterministic['species_richness'] ?? null;
+                if (! is_numeric($r)) {
+                    $general[] = $rule;
+
+                    continue;
+                }
+                if (($dir === 'low' && (float) $r < \App\Support\ReportContent::RICHNESS_LOW_MAX)
+                    || ($dir === 'high' && (float) $r > \App\Support\ReportContent::richnessHealthyMin())) {
+                    $matched[] = $rule;
+                }
+
+                continue;
+            }
+
+            // 4) Dysbiosis.
+            if (str_contains(strtolower($subject), 'dysbiosis')) {
+                $d = $deterministic['dysbiosis_score'] ?? null;
+                if (! is_numeric($d)) {
+                    $general[] = $rule;
+
+                    continue;
+                }
+                if (($dir === 'high' && (float) $d > \App\Support\ReportContent::DYSBIOSIS_HEALTHY_MAX)
+                    || ($dir === 'low' && (float) $d < \App\Support\ReportContent::DYSBIOSIS_HEALTHY_MIN)) {
+                    $matched[] = $rule;
+                }
+
+                continue;
+            }
+
+            // 5) Uncomputable subject (butyrate producers, protein fermentation, bile
+            //    acid bacteria, inflammatory bacteria, Sutterella, carbohydrate
+            //    fermenters, …) → general guidance, never a dog-specific claim.
+            $general[] = $rule;
+        }
+
+        return ['matched' => $matched, 'general' => $general];
+    }
+
+    /**
      * Build the diet-guidance USER message: the editable prompt (Setting::
-     * dietGuidancePrompt) + the finding→food rules (Setting::dietGuidanceRules) as a
-     * readable guidance list + THIS dog's findings (the SAME inputs the interpretation
-     * call receives — phylum totals, diversity, richness, dysbiosis, classification,
-     * notable taxa, genus insight taxa, plus the pet's diet + health notes from the
-     * shared petContext mapper). Public so tests can assert its contents without HTTP.
+     * dietGuidancePrompt) + the finding→food rules (Setting::dietGuidanceRules),
+     * DETERMINISTICALLY GATED (see gateDietRules) into APPLICABLE (matched to this
+     * dog's real values) and GENERAL (uncomputable) sets, + THIS dog's findings (the
+     * SAME inputs the interpretation call receives — phylum totals, diversity,
+     * richness, dysbiosis, classification, notable taxa, genus insight taxa, plus the
+     * pet's diet + health notes). Public so tests can assert its contents without HTTP.
      */
     public function buildDietGuidancePrompt(array $phylumTotals, float $diversityScore, array $petContext = [], array $deterministic = []): string
     {
@@ -956,20 +1110,34 @@ PROMPT;
         }
         $petBlock = $petLines === [] ? '' : "\n".implode("\n", $petLines)."\n";
 
-        // Editable finding→food rules (Settings) as guidance.
-        $ruleLines = [];
-        foreach (Setting::dietGuidanceRules() as $rule) {
-            $ruleLines[] = "- {$rule['finding']} => {$rule['recommend']} ({$rule['reason']})";
+        // Editable finding→food rules (Settings), DETERMINISTICALLY GATED against this
+        // dog's real values so the AI is handed only the rules that genuinely apply —
+        // it can no longer invoke a "high X" rule for a dog whose X isn't high. Any
+        // failure here falls back to treating all rules as GENERAL guidance (never a
+        // dog-specific claim) and never throws (the caller's never-throws contract).
+        try {
+            $gated = $this->gateDietRules(Setting::dietGuidanceRules(), $phylumTotals, $diversityScore, $deterministic);
+        } catch (\Throwable $e) {
+            Log::warning('Diet guidance: rule gating failed; passing all rules as general guidance.', ['error' => $e->getMessage()]);
+            $gated = ['matched' => [], 'general' => Setting::dietGuidanceRules()];
         }
-        $rulesBlock = implode("\n", $ruleLines);
+
+        $fmt = static fn (array $r): string => '- '.trim((string) ($r['finding'] ?? '')).' => '.trim((string) ($r['recommend'] ?? '')).' ('.trim((string) ($r['reason'] ?? '')).')';
+        $matchedBlock = $gated['matched'] === [] ? "(none matched this dog's measured values)" : implode("\n", array_map($fmt, $gated['matched']));
+        $generalBlock = $gated['general'] === [] ? '(none)' : implode("\n", array_map($fmt, $gated['general']));
 
         $editablePrompt = Setting::dietGuidancePrompt();
 
         return <<<PROMPT
 {$editablePrompt}
 
-FINDING TO RECOMMENDATION RULES (use as guidance where this dog's findings match; interpret sensibly, not mechanically):
-{$rulesBlock}
+APPLICABLE RULES — the system has ALREADY matched these to THIS dog's measured values. Apply them where they fit the foods you choose; you MAY state the linked finding (e.g. that a level is raised or reduced) because it is confirmed for this dog:
+{$matchedBlock}
+
+GENERAL GUIDANCE — NOT tied to a specific measured value for this dog. You may draw on these for sensible everyday suggestions, but do NOT state that this dog has the associated finding (never call a level high or low) unless it appears under APPLICABLE RULES above:
+{$generalBlock}
+
+Do not invoke any finding that is not listed under APPLICABLE RULES. In particular, never describe a phylum or marker as high, low, elevated or reduced unless the system listed it as applicable above — base everything else on the findings below.
 
 THIS DOG'S MICROBIOME FINDINGS:
 Phylum percentages:

@@ -125,12 +125,16 @@ class HealthInsightRules
             'bands' => [
                 // Target checked first so the ± tolerance window wins over the knife-
                 // edge; High/Low then cover everything outside the window.
-                ['when' => 'target', 'label' => 'Target', 'tone' => self::TONE_GOOD, // CONFIRMED target 25 (as a range via TARGET_TOLERANCE)
-                    'comment' => 'Firmicutes are within the target range, suggesting a balanced microbiome that supports healthy gut-brain communication and normal behaviour and mood.'],
-                ['when' => ['gt' => 25], 'label' => 'High', 'tone' => self::TONE_BAD,
-                    'comment' => 'Firmicutes are above the target range. Elevated levels have been associated with alterations in the gut-brain axis and may indicate a microbiome that is less balanced in supporting normal behaviour and emotional wellbeing.'],
-                ['when' => ['lt' => 25], 'label' => 'Low', 'tone' => self::TONE_WARN,
-                    'comment' => 'Firmicutes are below the target range. Reduced levels may indicate a lower abundance of beneficial bacteria involved in producing compounds that support gut health, behaviour and emotional balance.'],
+                // NB: 'label' is the STRUCTURAL key (stored in score_behaviour_mood,
+                // used for band lookup, colour + enum validation) — kept as
+                // Target/High/Low. 'display_label' is the reader-facing heading
+                // (Carol's wording) rendered on the card; two bands may share one.
+                ['when' => 'target', 'label' => 'Target', 'display_label' => 'Good support', 'tone' => self::TONE_GOOD, // CONFIRMED target 25 (as a range via TARGET_TOLERANCE)
+                    'comment' => 'The level of bacteria associated with serotonin-supporting pathways and gut–brain communication is within our optimal range. This provides a positive microbial foundation for the production and exchange of metabolites involved in normal gut–brain communication, mood and behaviour.'],
+                ['when' => ['gt' => 25], 'label' => 'High', 'display_label' => 'Support recommended', 'tone' => self::TONE_BAD,
+                    'comment' => 'The level of bacteria associated with serotonin-supporting pathways and gut–brain communication is above our optimal range. More is not necessarily better. An excessive result can indicate that part of the bacterial community has expanded disproportionately, rather than representing a broader increase in beneficial activity. Restoring a more even balance may provide better support for gut–brain communication.'],
+                ['when' => ['lt' => 25], 'label' => 'Low', 'display_label' => 'Support recommended', 'tone' => self::TONE_WARN,
+                    'comment' => 'The level of bacteria associated with serotonin-supporting pathways and gut–brain communication is below our optimal range. This may reduce the variety of microbial metabolites available to support normal communication between the gut and brain. Increasing the level and variety of these bacteria may help restore a more supportive microbial balance.'],
             ],
         ],
 
@@ -187,9 +191,9 @@ class HealthInsightRules
             'bands' => [
                 // ≥3% (incl. 4%, 5%+) → Optimal Health (top band, score 3). CONFIRMED.
                 ['when' => ['gte' => 3], 'label' => 'Optimal Health', 'level' => 3, 'tone' => self::TONE_GOOD,
-                    'comment' => 'Blautia levels are within the target range, suggesting good gut wall integrity and a healthy intestinal barrier that supports nutrient absorption and immune function.'],
+                    'comment' => 'Blautia levels are within the target, suggesting good gut wall integrity and a healthy intestinal barrier that supports nutrient absorption and immune function.'],
                 ['when' => ['range' => [2, 3]], 'label' => 'Disrupted', 'level' => 2, 'tone' => self::TONE_WARN, // 2% to <3%
-                    'comment' => 'Blautia levels are below the target range, suggesting mild disruption to the gut wall. This may reduce the gut\'s ability to maintain a strong barrier and can contribute to digestive sensitivity and inflammation.'],
+                    'comment' => 'Blautia levels are below the target, suggesting mild disruption to the gut wall. This may reduce the gut\'s ability to maintain a strong barrier and can contribute to digestive sensitivity and inflammation.'],
                 // <2% → Leaky Gut (score 1). CONFIRMED.
                 ['when' => ['lt' => 2], 'label' => 'Leaky Gut', 'level' => 1, 'tone' => self::TONE_BAD,
                     'comment' => 'Blautia levels are significantly reduced, suggesting poor gut wall integrity and increased intestinal permeability ("leaky gut"). This may allow unwanted substances to cross the gut barrier, contributing to inflammation and immune dysfunction.'],
@@ -210,13 +214,13 @@ class HealthInsightRules
             'shared_note' => null,
             'bands' => [
                 ['when' => ['gt' => 0.5], 'label' => 'High', 'tone' => self::TONE_BAD, // CONFIRMED >0.5
-                    'comment' => 'Escherichia/Shigella levels are above the target range, suggesting an increased likelihood of excess gas, digestive discomfort and intestinal irritation.'],
+                    'comment' => 'Escherichia/Shigella levels are above the target, suggesting an increased likelihood of excess gas, digestive discomfort and intestinal irritation.'],
                 ['when' => ['lt' => 0.5], 'label' => 'Low', 'tone' => self::TONE_GOOD, // CONFIRMED <0.5 — favourable
                     'comment' => 'Escherichia/Shigella levels are low, which is considered beneficial and consistent with a healthy, well-balanced microbiome that is less likely to contribute to digestive discomfort or excess gas.'],
                 // Exactly 0.5 → on target. No tolerance window here (a ± window would
                 // contradict the CONFIRMED "Low is anything <0.5" edge).
                 ['when' => 'else', 'label' => 'Target', 'tone' => self::TONE_GOOD, // CONFIRMED target 0.5
-                    'comment' => 'Escherichia/Shigella levels are within the target range, suggesting a balanced gut environment that supports normal digestion and digestive comfort.'],
+                    'comment' => 'Escherichia/Shigella levels are within the target, suggesting a balanced gut environment that supports normal digestion and digestive comfort.'],
             ],
         ],
 
@@ -233,13 +237,15 @@ class HealthInsightRules
             'favourable_label' => 'Target',
             'shared_note' => 'Firmicutes play multiple roles within the gut microbiome, so they are used to assess both gut-brain communication and the microbiome\'s resilience to environmental change.',
             'bands' => [
-                ['when' => ['gt' => 25.99], 'label' => 'High', 'tone' => self::TONE_BAD, // per spec >25.99
-                    'comment' => 'Firmicutes are above the target range, suggesting the microbiome is outside the optimal balance for environmental resilience.'],
-                ['when' => ['lt' => 25], 'label' => 'Low', 'tone' => self::TONE_WARN, // per spec <25
-                    'comment' => 'Firmicutes are below the target range, suggesting the microbiome may be less resilient to environmental stressors such as dietary changes, travel, illness or medication.'],
+                // 'label' stays the structural key (Target/High/Low); 'display_label'
+                // is Carol's reader-facing heading. Thresholds unchanged.
+                ['when' => ['gt' => 25.99], 'label' => 'High', 'display_label' => 'Reduced resilience', 'tone' => self::TONE_BAD, // per spec >25.99
+                    'comment' => 'The bacterial community associated with maintaining microbiome stability is above our optimal range. An excessive result may reflect over-expansion within the microbiome rather than greater resilience. When one part of the community occupies too much of the available space, the overall microbiome may become less evenly balanced and less adaptable to change. The Veterinary Summary will identify any specific bacterial dominance or overgrowth contributing to this result.'],
+                ['when' => ['lt' => 25], 'label' => 'Low', 'display_label' => 'Reduced resilience', 'tone' => self::TONE_WARN, // per spec <25
+                    'comment' => 'The bacterial community associated with maintaining microbiome stability is below our optimal range. A reduced level may leave the microbiome with less functional support when responding to changes such as illness, medication, surgery, diet, travel or environmental stress. Building this part of the community may help improve stability and recovery.'],
                 // [25, 25.99] = Target (~25).
-                ['when' => 'else', 'label' => 'Target', 'tone' => self::TONE_GOOD,
-                    'comment' => 'Firmicutes are within the target range, suggesting a balanced microbiome that is well adapted to cope with normal environmental challenges.'],
+                ['when' => 'else', 'label' => 'Target', 'display_label' => 'Good resilience', 'tone' => self::TONE_GOOD,
+                    'comment' => 'The bacterial community associated with maintaining microbiome stability is within our optimal range. This provides a positive foundation for coping with normal dietary, physical and environmental changes while maintaining a more stable microbial balance.'],
             ],
         ],
     ];
@@ -419,6 +425,9 @@ class HealthInsightRules
             'driver' => $cfg['driver'] ?? '',
             'value' => $value,
             'label' => $band['label'] ?? null,
+            // Reader-facing heading for the card badge; falls back to the structural
+            // label so cards without a custom heading are unchanged.
+            'display_label' => $band['display_label'] ?? ($band['label'] ?? null),
             'comment' => $band['comment'] ?? null,
             'tone' => $band['tone'] ?? null,
             // The healthy/green band for Stage-3 colouring (Gas flips it to Low).

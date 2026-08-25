@@ -119,4 +119,59 @@ class HealthInsightScoringTest extends TestCase
         $options = HealthInsightRules::labelOptions('score_gut_wall');
         $this->assertSame(['Optimal Health', 'Disrupted', 'Leaky Gut'], array_values($options));
     }
+
+    private function renderReport(Report $report): array
+    {
+        $report = $report->fresh()->load(['client', 'pet.client', 'test', 'plan', 'catalogProducts', 'steps.products.catalogProduct']);
+
+        return [
+            'web' => view('report.show', ['report' => $report])->render(),
+            'pdf' => view('report.pdf', ['report' => $report])->render(),
+        ];
+    }
+
+    public function test_cards_show_the_driver_measured_value_matching_the_band_value(): void
+    {
+        // Genus drivers (Blautia, E/Shigella) + phyla; all non-zero → all shown.
+        $test = $this->testWith(
+            phylumData: ['Bacteroidetes' => 50.05, 'Firmicutes' => 26.06],
+            insightTaxa: ['blautia' => 0.85, 'escherichia_shigella' => 1.12],
+        );
+        $report = ReportGeneration::createReportFromTest($test);
+
+        // The displayed figure equals the value the band was computed from (same source).
+        $percentages = ReportContent::insightTaxonPercentages($report);
+        foreach (ReportContent::healthInsights($report) as $insight) {
+            $this->assertSame(
+                (float) ($percentages[$insight['driver']] ?? -1),
+                (float) $insight['value'],
+                "displayed value for {$insight['driver']} must equal the band-driving value",
+            );
+        }
+
+        // Rendered on BOTH web and PDF — genus figures are now locatable, not prose-only.
+        foreach ($this->renderReport($report) as $where => $html) {
+            $this->assertStringContainsString('Measured:', $html, $where);
+            $this->assertStringContainsString('Blautia 0.85%', $html, $where);
+            $this->assertStringContainsString('Escherichia/Shigella 1.12%', $html, $where);
+            $this->assertStringContainsString('Firmicutes 26.06%', $html, $where);
+        }
+    }
+
+    public function test_zero_or_absent_driver_value_omits_the_measured_line(): void
+    {
+        // Verrucomicrobia absent (→ 0) drives Metabolic Health: no "Measured" line for it,
+        // but the card itself (title/band) still renders.
+        $test = $this->testWith(
+            phylumData: ['Bacteroidetes' => 50, 'Firmicutes' => 26],
+            insightTaxa: ['blautia' => 0.85, 'escherichia_shigella' => 1.12],
+        );
+        $report = ReportGeneration::createReportFromTest($test);
+
+        foreach ($this->renderReport($report) as $where => $html) {
+            $this->assertStringContainsString('Metabolic Health', $html, $where);      // card present
+            $this->assertStringNotContainsString('Verrucomicrobia 0%', $html, $where); // no 0% line
+            $this->assertStringNotContainsString('Measured: Verrucomicrobia', $html, $where);
+        }
+    }
 }

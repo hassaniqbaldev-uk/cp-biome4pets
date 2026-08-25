@@ -49,10 +49,15 @@ class HealthInsightRulesTest extends TestCase
     // 2. BEHAVIOUR & MOOD — Firmicutes (High >25 / Target 25 / Low <25).
     public function test_behaviour_mood_firmicutes_bands(): void
     {
+        // Structural labels unchanged (stored score keys, colour, enum validation).
         $this->assertSame('High', $this->band('score_behaviour_mood', 26)['label']);
         $this->assertSame('Target', $this->band('score_behaviour_mood', 25)['label']);
         $this->assertSame('Low', $this->band('score_behaviour_mood', 20)['label']);
-        $this->assertStringStartsWith('Firmicutes are above the target range', $this->band('score_behaviour_mood', 26)['comment']);
+        // Carol's reader-facing headings (display_label) and general "optimal range" copy.
+        $this->assertSame('Support recommended', $this->band('score_behaviour_mood', 26)['display_label']);
+        $this->assertSame('Good support', $this->band('score_behaviour_mood', 25)['display_label']);
+        $this->assertStringContainsString('above our optimal range', $this->band('score_behaviour_mood', 26)['comment']);
+        $this->assertStringNotContainsString('target range', $this->band('score_behaviour_mood', 26)['comment']);
     }
 
     // 3. METABOLIC — Verrucomicrobia CONFIRMED 3-band range: <1 Low / 1-4 Healthy
@@ -104,7 +109,8 @@ class HealthInsightRulesTest extends TestCase
         $this->assertSame('Optimal Health', $target['label']);
         $this->assertSame(3, $target['level']);
         $this->assertTrue($target['favourable']);
-        $this->assertStringStartsWith('Blautia levels are within the target range', $target['comment']);
+        $this->assertStringStartsWith('Blautia levels are within the target', $target['comment']);
+        $this->assertStringNotContainsString('target range', $target['comment']);
 
         // ≥3 incl. higher all Optimal Health (score 3).
         $this->assertSame(3, $this->band('score_gut_wall', 5)['level']);
@@ -151,9 +157,33 @@ class HealthInsightRulesTest extends TestCase
         $this->assertSame('Target', $this->band('score_stress_resilience', 25.5)['label']);
         $this->assertSame('Target', $this->band('score_stress_resilience', 25.0)['label']);
 
+        // Carol's reader-facing headings; structural labels above are unchanged.
+        $this->assertSame('Reduced resilience', $this->band('score_stress_resilience', 26)['display_label']);
+        $this->assertSame('Reduced resilience', $this->band('score_stress_resilience', 24)['display_label']);
+        $this->assertSame('Good resilience', $this->band('score_stress_resilience', 25.5)['display_label']);
+        $this->assertStringContainsString('above our optimal range', $this->band('score_stress_resilience', 26)['comment']);
+
         // The shared explanatory note appears on this insight.
         $note = $this->band('score_stress_resilience', 25.5)['shared_note'];
         $this->assertStringContainsString('Firmicutes play multiple roles', $note);
+    }
+
+    /**
+     * Guard: NO band comment across ANY insight may say "target range" — Carol's
+     * rewrite (Behaviour & Mood, Env Stress) plus the target-range→target sweep
+     * (Gut Wall, Gas & Digestive) removed it everywhere it was reader-facing.
+     */
+    public function test_no_band_comment_contains_target_range(): void
+    {
+        foreach (HealthInsightRules::HEALTH_INSIGHT_RULES as $field => $cfg) {
+            foreach ($cfg['bands'] as $band) {
+                $this->assertStringNotContainsStringIgnoringCase(
+                    'target range',
+                    (string) ($band['comment'] ?? ''),
+                    "{$field} / {$band['label']} still says 'target range'",
+                );
+            }
+        }
     }
 
     public function test_target_tolerance_is_a_single_adjustable_constant(): void

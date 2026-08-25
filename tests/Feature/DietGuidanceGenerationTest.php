@@ -333,4 +333,90 @@ class DietGuidanceGenerationTest extends TestCase
         $this->assertStringContainsString('&lt;script&gt;', $web);
         $this->assertStringContainsString('and safe text', $web);
     }
+
+    // ── Rule gating: only genuinely-matching rules fire ─────────────────────
+
+    public function test_high_phylum_rule_fires_only_above_the_high_threshold(): void
+    {
+        $svc = new OpenAiService;
+        $rules = [['finding' => 'High Proteobacteria', 'recommend' => 'White fish', 'reason' => 'x']];
+
+        // Proteobacteria high threshold = 18. 5.12% (Oscar) → does NOT fire, and a
+        // computable-but-not-firing rule is DROPPED (not offered as general either).
+        $oscar = $svc->gateDietRules($rules, ['Proteobacteria' => 5.12], 2.4, []);
+        $this->assertSame([], $oscar['matched']);
+        $this->assertSame([], $oscar['general']);
+
+        // 20.85% (Piper) → fires.
+        $piper = $svc->gateDietRules($rules, ['Proteobacteria' => 20.85], 2.4, []);
+        $this->assertCount(1, $piper['matched']);
+        $this->assertSame('High Proteobacteria', $piper['matched'][0]['finding']);
+    }
+
+    public function test_low_phylum_rule_fires_only_below_the_low_threshold(): void
+    {
+        $svc = new OpenAiService;
+        $rules = [['finding' => 'Low Bacteroidetes', 'recommend' => 'x', 'reason' => 'y']]; // low = 10
+        $this->assertCount(1, $svc->gateDietRules($rules, ['Bacteroidetes' => 4], 2.4, [])['matched']);
+        $this->assertSame([], $svc->gateDietRules($rules, ['Bacteroidetes' => 25], 2.4, [])['matched']);
+    }
+
+    public function test_diversity_richness_dysbiosis_gating(): void
+    {
+        $svc = new OpenAiService;
+        // Low diversity: < 1.9 fires; 2.4 (Medium) does not.
+        $this->assertCount(1, $svc->gateDietRules([['finding' => 'Low diversity', 'recommend' => 'x', 'reason' => 'y']], [], 1.5, [])['matched']);
+        $this->assertSame([], $svc->gateDietRules([['finding' => 'Low diversity', 'recommend' => 'x', 'reason' => 'y']], [], 2.4, [])['matched']);
+        // High dysbiosis: > 0.5 fires.
+        $this->assertCount(1, $svc->gateDietRules([['finding' => 'High dysbiosis', 'recommend' => 'x', 'reason' => 'y']], [], 2.4, ['dysbiosis_score' => 15.16])['matched']);
+        $this->assertSame([], $svc->gateDietRules([['finding' => 'High dysbiosis', 'recommend' => 'x', 'reason' => 'y']], [], 2.4, ['dysbiosis_score' => 0.4])['matched']);
+        // Low richness: < 400 fires.
+        $this->assertCount(1, $svc->gateDietRules([['finding' => 'Low richness', 'recommend' => 'x', 'reason' => 'y']], [], 2.4, ['species_richness' => 270])['matched']);
+    }
+
+    public function test_uncomputable_and_unresolvable_rules_go_to_general_never_matched(): void
+    {
+        $svc = new OpenAiService;
+        $rules = [
+            ['finding' => 'High protein fermentation', 'recommend' => 'a', 'reason' => 'b'], // no metric → general
+            ['finding' => 'High Sutterella', 'recommend' => 'a', 'reason' => 'b'],           // not a banded phylum → general
+            ['finding' => 'High Prevotella', 'recommend' => 'a', 'reason' => 'b'],           // banded, but no value present → fail safe → general
+        ];
+        $g = $svc->gateDietRules($rules, ['Proteobacteria' => 5], 2.4, []);
+        $this->assertSame([], $g['matched']);
+        $this->assertCount(3, $g['general']);
+    }
+
+    public function test_prompt_hands_over_only_matched_rules_as_applicable(): void
+    {
+        // Oscar-like (Proteobacteria 5.12, diversity 2.2): the High Proteobacteria rule
+        // (its recommend is the only source of "White fish") is dropped, so "White fish"
+        // must not appear anywhere in the prompt.
+        $oscarPrompt = (new OpenAiService)->buildDietGuidancePrompt(
+            ['Proteobacteria' => 5.12, 'Firmicutes' => 26.06], 2.2, [], ['species_richness' => 270, 'dysbiosis_score' => 0.52],
+        );
+        $this->assertStringContainsString('APPLICABLE RULES', $oscarPrompt);
+        $this->assertStringNotContainsString('White fish', $oscarPrompt);
+        // The old loose framing that caused the bug is gone.
+        $this->assertStringNotContainsString('interpret sensibly, not mechanically', $oscarPrompt);
+
+        // Piper-like (Proteobacteria 20.85): White fish IS applicable.
+        $piperPrompt = (new OpenAiService)->buildDietGuidancePrompt(['Proteobacteria' => 20.85], 2.4, [], []);
+        $applicable = substr(
+            $piperPrompt,
+            strpos($piperPrompt, 'APPLICABLE RULES'),
+            strpos($piperPrompt, 'GENERAL GUIDANCE') - strpos($piperPrompt, 'APPLICABLE RULES'),
+        );
+        $this->assertStringContainsString('White fish', $applicable);
+    }
+
+    public function test_gating_never_throws_on_malformed_rules(): void
+    {
+        $svc = new OpenAiService;
+        // Missing keys / odd shapes must be tolerated (fail safe to general, no throw).
+        $g = $svc->gateDietRules([['finding' => ''], ['recommend' => 'x'], ['finding' => 'Zzz Unknownus']], ['Proteobacteria' => 5], 2.4, []);
+        $this->assertIsArray($g['matched']);
+        $this->assertIsArray($g['general']);
+        $this->assertSame([], $g['matched']);
+    }
 }
