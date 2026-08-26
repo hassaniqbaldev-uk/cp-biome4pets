@@ -165,7 +165,8 @@ class HealthInsightRulesTest extends TestCase
 
         // The shared explanatory note appears on this insight.
         $note = $this->band('score_stress_resilience', 25.5)['shared_note'];
-        $this->assertStringContainsString('Firmicutes play multiple roles', $note);
+        $this->assertStringContainsString('These bacteria play multiple roles', $note);
+        $this->assertStringNotContainsString('Firmicutes', $note);
     }
 
     /**
@@ -226,5 +227,25 @@ class HealthInsightRulesTest extends TestCase
         $blank = HealthInsightRules::describeByLabel('score_skin_allergy', null);
         $this->assertNull($blank['comment']);
         $this->assertNull($blank['label']);
+    }
+
+    /**
+     * Carol's request: the two Firmicutes-driven cards must not name "Firmicutes" in
+     * their interpretive WORDING — the description, the shared note, or any band
+     * comment. (The 'driver' key stays 'Firmicutes' for the "Measured:" line, a
+     * separate pending decision, so that is deliberately NOT asserted here.)
+     */
+    public function test_firmicutes_cards_have_no_firmicutes_in_the_wording(): void
+    {
+        foreach (['score_behaviour_mood', 'score_stress_resilience'] as $field) {
+            $cfg = HealthInsightRules::HEALTH_INSIGHT_RULES[$field];
+            $this->assertStringNotContainsString('Firmicutes', (string) $cfg['desc'], "{$field} desc");
+            $this->assertStringNotContainsString('Firmicutes', (string) ($cfg['shared_note'] ?? ''), "{$field} shared_note");
+            foreach ($cfg['bands'] as $band) {
+                $this->assertStringNotContainsString('Firmicutes', (string) ($band['comment'] ?? ''), "{$field} / {$band['label']} comment");
+            }
+            // …but the driver (for the Measured line) is intentionally still Firmicutes.
+            $this->assertSame('Firmicutes', $cfg['driver']);
+        }
     }
 }

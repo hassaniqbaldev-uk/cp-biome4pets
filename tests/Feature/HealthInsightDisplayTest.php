@@ -82,7 +82,7 @@ class HealthInsightDisplayTest extends TestCase
         $this->assertStringContainsString('Escherichia/Shigella levels are low, which is considered beneficial', $html); // Gas Low
 
         // 3. Environmental Resilience shows the shared Firmicutes note.
-        $this->assertStringContainsString('Firmicutes play multiple roles within the gut microbiome', $html);
+        $this->assertStringContainsString('These bacteria play multiple roles within the gut microbiome', $html);
     }
 
     public function test_web_gas_low_is_green_and_skin_high_is_red(): void
@@ -122,7 +122,7 @@ class HealthInsightDisplayTest extends TestCase
         $this->assertStringContainsString('Higher levels of Bacteroidetes have been associated', $html);
         $this->assertStringContainsString('Escherichia/Shigella levels are low', $html);
         // Shared note present.
-        $this->assertStringContainsString('Firmicutes play multiple roles within the gut microbiome', $html);
+        $this->assertStringContainsString('These bacteria play multiple roles within the gut microbiome', $html);
         // Direction colours: green (#16a34a) for Gas Low, red (#dc2626) for Skin High.
         $this->assertStringContainsString('#16a34a', $html);
         $this->assertStringContainsString('#dc2626', $html);

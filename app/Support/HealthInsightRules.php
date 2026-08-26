@@ -116,8 +116,9 @@ class HealthInsightRules
         //    a range via TARGET_TOLERANCE), Low <25; no medium band.
         'score_behaviour_mood' => [
             'title' => 'Behaviour & Mood Balance',
-            // Client's scientific wording (Firmicutes / gut-brain axis).
-            'desc' => 'Evaluates the abundance of Firmicutes, a major bacterial phylum that includes many beneficial species involved in the gut-brain axis. These bacteria support the production of short-chain fatty acids and stimulate pathways involved in serotonin synthesis, helping to regulate mood, behaviour and stress resilience through microbiome-brain communication.',
+            // Client's scientific wording (gut-brain axis). "Firmicutes" removed per
+            // Carol's request; the phylum is still named on the "Measured:" driver line.
+            'desc' => 'Evaluates bacteria involved in the gut-brain axis, including many beneficial species. These bacteria support the production of short-chain fatty acids and stimulate pathways involved in serotonin synthesis, helping to regulate mood, behaviour and stress resilience through microbiome-brain communication.',
             'driver' => 'Firmicutes',
             'target' => 25.0, // per original spec
             'favourable_label' => 'Target',
@@ -230,12 +231,13 @@ class HealthInsightRules
         //    shared note explaining why Firmicutes drives two insights.
         'score_stress_resilience' => [
             'title' => 'Environmental Stress Resilience',
-            // Client's scientific wording (Firmicutes / resilience).
-            'desc' => 'Assesses Firmicutes, a dominant bacterial phylum associated with microbial resilience, metabolic flexibility and maintenance of a stable gut ecosystem. Adequate abundance supports resistance to environmental challenges, helping the microbiome recover from dietary changes, stress and other factors that may disrupt microbial balance.',
+            // Client's scientific wording (resilience). "Firmicutes" removed per Carol's
+            // request; the phylum is still named on the "Measured:" driver line.
+            'desc' => 'Assesses bacteria associated with microbial resilience, metabolic flexibility and maintenance of a stable gut ecosystem. Adequate abundance supports resistance to environmental challenges, helping the microbiome recover from dietary changes, stress and other factors that may disrupt microbial balance.',
             'driver' => 'Firmicutes',
             'target' => 25.0,
             'favourable_label' => 'Target',
-            'shared_note' => 'Firmicutes play multiple roles within the gut microbiome, so they are used to assess both gut-brain communication and the microbiome\'s resilience to environmental change.',
+            'shared_note' => 'These bacteria play multiple roles within the gut microbiome, so they are used to assess both gut-brain communication and the microbiome\'s resilience to environmental change.',
             'bands' => [
                 // 'label' stays the structural key (Target/High/Low); 'display_label'
                 // is Carol's reader-facing heading. Thresholds unchanged.
