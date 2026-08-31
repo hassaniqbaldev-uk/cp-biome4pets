@@ -608,6 +608,12 @@
                         @if(!empty($insight['comment']))
                             <div style="font-size: 9px; color: #33303a; margin-top: 8px; line-height: 1.5;">{{ $insight['comment'] }}</div>
                         @endif
+                        {{-- Behaviour & Mood ONLY, HIGH (excess) state only — gated on the
+                             card's own status ($insight['label'] === 'High'); mirrors the web.
+                             18.6% is client display text, not a cutoff. --}}
+                        @if(($insight['field'] ?? null) === 'score_behaviour_mood' && ($insight['label'] ?? null) === 'High')
+                            <div style="font-size: 9px; color: #33303a; margin-top: 8px; line-height: 1.5;">Excess Firmicutes (healthy avg: 18.6%) disrupt the gut-brain axis by increasing harmful species</div>
+                        @endif
                         @if(!empty($insight['shared_note']))
                             <div style="font-size: 8px; color: #55505A; font-style: italic; margin-top: 8px; padding-top: 6px; border-top: 1px solid #ececf0;">{{ $insight['shared_note'] }}</div>
                         @endif

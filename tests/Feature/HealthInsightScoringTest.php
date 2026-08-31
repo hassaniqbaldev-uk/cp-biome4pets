@@ -174,4 +174,50 @@ class HealthInsightScoringTest extends TestCase
             $this->assertStringNotContainsString('Measured: Verrucomicrobia', $html, $where);
         }
     }
+
+    private const EXCESS_LINE = 'Excess Firmicutes (healthy avg: 18.6%) disrupt the gut-brain axis by increasing harmful species';
+
+    public function test_excess_line_shows_only_in_the_high_behaviour_mood_state(): void
+    {
+        // Firmicutes 26.06% → Behaviour & Mood 'High' (above 25 + tolerance).
+        $report = ReportGeneration::createReportFromTest(
+            $this->testWith(phylumData: ['Firmicutes' => 26.06], insightTaxa: []),
+        );
+        $this->assertSame('High', $report->score_behaviour_mood);
+
+        foreach ($this->renderReport($report) as $where => $html) {
+            // Shown exactly once, web + PDF.
+            $this->assertSame(1, substr_count($html, self::EXCESS_LINE), "{$where}: line should appear once");
+            // Carol's existing state comment is still present (untouched).
+            $this->assertStringContainsString('is above our optimal range', $html, $where);
+        }
+    }
+
+    public function test_excess_line_absent_when_behaviour_mood_is_target_or_low(): void
+    {
+        // Target: |25 - 25| <= 0.25 → 'Target'. Low: 20 < 25 → 'Low'.
+        foreach ([25.0 => 'Target', 20.0 => 'Low'] as $firmicutes => $expectedLabel) {
+            $report = ReportGeneration::createReportFromTest(
+                $this->testWith(phylumData: ['Firmicutes' => $firmicutes], insightTaxa: []),
+            );
+            $this->assertSame($expectedLabel, $report->score_behaviour_mood);
+
+            foreach ($this->renderReport($report) as $where => $html) {
+                $this->assertStringNotContainsString(self::EXCESS_LINE, $html, "{$where} @ {$expectedLabel}");
+            }
+        }
+    }
+
+    public function test_excess_line_is_null_safe_when_status_is_missing(): void
+    {
+        // A report with an empty/unclassifiable behaviour-mood status never shows it.
+        $report = ReportGeneration::createReportFromTest(
+            $this->testWith(phylumData: ['Firmicutes' => 26.06], insightTaxa: []),
+        );
+        $report->update(['score_behaviour_mood' => '']);   // legacy/blank status
+
+        foreach ($this->renderReport($report) as $where => $html) {
+            $this->assertStringNotContainsString(self::EXCESS_LINE, $html, "{$where}: blank status");
+        }
+    }
 }

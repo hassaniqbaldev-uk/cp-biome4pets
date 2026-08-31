@@ -618,6 +618,15 @@
                             @if(!empty($insight['comment']))
                                 <p class="text-gray-700 mt-3 leading-relaxed">{{ $insight['comment'] }}</p>
                             @endif
+                            {{-- Behaviour & Mood ONLY, and ONLY in its HIGH (excess) state.
+                                 Gated on the card's own authoritative status ($insight['label']
+                                 === 'High', the structural band) — no new threshold, so this
+                                 line and the card's own state can never disagree. Null/other
+                                 states (Target/Low/missing) never show it. The 18.6% is the
+                                 client's literal display text, not a cutoff. --}}
+                            @if(($insight['field'] ?? null) === 'score_behaviour_mood' && ($insight['label'] ?? null) === 'High')
+                                <p class="text-gray-700 mt-3 leading-relaxed">Excess Firmicutes (healthy avg: 18.6%) disrupt the gut-brain axis by increasing harmful species</p>
+                            @endif
                             @if(!empty($insight['shared_note']))
                                 <p class="text-xs text-gray-500 mt-3 pt-3 border-t border-gray-100 italic">{{ $insight['shared_note'] }}</p>
                             @endif
