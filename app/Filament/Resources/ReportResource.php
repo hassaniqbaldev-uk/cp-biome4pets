@@ -786,7 +786,26 @@ class ReportResource extends Resource
 
                             Forms\Components\Toggle::make('hide_subscribe')
                                 ->label('Hide subscribe section')
+                                ->live()
+                                // Mutually exclusive with "no commerce": turning this on
+                                // clears hide_commerce (both true makes no sense — this
+                                // hides the whole plan, that shows it without prices).
+                                ->afterStateUpdated(function ($state, Forms\Set $set) {
+                                    if ($state) {
+                                        $set('hide_commerce', false);
+                                    }
+                                })
                                 ->helperText('Hide the subscription / recommended-next-steps section on this report (e.g. for retests or customers already on the programme). The report\'s findings (metrics, charts, classification, insights, summaries) always stay visible.'),
+
+                            Forms\Components\Toggle::make('hide_commerce')
+                                ->label('No commerce (plan only)')
+                                ->live()
+                                ->afterStateUpdated(function ($state, Forms\Set $set) {
+                                    if ($state) {
+                                        $set('hide_subscribe', false);
+                                    }
+                                })
+                                ->helperText('Shows the plan without prices or purchase options. Turns off "Hide subscribe section".'),
 
                             Forms\Components\Actions::make([
                                 Forms\Components\Actions\Action::make('apply_plan')

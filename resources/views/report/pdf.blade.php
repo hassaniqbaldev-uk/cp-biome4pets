@@ -669,7 +669,9 @@
     $savingClause = (filled($subSaving) && filled($subFullPrice))
         ? ' — ' . $subSaving . ' the usual ' . $subFullPrice
         : (filled($subSaving) ? ' — ' . $subSaving : '');
-    $subClause = ($subAvailable && filled($subPrice))
+    // No-commerce (hide_commerce) reports show the plan intro WITHOUT the subscription
+    // clause and without the "view plan online / subscription" CTA below.
+    $subClause = ($subAvailable && filled($subPrice) && ! $report->hide_commerce)
         ? ' and available as a subscription from ' . $subPrice . $savingClause
         : '';
 @endphp
@@ -688,7 +690,9 @@
             @include('report.partials._diet-review-pdf')
         @endif
 
-        {{-- Compact "view plan online" block; kept together on one page. --}}
+        {{-- Compact "view plan online" block; kept together on one page. Omitted on
+             no-commerce (hide_commerce) reports — it's the subscription CTA. --}}
+        @if(! $report->hide_commerce)
         <div style="page-break-inside: avoid; margin-top: 18px;">
             <table style="width: 100%; border-collapse: collapse;" cellspacing="0" cellpadding="0">
                 <tr>
@@ -704,6 +708,7 @@
                 </tr>
             </table>
         </div>
+        @endif
     </div>
 </div>
 

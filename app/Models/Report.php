@@ -59,6 +59,7 @@ class Report extends Model
         'plan_intro',
         'subscription_snapshot',
         'hide_subscribe',
+        'hide_commerce',
         'pet_snapshot',
         'klaviyo_last_sent_at',
         'klaviyo_last_result',
@@ -79,6 +80,7 @@ class Report extends Model
         // Report→Test proxy returns the already-cast Test value.
         'subscription_snapshot' => 'array',
         'hide_subscribe' => 'boolean',
+        'hide_commerce' => 'boolean',
         'pet_snapshot' => 'array',
         'klaviyo_last_sent_at' => 'datetime',
         'klaviyo_last_result' => 'array',
@@ -212,6 +214,16 @@ class Report extends Model
 
     protected static function booted(): void
     {
+        // hide_subscribe (hide the whole plan section) and hide_commerce (show the
+        // plan but no prices/purchase) are mutually exclusive. If both are somehow
+        // set, hide_subscribe wins and hide_commerce is cleared — enforced here so it
+        // holds regardless of how the record was saved (admin form, tinker, import).
+        static::saving(function (Report $report) {
+            if ($report->hide_subscribe && $report->hide_commerce) {
+                $report->hide_commerce = false;
+            }
+        });
+
         static::creating(function (Report $report) {
             if (empty($report->slug)) {
                 $petName = $report->pet?->name ?? optional(Pet::find($report->pet_id))->name;
@@ -455,8 +467,11 @@ class Report extends Model
         return [
             'has_plan' => true,
             'plan_name' => $this->plan?->name,
-            'subscription_price' => $snapshot['price'] ?? null,
-            'subscription_url' => $snapshot['url'] ?? null,
+            // No-commerce (hide_commerce) reports omit the subscription price + URL so
+            // downstream Klaviyo flows can't surface a price/checkout for them; the
+            // plan metadata (name/phase/product) is still emitted.
+            'subscription_price' => $this->hide_commerce ? null : ($snapshot['price'] ?? null),
+            'subscription_url' => $this->hide_commerce ? null : ($snapshot['url'] ?? null),
             'plan_phase_count' => $this->steps->count(),
             'plan_product_count' => count($productNames),
             'plan_products' => $productNames,

@@ -100,7 +100,7 @@ class ReportController extends Controller
         // OR when staff have hidden the subscribe pitch on this report — so a stale
         // /subscribe link can never drive a hidden-subscribe customer into checkout.
         // (The interstitial still needs an enabled plan to render its details.)
-        if ($report->hide_subscribe || ! $plan || ! $plan->enabled || blank($checkoutUrl)) {
+        if ($report->hide_subscribe || $report->hide_commerce || ! $plan || ! $plan->enabled || blank($checkoutUrl)) {
             return redirect()->route('report.show', ['token' => $report->public_token]);
         }
 

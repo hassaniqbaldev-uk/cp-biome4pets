@@ -688,8 +688,9 @@
             </div>
             <div class="report-body space-y-8">
 
-                {{-- Subscribe panel — only when the plan's subscription is available --}}
-                @if($subAvailable)
+                {{-- Subscribe panel — only when the plan's subscription is available AND
+                     this isn't a no-commerce (hide_commerce) report. --}}
+                @if($subAvailable && ! $report->hide_commerce)
                 <div style="border:1px solid #E3F0FF; border-radius:18px; overflow:hidden; background:#FAF8FF; display:flex; flex-wrap:wrap; box-shadow:0 8px 24px rgba(48,28,71,.06);">
                     <div class="sub-panel__info" style="flex:0 1 65%; min-width:300px; padding:26px 28px;">
                         <span style="display:inline-block; background:#4654A4; color:#fff; font-size:11px; font-weight:600; letter-spacing:.06em; text-transform:uppercase; padding:4px 11px; border-radius:999px;">Recommended</span>
@@ -859,7 +860,7 @@
                                                     // per product — $includedDiscounted), not the whole-plan string.
                                                     $isPlanIncluded = $product->inclusion !== 'optional';
                                                 @endphp
-                                                @if(! is_null($catalog?->price))
+                                                @if(! $report->hide_commerce && ! is_null($catalog?->price))
                                                     @if($isPlanIncluded && $subAvailable && ! is_null($includedDiscounted))
                                                         {{-- Included subscription product: the ORIGINAL single-line
                                                              "£X individually · £Y / month on the subscription plan"
@@ -895,6 +896,12 @@
                                                 @if(filled($product->how_it_helps))
                                                     <p class="text-sm" style="margin:12px 0 0;"><b class="text-navy">How it will help {{ $petName }}:</b> {{ $product->how_it_helps }}</p>
                                                 @endif
+                                                {{-- The buy/tag affordance row. In no-commerce mode (hide_commerce)
+                                                     the OPTIONAL branch (buy link + "Optional add-on" tag) is
+                                                     suppressed entirely — the whole row is skipped so there is no
+                                                     empty gap; the INCLUDED "Included in plan" tag is plan info
+                                                     (not commerce) and still shows. --}}
+                                                @if(! ($product->inclusion === 'optional' && $report->hide_commerce))
                                                 <div style="display:flex; align-items:center; gap:14px; margin-top:16px; flex-wrap:wrap;">
                                                     {{-- Push the subscription: only OPTIONAL add-ons (not in the plan,
                                                          e.g. the retest kit) get an individual buy button. Included
@@ -908,6 +915,7 @@
                                                         <span style="font-size:12.5px; font-weight:600; color:#38427F; display:inline-flex; align-items:center; gap:6px;"><span style="width:8px; height:8px; border-radius:50%; background:#4654A4; display:inline-block;"></span>Included in plan</span>
                                                     @endif
                                                 </div>
+                                                @endif
                                             </div>
                                         </div>
                                     @endforeach
@@ -918,8 +926,9 @@
                 </div>
 
                 {{-- Closing subscription nudge — only when the plan's subscription
-                     is available (same condition as the top subscribe panel). --}}
-                @if($subAvailable)
+                     is available (same condition as the top subscribe panel) and this
+                     isn't a no-commerce (hide_commerce) report. --}}
+                @if($subAvailable && ! $report->hide_commerce)
                 <div class="bg-navy text-white" style="border-radius:18px; padding:28px 26px; text-align:center;">
                     <h3 style="font-size:18px; font-weight:700; margin:0 0 6px;">Ready to get started?</h3>
                     <p style="font-size:14px; color:rgba(255,255,255,.78); margin:0 auto 18px; max-width:48ch; line-height:1.6;">Subscribe to {{ $planName ?: 'your plan' }} and we'll handle the rest, with the right products, in the right order, delivered to your door.</p>
