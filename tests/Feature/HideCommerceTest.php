@@ -37,7 +37,7 @@ class HideCommerceTest extends TestCase
         Artisan::call('migrate', ['--force' => true]);
     }
 
-    private function makeReport(bool $hideSubscribe = false, bool $hideCommerce = false): Report
+    private function makeReport(bool $hideSubscribe = false, bool $hideCommerce = false, bool $excludeIncluded = false): Report
     {
         $client = Client::create(['name' => 'Owner', 'email' => 'o'.uniqid().'@e.com']);
         $pet = Pet::create(['client_id' => $client->id, 'name' => 'Lola']);
@@ -63,7 +63,10 @@ class HideCommerceTest extends TestCase
             ],
         ]);
 
-        $amr = CatalogProduct::create(['name' => 'PetBiome AMR', 'price' => 35, 'is_active' => true]);
+        // $amr stands in for the plan-INCLUDED product. Flagging it bb_excluded makes
+        // it the "add-on" case (e.g. Gut Renew in Rebuild & Renew), which on a
+        // no-commerce report reads "Available as an add-on" instead of "Included in plan".
+        $amr = CatalogProduct::create(['name' => 'PetBiome AMR', 'price' => 35, 'is_active' => true, 'bb_excluded' => $excludeIncluded]);
         $kit = CatalogProduct::create(['name' => 'Retest Kit', 'price' => 180, 'subscription_discount_percent' => 30, 'is_active' => true, 'url' => 'https://shop.test/kit']);
 
         $step = ReportStep::create(['report_id' => $report->id, 'title' => 'Step 1: Microbiome Reset', 'type' => 'product', 'stage_label' => 'Phase 1 · Months 1-3', 'position' => 0]);
@@ -201,5 +204,70 @@ class HideCommerceTest extends TestCase
         $r = $this->makeReport();
         $this->assertFalse($r->hide_commerce);
         $this->assertFalse($r->hide_subscribe);
+    }
+
+    // ── Part A: "Your Biome Balance Programme" reassurance box ───────────────
+
+    public function test_box_shows_only_on_hide_commerce_web(): void
+    {
+        $on = $this->web($this->makeReport(hideCommerce: true));
+        $this->assertStringContainsString('Your Biome Balance Programme', $on);
+        $this->assertStringContainsString('Included programme', $on);   // the pill
+        $this->assertStringContainsString('already included in your package', $on);
+        $this->assertStringContainsString('Dr Carol Hughes', $on);
+
+        $off = $this->web($this->makeReport());
+        $this->assertStringNotContainsString('Your Biome Balance Programme', $off);
+    }
+
+    public function test_box_shows_only_on_hide_commerce_pdf(): void
+    {
+        $on = $this->pdf($this->makeReport(hideCommerce: true));
+        $this->assertStringContainsString('Your Biome Balance Programme', $on);
+        $this->assertStringContainsString('Included programme', $on);   // the pill
+        $this->assertStringContainsString('sent to you automatically', $on);
+
+        $off = $this->pdf($this->makeReport());
+        $this->assertStringNotContainsString('Your Biome Balance Programme', $off);
+    }
+
+    // ── Part B: "Available as an add-on" label for bb_excluded products ──────
+
+    public function test_bb_excluded_product_shows_addon_label_on_hide_commerce_report(): void
+    {
+        $web = $this->web($this->makeReport(hideCommerce: true, excludeIncluded: true));
+
+        // The flagged (included-but-excluded) product reads as an add-on, NOT "Included":
+        // an amber pill by the name + an "available separately" explainer box.
+        $this->assertStringContainsString('Available as an add-on', $web);
+        $this->assertStringContainsString('Available separately if you\'d like to add it.', $web);
+        $this->assertStringNotContainsString('Included in plan', $web);
+    }
+
+    public function test_bb_excluded_product_is_unchanged_on_a_standard_report(): void
+    {
+        // Same flagged product, but hide_commerce is false (standard report): it must
+        // render exactly as before — "Included in plan", no add-on label.
+        $web = $this->web($this->makeReport(excludeIncluded: true));
+
+        $this->assertStringContainsString('Included in plan', $web);
+        $this->assertStringNotContainsString('Available as an add-on', $web);
+    }
+
+    public function test_bb_excluded_is_ignored_without_hide_commerce_even_with_flag(): void
+    {
+        // Flag set but neither hide mode → the whole plan + commerce show normally and
+        // the product keeps its "Included in plan" tag (flag is inert off BB reports).
+        $web = $this->web($this->makeReport(excludeIncluded: true));
+        $this->assertStringContainsString('Subscribe to plan', $web);
+        $this->assertStringContainsString('Included in plan', $web);
+    }
+
+    public function test_unflagged_product_still_reads_included_on_hide_commerce_report(): void
+    {
+        // hide_commerce ON but product NOT flagged → still "Included in plan".
+        $web = $this->web($this->makeReport(hideCommerce: true));
+        $this->assertStringContainsString('Included in plan', $web);
+        $this->assertStringNotContainsString('Available as an add-on', $web);
     }
 }

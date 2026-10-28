@@ -688,6 +688,26 @@
             </div>
             <div class="report-body space-y-8">
 
+                {{-- Biome Balance reassurance box — only on no-commerce (hide_commerce)
+                     reports. Reassures the customer that the plan below is already part
+                     of their programme, so nothing needs buying separately. --}}
+                @if($report->hide_commerce)
+                {{-- Card: light-green fill + indigo (#4654A4) left accent bar matching the
+                     step-header bar; radius 14px (the product-card radius) and the subscribe
+                     panel's shadow. Pill, heading and body reuse the subscribe panel's styles. --}}
+                <div style="background:#F4FAF6; border:1px solid #DCEBE2; border-left:4px solid #4654A4; border-radius:14px; box-shadow:0 8px 24px rgba(48,28,71,.06); padding:22px 24px;">
+                    {{-- "Included programme" pill — green, same geometry as the subscribe
+                         panel's "Recommended" pill. --}}
+                    <span style="display:inline-flex; align-items:center; gap:5px; background:#E7F3EC; color:#2F8F5B; font-size:11px; font-weight:600; letter-spacing:.06em; text-transform:uppercase; padding:4px 11px; border-radius:999px;"><span aria-hidden="true" style="font-weight:700;">&checkmark;</span>Included programme</span>
+                    {{-- Heading — matches the subscribe panel heading exactly (22px / 700 / navy). --}}
+                    <h3 class="text-navy" style="font-size:22px; font-weight:700; margin:13px 0 8px; line-height:1.2;">Your Biome Balance Programme</h3>
+                    {{-- Body — matches the subscribe panel body (text-sm / #55505A). --}}
+                    <p class="text-sm" style="color:#55505A; margin:0 0 16px;">As part of your Biome Balance programme, your recommended supplements are already included in your package.</p>
+                    <p class="text-sm" style="color:#55505A; margin:0 0 16px;">The protocol outlined below, including your supplements and your follow-up microbiome test kit, will be sent to you automatically. There is no need to purchase any of these products separately.</p>
+                    <p class="text-sm" style="color:#55505A; margin:0;">We will also contact you shortly to arrange your one-to-one consultation with our microbiologist, Dr Carol Hughes, to discuss your results and recommended plan.</p>
+                </div>
+                @endif
+
                 {{-- Subscribe panel — only when the plan's subscription is available AND
                      this isn't a no-commerce (hide_commerce) report. --}}
                 @if($subAvailable && ! $report->hide_commerce)
@@ -852,7 +872,17 @@
                                                 </div>
                                             @endif
                                             <div style="flex:1; min-width:0;">
-                                                <h4 class="text-navy" style="font-weight:600; font-size:18px; margin:0;">{{ $catalog?->name }}</h4>
+                                                @if($report->hide_commerce && $catalog?->bb_excluded)
+                                                    {{-- BB-excluded add-on: name + an amber "Available as an add-on"
+                                                         pill (plus icon) at the top of the card. Card itself stays
+                                                         neutral, same as included products. --}}
+                                                    <div style="display:flex; align-items:center; gap:10px; flex-wrap:wrap;">
+                                                        <h4 class="text-navy" style="font-weight:600; font-size:18px; margin:0;">{{ $catalog?->name }}</h4>
+                                                        <span style="display:inline-flex; align-items:center; gap:5px; background:#F6E4C2; color:#8a5a0c; font-size:11px; font-weight:600; padding:4px 11px; border-radius:999px;"><span aria-hidden="true" style="font-weight:700;">+</span>Available as an add-on</span>
+                                                    </div>
+                                                @else
+                                                    <h4 class="text-navy" style="font-weight:600; font-size:18px; margin:0;">{{ $catalog?->name }}</h4>
+                                                @endif
                                                 @php
                                                     // Plan-included products (NOT optional add-ons) are covered by the
                                                     // monthly subscription. Each included product now shows its OWN
@@ -896,12 +926,20 @@
                                                 @if(filled($product->how_it_helps))
                                                     <p class="text-sm" style="margin:12px 0 0;"><b class="text-navy">How it will help {{ $petName }}:</b> {{ $product->how_it_helps }}</p>
                                                 @endif
-                                                {{-- The buy/tag affordance row. In no-commerce mode (hide_commerce)
-                                                     the OPTIONAL branch (buy link + "Optional add-on" tag) is
-                                                     suppressed entirely — the whole row is skipped so there is no
-                                                     empty gap; the INCLUDED "Included in plan" tag is plan info
-                                                     (not commerce) and still shows. --}}
-                                                @if(! ($product->inclusion === 'optional' && $report->hide_commerce))
+                                                {{-- The buy/tag affordance row. A BB-excluded product (hide_commerce)
+                                                     gets an "available separately" explainer box INSTEAD of the tag
+                                                     row (the top-of-card pill carries the status). Otherwise, in
+                                                     no-commerce mode the OPTIONAL branch (buy link + "Optional add-on"
+                                                     tag) is suppressed so there's no empty gap; the INCLUDED
+                                                     "Included in plan" tag is plan info (not commerce) and still shows. --}}
+                                                @if($report->hide_commerce && $catalog?->bb_excluded)
+                                                    {{-- Explainer box — mirrors the prose-step "Tip" callout geometry
+                                                         (radius 10px, padding 14px 16px) in calm amber. --}}
+                                                    <div style="margin-top:16px; background:#FBF4E6; border:1px solid #F0E2C4; border-radius:10px; padding:14px 16px; display:flex; align-items:flex-start; gap:10px;">
+                                                        <span aria-hidden="true" style="flex:0 0 auto; width:18px; height:18px; border-radius:9999px; background:#8a5a0c; color:#fff; font-size:12px; font-weight:700; font-style:italic; line-height:18px; text-align:center;">i</span>
+                                                        <span class="text-sm" style="color:#8a5a0c;">Not included in your Biome Balance package. Available separately if you'd like to add it.</span>
+                                                    </div>
+                                                @elseif(! ($product->inclusion === 'optional' && $report->hide_commerce))
                                                 <div style="display:flex; align-items:center; gap:14px; margin-top:16px; flex-wrap:wrap;">
                                                     {{-- Push the subscription: only OPTIONAL add-ons (not in the plan,
                                                          e.g. the retest kit) get an individual buy button. Included

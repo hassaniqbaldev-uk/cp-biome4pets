@@ -16,12 +16,14 @@ class CatalogProduct extends Model
         'price',
         'subscription_discount_percent',
         'is_active',
+        'bb_excluded',
     ];
 
     protected $casts = [
         'price' => 'decimal:2',
         'subscription_discount_percent' => 'integer',
         'is_active' => 'boolean',
+        'bb_excluded' => 'boolean',
     ];
 
     /**

@@ -679,6 +679,25 @@
 <div class="section">
     <div class="section-bar">Recommended Next Steps</div>
     <div class="section-body">
+        {{-- Biome Balance reassurance box — only on no-commerce (hide_commerce)
+             reports; mirrors the web callout. DomPDF-safe inline styles / table. --}}
+        @if($report->hide_commerce)
+        {{-- Same look as the web box, DomPDF-safe: light-green fill, indigo (#4654A4)
+             left accent via border-left on the td, green "Included programme" pill
+             (inline-block), navy heading, three paragraphs. Solid borders (no shadow). --}}
+        <table style="width: 100%; border-collapse: collapse; margin-bottom: 18px; page-break-inside: avoid;" cellspacing="0" cellpadding="0">
+            <tr>
+                <td style="background-color: #F4FAF6; border: 1px solid #DCEBE2; border-left: 4px solid #4654A4; padding: 18px 20px;">
+                    <div style="margin-bottom: 10px;"><span style="display: inline-block; background-color: #E7F3EC; color: #2F8F5B; font-size: 10px; font-weight: bold; letter-spacing: 1px; text-transform: uppercase; padding: 3px 10px; border-radius: 10px;">&#10003; Included programme</span></div>
+                    <div style="font-size: 15px; font-weight: bold; color: #301C47; margin-bottom: 10px;">Your Biome Balance Programme</div>
+                    <p style="font-size: 12px; color: #301C47; line-height: 1.6; margin: 0 0 9px;">As part of your Biome Balance programme, your recommended supplements are already included in your package.</p>
+                    <p style="font-size: 12px; color: #301C47; line-height: 1.6; margin: 0 0 9px;">The protocol outlined below, including your supplements and your follow-up microbiome test kit, will be sent to you automatically. There is no need to purchase any of these products separately.</p>
+                    <p style="font-size: 12px; color: #301C47; line-height: 1.6; margin: 0;">We will also contact you shortly to arrange your one-to-one consultation with our microbiologist, Dr Carol Hughes, to discuss your results and recommended plan.</p>
+                </td>
+            </tr>
+        </table>
+        @endif
+
         <p style="margin-bottom: 16px;">Based on {{ $petName }}'s microbiome results we've built a personalised protocol, <b style="color: #301C47;">{{ $planName }}</b>{{ $phaseClause }}, with products and dosing matched to {{ $petName }}'s results{{ $subClause }}.</p>
 
         {{-- The nutritionist recommendation sits BETWEEN the plan intro and the "view plan

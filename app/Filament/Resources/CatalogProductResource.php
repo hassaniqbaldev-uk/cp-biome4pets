@@ -66,6 +66,9 @@ class CatalogProductResource extends Resource
                 Forms\Components\Toggle::make('is_active')
                     ->label('Active')
                     ->default(true),
+                Forms\Components\Toggle::make('bb_excluded')
+                    ->label('Not included in Biome Balance package')
+                    ->helperText('Shows an "Available as an add-on" label instead of "Included in plan" on Biome Balance reports.'),
                 Forms\Components\CheckboxList::make('triggers')
                     ->label('Trigger Codes')
                     // Dynamic, shared list: the distinct trigger names defined in
