@@ -240,6 +240,49 @@ class DietGuidanceGenerationTest extends TestCase
         $this->assertSame('SECOND AVOID', $report->fresh()->ai_diet_avoid);
     }
 
+    public function test_regenerate_flags_a_non_grounded_taxon_in_the_diet_prose(): void
+    {
+        // End-to-end proof the CATCH layer rides the regenerate path (the client's
+        // "regenerate to fix a report" lever). The stubbed diet "avoid" names
+        // Streptococcus, which is in none of this test's phylum/top_taxa/insight data,
+        // so the regenerated report must come back needs_review with an unknown_taxon
+        // flag — exactly how staff would catch an Oslo-style stray.
+        $this->bindFakeAi('Clean include.', 'Clean avoid.');
+        [$test] = $this->seedTest();
+        $report = ReportGeneration::createReportFromTest($test->fresh())->fresh();
+
+        $this->bindFakeAi(
+            'Pumpkin: gentle fibre to support a balanced gut environment.',
+            'Starchy foods: with your elevated Streptococcus these can feed the imbalance.',
+        );
+        $result = ReportGeneration::regenerateReport($report->fresh());
+
+        $this->assertTrue($result['ok']);
+        $fresh = $report->fresh();
+        $this->assertTrue((bool) $fresh->needs_review);
+        $codes = collect($fresh->review_flags['issues'] ?? [])->pluck('code')->all();
+        $this->assertContains('unknown_taxon', $codes);
+    }
+
+    public function test_regenerate_does_not_flag_grounded_taxa_in_the_diet_prose(): void
+    {
+        // Companion false-positive guard: diet prose naming only a GROUNDED taxon
+        // (Firmicutes is in this test's phylum data) must never raise unknown_taxon.
+        $this->bindFakeAi('Clean include.', 'Clean avoid.');
+        [$test] = $this->seedTest();
+        $report = ReportGeneration::createReportFromTest($test->fresh())->fresh();
+
+        $this->bindFakeAi(
+            'Oats: encourage your Firmicutes and a balanced gut environment.',
+            'Clean avoid.',
+        );
+        $result = ReportGeneration::regenerateReport($report->fresh());
+
+        $this->assertTrue($result['ok']);
+        $codes = collect($report->fresh()->review_flags['issues'] ?? [])->pluck('code')->all();
+        $this->assertNotContains('unknown_taxon', $codes);
+    }
+
     public function test_generation_with_no_key_persists_empty_and_does_not_break(): void
     {
         [$test] = $this->seedTest();   // no fake bound, no key → empty AI
@@ -408,6 +451,48 @@ class DietGuidanceGenerationTest extends TestCase
             strpos($piperPrompt, 'GENERAL GUIDANCE') - strpos($piperPrompt, 'APPLICABLE RULES'),
         );
         $this->assertStringContainsString('White fish', $applicable);
+    }
+
+    public function test_prompt_contains_the_positive_taxa_allow_list_from_grounded_data(): void
+    {
+        // LAYER A — PREVENTION. The prompt now carries a POSITIVE allow-list built from
+        // the grounded set (phylum + top_taxa + humanised insight_taxa), and forbids
+        // naming anything outside it (the Oslo offender, Streptococcus, as the example).
+        $prompt = (new OpenAiService)->buildDietGuidancePrompt(
+            ['Proteobacteria' => 30.0, 'Firmicutes' => 40.0],
+            2.4,
+            [],
+            [
+                'top_taxa' => [['name' => 'Bacteroides', 'pct' => 22.0], ['name' => 'Prevotella', 'pct' => 11.0]],
+                'insight_taxa' => ['blautia' => 0.4, 'escherichia_shigella' => 0.02],
+            ],
+        );
+
+        $this->assertStringContainsString('You may name ONLY these bacteria or taxa in your reasons:', $prompt);
+        $this->assertStringContainsString('Do not name any other organism', $prompt);
+        $this->assertStringContainsString('Streptococcus', $prompt);   // named as the forbidden example
+
+        // Isolate the allow-list itself and confirm every grounded taxon is in it,
+        // and that a non-grounded organism is NOT.
+        $start = strpos($prompt, 'You may name ONLY these bacteria or taxa in your reasons: ')
+            + strlen('You may name ONLY these bacteria or taxa in your reasons: ');
+        $end = strpos($prompt, '. Do not name any other organism', $start);
+        $allowList = substr($prompt, $start, $end - $start);
+        foreach (['Proteobacteria', 'Firmicutes', 'Bacteroides', 'Prevotella', 'Blautia', 'Escherichia/Shigella'] as $taxon) {
+            $this->assertStringContainsString($taxon, $allowList);
+        }
+        $this->assertStringNotContainsString('Streptococcus', $allowList);
+    }
+
+    public function test_prompt_without_grounded_taxa_forbids_naming_any_organism(): void
+    {
+        // Fail-safe: when no taxa are grounded (no top_taxa / insight), the allow-list
+        // degrades to a blanket "name no specific organism" rule rather than an empty
+        // "name ONLY these: " sentence.
+        $prompt = (new OpenAiService)->buildDietGuidancePrompt([], 2.4, [], []);
+
+        $this->assertStringContainsString('Do not name any specific bacteria, genus or species', $prompt);
+        $this->assertStringNotContainsString('You may name ONLY these bacteria or taxa', $prompt);
     }
 
     public function test_gating_never_throws_on_malformed_rules(): void

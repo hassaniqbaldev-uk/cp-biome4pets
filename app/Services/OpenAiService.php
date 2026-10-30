@@ -4,6 +4,7 @@ namespace App\Services;
 
 use App\Models\AiUsageEvent;
 use App\Models\Setting;
+use App\Support\ReportGeneration;
 use Illuminate\Support\Facades\Log;
 
 class OpenAiService
@@ -1110,6 +1111,27 @@ PROMPT;
         }
         $petBlock = $petLines === [] ? '' : "\n".implode("\n", $petLines)."\n";
 
+        // LAYER A — PREVENTION: a POSITIVE allow-list of the only organisms the model
+        // may name. Built from the SAME source arrays as the blocks above (phylum
+        // totals + top_taxa + insight_taxa) through the shared grounded-taxa helper
+        // the validator's whitelist also draws on, so the prompt promises exactly what
+        // the unknown-taxon guardrail will accept. This converts the prior negative-
+        // only guardrail ("don't call anything elevated") into a hard allow-list, so
+        // the model can no longer invent an organism that isn't in this dog's data
+        // (e.g. Streptococcus). It still writes food suggestions freely — it just may
+        // not NAME a taxon outside the grounded set.
+        $allowedTaxa = ReportGeneration::groundedTaxaNames(
+            $phylumTotals,
+            is_array($topTaxa) ? $topTaxa : [],
+            is_array($insightTaxa) ? $insightTaxa : [],
+        );
+        if ($allowedTaxa !== []) {
+            $allowedList = implode(', ', $allowedTaxa);
+            $taxaWhitelistClause = "You may name ONLY these bacteria or taxa in your reasons: {$allowedList}. Do not name any other organism (for example Streptococcus, Lactobacillus, or any genus or species not in this list) under any circumstances. If a food's reason would require naming an organism not in this list, give a general gut-health reason instead (for example \"supports a balanced gut environment\") without naming a specific organism.";
+        } else {
+            $taxaWhitelistClause = 'Do not name any specific bacteria, genus or species in your reasons (for example Streptococcus or Lactobacillus); give general gut-health reasons instead (for example "supports a balanced gut environment").';
+        }
+
         // Editable finding→food rules (Settings), DETERMINISTICALLY GATED against this
         // dog's real values so the AI is handed only the rules that genuinely apply —
         // it can no longer invoke a "high X" rule for a dog whose X isn't high. Any
@@ -1138,6 +1160,8 @@ GENERAL GUIDANCE — NOT tied to a specific measured value for this dog. You may
 {$generalBlock}
 
 Do not invoke any finding that is not listed under APPLICABLE RULES. In particular, never describe a phylum or marker as high, low, elevated or reduced unless the system listed it as applicable above — base everything else on the findings below.
+
+{$taxaWhitelistClause}
 
 THIS DOG'S MICROBIOME FINDINGS:
 Phylum percentages:

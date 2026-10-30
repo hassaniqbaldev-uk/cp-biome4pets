@@ -148,6 +148,63 @@ class ReportGeneration
     }
 
     /**
+     * The taxa names GROUNDED in a report's own lab data — the single source of
+     * truth shared by BOTH the diet-guidance prompt's allow-list (what the AI may
+     * name) and the unknown-taxon validator's whitelist (what it won't flag), so the
+     * two can never drift apart. The set is: phylum names + top_taxa display names +
+     * insight_taxa genus keys. insight_taxa keys arrive snake_cased
+     * (e.g. "escherichia_shigella") and are humanised to "Escherichia/Shigella" for
+     * display; the validator splits on space / underscore / slash when it matches,
+     * so either token clears.
+     *
+     * Tolerates absent/old data (returns what it can) so pre-Stage-1 reports behave
+     * exactly as before. De-duplicates case-insensitively, first spelling wins.
+     *
+     * @param  array<string,mixed>  $phylumTotals  phylum name => pct
+     * @param  array<int,array{name?:string}>  $topTaxa
+     * @param  array<string,mixed>  $insightTaxa  genus key => pct
+     * @return array<int,string>
+     */
+    public static function groundedTaxaNames(array $phylumTotals, array $topTaxa, array $insightTaxa): array
+    {
+        $names = [];
+
+        foreach (array_keys($phylumTotals) as $phylum) {
+            $name = trim((string) $phylum);
+            if ($name !== '') {
+                $names[] = $name;
+            }
+        }
+
+        foreach (self::taxaNames($topTaxa) as $name) {
+            $names[] = $name;
+        }
+
+        foreach (array_keys($insightTaxa) as $key) {
+            $key = trim((string) $key);
+            if ($key === '') {
+                continue;
+            }
+            // "escherichia_shigella" => "Escherichia/Shigella"
+            $names[] = implode('/', array_map('ucfirst', explode('_', $key)));
+        }
+
+        // Case-insensitive de-dupe, keeping the first spelling seen.
+        $seen = [];
+        $out = [];
+        foreach ($names as $name) {
+            $lower = strtolower($name);
+            if (isset($seen[$lower])) {
+                continue;
+            }
+            $seen[$lower] = true;
+            $out[] = $name;
+        }
+
+        return $out;
+    }
+
+    /**
      * Fire the product rules for the raw inputs and return the matched catalog
      * product ids + the recommended plan id (both derived from the same triggers).
      *
@@ -207,6 +264,10 @@ class ReportGeneration
                 'dysbiosis_score' => $deterministic['dysbiosis_score'] ?? null,
                 'microbiome_classification' => $deterministic['microbiome_classification'] ?? null,
                 'species' => $deterministic['species'] ?? [],
+                // insight_taxa genus keys join the unknown-taxon whitelist (so a
+                // genus legitimately named in the diet prose — e.g. Blautia — is not
+                // flagged). Same grounded set the diet prompt's allow-list uses.
+                'insight_taxa' => $deterministic['insight_taxa'] ?? [],
                 'triggered' => $selection['triggered'] ?? [],
                 'plan_id' => $selection['plan_id'] ?? null,
                 // Lets the grader tell an unwell + no-trigger AUTO-assigned fallback
@@ -493,6 +554,7 @@ class ReportGeneration
                 'microbiome_classification' => $test->microbiome_classification,
                 // Allowed-taxa whitelist for the unknown-taxon guardrail.
                 'species' => self::taxaNames($deterministic['top_taxa'] ?? []),
+                'insight_taxa' => $deterministic['insight_taxa'] ?? [],
             ], $selection, $genError, ['path' => 'generate_from_test', 'test_id' => $test->getKey()]);
 
             $report = Report::create(array_merge($interp, [
@@ -594,6 +656,7 @@ class ReportGeneration
             'dysbiosis_score' => $test->dysbiosis_score,
             'microbiome_classification' => $test->microbiome_classification,
             'species' => self::taxaNames($deterministic['top_taxa'] ?? []),
+            'insight_taxa' => $deterministic['insight_taxa'] ?? [],
         ], $selection, $genError, ['path' => 'bulk_regenerate', 'report_id' => $report->getKey()]);
 
         $report->update(array_merge($interp, [

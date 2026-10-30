@@ -225,6 +225,45 @@ class ReportQualityValidatorTest extends TestCase
         $this->assertFalse($v['needs_review']);
     }
 
+    public function test_invented_taxon_in_diet_prose_is_flagged_and_drives_review(): void
+    {
+        // The Oslo hallucination: the diet "avoid" box names an elevated
+        // Streptococcus that is nowhere in this pet's data (not phylum, not top_taxa,
+        // not insight_taxa). The diet fields are now scanned, so this must flag
+        // unknown_taxon AND set needs_review so staff catch it before it goes out.
+        $interp = $this->cleanInterp();
+        $interp['ai_diet_avoid'] = "A few foods to ease back on:\n"
+            ."Starchy foods: with your elevated Streptococcus these can feed the imbalance.";
+
+        $v = ReportQualityValidator::validate($this->ground(['interpretations' => $interp]));
+
+        $this->assertContains('unknown_taxon', $this->codes($v));
+        $this->assertTrue($v['needs_review']);
+        $flag = collect($v['issues'])->firstWhere('code', 'unknown_taxon');
+        $this->assertStringContainsString('Streptococcus', $flag['detail']);
+    }
+
+    public function test_grounded_taxa_in_diet_prose_including_insight_genus_are_not_flagged(): void
+    {
+        // The diet prose names only GROUNDED taxa: a top_taxa genus (Bacteroides,
+        // passed via species) and an insight_taxa genus (Blautia, passed via the new
+        // insight_taxa whitelist). Neither may be flagged — no false positive, no
+        // review — which is what keeps the catch layer from punishing good reports.
+        $interp = $this->cleanInterp();
+        $interp['ai_diet_include'] = "Some foods to lean into:\n"
+            ."Pumpkin: gentle fibre to support your Bacteroides.\n"
+            ."Oats: encourage your Blautia and a balanced gut environment.";
+
+        $v = ReportQualityValidator::validate($this->ground([
+            'interpretations' => $interp,
+            'species' => ['Bacteroides'],
+            'insight_taxa' => ['blautia' => 0.4, 'escherichia_shigella' => 0.02],
+        ]));
+
+        $this->assertNotContains('unknown_taxon', $this->codes($v));
+        $this->assertFalse($v['needs_review']);
+    }
+
     public function test_known_phylum_in_prose_is_not_flagged_as_unknown_taxon(): void
     {
         $interp = $this->cleanInterp();

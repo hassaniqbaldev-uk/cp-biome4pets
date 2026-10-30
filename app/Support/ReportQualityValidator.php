@@ -144,7 +144,8 @@ class ReportQualityValidator
      *                          'species_richness' => int|null,
      *                          'dysbiosis_score' => float|null,
      *                          'microbiome_classification' => string|null,
-     *                          'species' => array<int,string>,   // taxa ground truth (not retained today; defaults [])
+     *                          'species' => array<int,string>,   // top_taxa names — unknown-taxon whitelist (defaults [])
+     *                          'insight_taxa' => array<string,mixed>,   // genus keys — also whitelisted (defaults [])
      *                          'triggered' => array<int,string>,
      *                          'plan_id' => int|null,
      *                          'generation_error' => 'api_failed'|'json_parse_failed'|null,
@@ -408,7 +409,10 @@ class ReportQualityValidator
 
     /**
      * The prose fields where the AI may now name specific bacteria. Scanned by the
-     * unknown-taxon guardrail for organisms outside this pet's whitelist.
+     * unknown-taxon guardrail for organisms outside this pet's whitelist. Includes
+     * the two diet-guidance boxes (ai_diet_include / ai_diet_avoid): free-text food
+     * reasons were the one place the model could still invent a taxon (e.g. an
+     * "elevated Streptococcus" that isn't in the dog's data), so they are scanned too.
      */
     public const TAXON_SCAN_FIELDS = [
         'ai_summary',
@@ -419,6 +423,8 @@ class ReportQualityValidator
         'ai_fusobacteria_interpretation',
         'ai_proteobacteria_interpretation',
         'ai_diversity_interpretation',
+        'ai_diet_include',
+        'ai_diet_avoid',
     ];
 
     /**
@@ -440,9 +446,22 @@ class ReportQualityValidator
         }
         // context['species'] now carries this pet's retained top_taxa NAMES (genus
         // rollups + species). Whitelist each word so a multi-word name like
-        // "Fusobacterium perfoetens" clears on either token.
+        // "Fusobacterium perfoetens" clears on either token. Split on underscore /
+        // slash too so compound keys (e.g. "escherichia_shigella") tokenise.
         foreach ($context['species'] ?? [] as $species) {
-            foreach (preg_split('/\s+/', strtolower((string) $species)) as $word) {
+            foreach (preg_split('/[\s_\/]+/', strtolower((string) $species)) as $word) {
+                if ($word !== '') {
+                    $known[$word] = true;
+                }
+            }
+        }
+        // insight_taxa genus keys (e.g. "escherichia_shigella", "blautia") are equally
+        // grounded in this pet's data and may legitimately appear in the diet prose —
+        // whitelist each so they are never flagged. This is the SAME grounded source
+        // set the diet prompt's allow-list uses (phylum + top_taxa + insight_taxa), so
+        // prompt and validator agree on exactly which taxa are permitted.
+        foreach (array_keys($context['insight_taxa'] ?? []) as $genus) {
+            foreach (preg_split('/[\s_\/]+/', strtolower((string) $genus)) as $word) {
                 if ($word !== '') {
                     $known[$word] = true;
                 }

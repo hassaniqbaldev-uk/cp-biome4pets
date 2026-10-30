@@ -424,6 +424,7 @@ class ReportResource extends Resource
                                             'microbiome_classification' => $test->microbiome_classification,
                                             // Allowed-taxa whitelist for the unknown-taxon guardrail.
                                             'species' => ReportGeneration::taxaNames($deterministic['top_taxa']),
+                                            'insight_taxa' => $deterministic['insight_taxa'] ?? [],
                                         ], $selection, $genError, ['path' => 'wizard_existing_test', 'test_id' => $test->getKey()]);
                                         $set('needs_review', $verdict['needs_review']);
                                         $set('review_flags', ReportGeneration::reviewFlagsFromVerdict($verdict));
@@ -640,6 +641,7 @@ class ReportResource extends Resource
                                             'microbiome_classification' => $results['microbiome_classification'] ?? null,
                                             // Allowed-taxa whitelist for the unknown-taxon guardrail.
                                             'species' => ReportGeneration::taxaNames($deterministic['top_taxa']),
+                                            'insight_taxa' => $deterministic['insight_taxa'] ?? [],
                                         ], $selection, $genError, ['path' => 'wizard_new_csv', 'pet_id' => $get('pet_id')]);
                                         $set('needs_review', $verdict['needs_review']);
                                         $set('review_flags', ReportGeneration::reviewFlagsFromVerdict($verdict));
