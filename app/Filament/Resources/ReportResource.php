@@ -809,6 +809,91 @@ class ReportResource extends Resource
                                 })
                                 ->helperText('Shows the plan without prices or purchase options. Turns off "Hide subscribe section".'),
 
+                            // Retest link: mark this report as a retest OF one of the
+                            // SAME pet's earlier reports. Options are scoped to the pet
+                            // chosen above (reads $get('pet_id'), set in the first step /
+                            // the record on edit) and exclude this report itself. Saving
+                            // with this set freezes the before/after comparison onto the
+                            // report (CreateReport/EditReport → retestComparisonFor()).
+                            Forms\Components\Select::make('retest_of_report_id')
+                                ->label('Retest of')
+                                ->placeholder('Not a retest')
+                                ->options(fn (Forms\Get $get, ?Report $record): array => static::retestOfOptions($get('pet_id'), $record?->getKey()))
+                                ->getOptionLabelUsing(fn ($value): ?string => static::retestOfOptionLabel($value))
+                                ->searchable()
+                                ->native(false)
+                                // Live so the Key Changes editor below shows/hides as soon as
+                                // the link is set/cleared, not only after a save+reload.
+                                ->live()
+                                ->helperText('Link this report to the same pet\'s earlier report to mark it as a retest. The before/after comparison is frozen onto this report when you save.'),
+
+                            // Key Changes editor — curate the biggest-mover rows the web + PDF
+                            // retest report shows. Shown ONLY for a retest (a link is set); the
+                            // two repeaters map to retest_key_changes.{increases,decreases}.
+                            // Prefilled from Report::keyChanges() (stored value, or the step-7a
+                            // default) in EditReport::mutateFormDataBeforeFill. Hidden fields
+                            // aren't dehydrated, so a non-retest never writes the column.
+                            Forms\Components\Group::make()
+                                ->visible(fn (Forms\Get $get): bool => filled($get('retest_of_report_id')))
+                                ->schema([
+                                    Forms\Components\Repeater::make('retest_key_changes.increases')
+                                        ->label('Key changes — New priorities (increases)')
+                                        ->schema(static::keyChangeRowSchema([
+                                            'New' => 'New',
+                                            'Marked increase' => 'Marked increase',
+                                            'Increased' => 'Increased',
+                                        ]))
+                                        ->columns(4)
+                                        ->reorderable()
+                                        ->collapsible()
+                                        ->defaultItems(0)
+                                        ->addActionLabel('Add a priority')
+                                        ->itemLabel(fn (array $state): ?string => $state['name'] ?? null),
+                                    Forms\Components\Repeater::make('retest_key_changes.decreases')
+                                        ->label('Key changes — Improved (decreases)')
+                                        ->schema(static::keyChangeRowSchema([
+                                            'Resolved' => 'Resolved',
+                                            'Marked reduction' => 'Marked reduction',
+                                            'Reduced' => 'Reduced',
+                                        ]))
+                                        ->columns(4)
+                                        ->reorderable()
+                                        ->collapsible()
+                                        ->defaultItems(0)
+                                        ->addActionLabel('Add an improvement')
+                                        ->itemLabel(fn (array $state): ?string => $state['name'] ?? null),
+                                ]),
+
+                            // AI retest-summary editor — six Textareas bound to
+                            // retest_summary.{conclusion,…} (dot-path, like the Key Changes
+                            // editor). Shown ONLY for a retest; prefilled from the stored
+                            // value in EditReport::mutateFormDataBeforeFill. Editing is a
+                            // pre-publish tweak: a regenerate overwrites it (step 10a), so
+                            // there is deliberately no seed-only-if-null here — this matches
+                            // how the AI interpretation fields are edited.
+                            Forms\Components\Group::make()
+                                ->visible(fn (Forms\Get $get): bool => filled($get('retest_of_report_id')))
+                                ->schema([
+                                    Forms\Components\Textarea::make('retest_summary.conclusion')
+                                        ->label('Retest summary — Conclusion (headline)')
+                                        ->rows(2),
+                                    Forms\Components\Textarea::make('retest_summary.started')
+                                        ->label('Retest summary — Where we started')
+                                        ->rows(3),
+                                    Forms\Components\Textarea::make('retest_summary.improved')
+                                        ->label('Retest summary — What has improved')
+                                        ->rows(3),
+                                    Forms\Components\Textarea::make('retest_summary.attention')
+                                        ->label('Retest summary — What still needs attention')
+                                        ->rows(3),
+                                    Forms\Components\Textarea::make('retest_summary.meaning')
+                                        ->label('Retest summary — What this means')
+                                        ->rows(3),
+                                    Forms\Components\Textarea::make('retest_summary.recommend')
+                                        ->label('Retest summary — What we recommend next')
+                                        ->rows(3),
+                                ]),
+
                             Forms\Components\Actions::make([
                                 Forms\Components\Actions\Action::make('apply_plan')
                                     ->label('Apply plan')
@@ -1126,6 +1211,74 @@ class ReportResource extends Resource
      * would be excluded — $currentTestId keeps it in the list so the preselected
      * value resolves to a label and stays findable when searching.
      */
+    /**
+     * One Key Changes repeater row: organism name, original/retest %, and a factual
+     * label. The label options differ per direction (increases vs decreases), so they
+     * are passed in. Shared by both repeaters so the row shape stays identical to the
+     * stored JSON {name, original_pct, retest_pct, label}.
+     *
+     * @param  array<string,string>  $labelOptions
+     * @return array<\Filament\Forms\Components\Component>
+     */
+    public static function keyChangeRowSchema(array $labelOptions): array
+    {
+        return [
+            Forms\Components\TextInput::make('name')
+                ->label('Organism')
+                ->required()
+                ->columnSpan(2),
+            Forms\Components\TextInput::make('original_pct')
+                ->label('Original %')
+                ->numeric(),
+            Forms\Components\TextInput::make('retest_pct')
+                ->label('Retest %')
+                ->numeric(),
+            Forms\Components\Select::make('label')
+                ->label('Label')
+                ->options($labelOptions)
+                ->native(false)
+                ->columnSpan(4),
+        ];
+    }
+
+    /**
+     * "Retest of" options: the SAME pet's OTHER reports (never a different pet's, never
+     * this report itself). Scoped by pet_id; soft-deleted reports are excluded by the
+     * model's global scope. Returns [id => label]; blank pet → no options.
+     */
+    public static function retestOfOptions(mixed $petId, mixed $currentReportId = null): array
+    {
+        if (blank($petId)) {
+            return [];
+        }
+
+        return Report::query()
+            ->where('pet_id', $petId)
+            ->when($currentReportId, fn (Builder $q) => $q->whereKeyNot($currentReportId))
+            ->orderByDesc('id')
+            ->get()
+            ->mapWithKeys(fn (Report $r): array => [$r->getKey() => static::retestOfLabel($r)])
+            ->all();
+    }
+
+    /** Label for a single stored retest_of_report_id, so a set value stays visible. */
+    public static function retestOfOptionLabel(mixed $reportId): ?string
+    {
+        $report = Report::find($reportId);
+
+        return $report ? static::retestOfLabel($report) : null;
+    }
+
+    /** Human label for a report option (id + report date + sample id, where present). */
+    protected static function retestOfLabel(Report $report): string
+    {
+        return trim(
+            'Report #'.$report->getKey()
+            .($report->report_date ? ' · '.$report->report_date->format('j M Y') : '')
+            .($report->sample_id ? ' · '.$report->sample_id : '')
+        );
+    }
+
     public static function existingTestOptions(mixed $petId, mixed $currentTestId = null): array
     {
         return Test::query()

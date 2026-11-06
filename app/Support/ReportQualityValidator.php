@@ -425,6 +425,14 @@ class ReportQualityValidator
         'ai_diversity_interpretation',
         'ai_diet_include',
         'ai_diet_avoid',
+        // Retest summary prose (grounded like the diet boxes): the overall conclusion
+        // plus Aneta's five parts. Whitelisted by context['retest_allow_list'].
+        'conclusion',
+        'started',
+        'improved',
+        'attention',
+        'meaning',
+        'recommend',
     ];
 
     /**
@@ -462,6 +470,16 @@ class ReportQualityValidator
         // prompt and validator agree on exactly which taxa are permitted.
         foreach (array_keys($context['insight_taxa'] ?? []) as $genus) {
             foreach (preg_split('/[\s_\/]+/', strtolower((string) $genus)) as $word) {
+                if ($word !== '') {
+                    $known[$word] = true;
+                }
+            }
+        }
+        // Retest-summary allow-list: the taxa the retest already names (key changes +
+        // specialists + major-group phyla). Same grounded mechanism as the diet allow-list,
+        // so a grounded organism in the summary clears and an ungrounded one flags.
+        foreach ($context['retest_allow_list'] ?? [] as $taxon) {
+            foreach (preg_split('/[\s_\/]+/', strtolower((string) $taxon)) as $word) {
                 if ($word !== '') {
                     $known[$word] = true;
                 }

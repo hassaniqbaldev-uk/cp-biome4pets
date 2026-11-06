@@ -200,6 +200,9 @@
         @php
             $toc = [
                 'Veterinary Summary', 'Your Dog\'s Personal Summary', 'Microbiome Overview',
+                // Retest headline — listed only for a linked retest (renders before the
+                // phyla breakdown); a normal report's contents are unchanged.
+                ...($report->isRetest() && !empty($report->retest_comparison) ? ['Retest Progress'] : []),
                 'Your Dog vs Healthy Microbiome', 'Microbiome Classification',
                 'Key Microbes', 'Microbiome-Driven Health Insights',
                 // The plan/subscribe section is omitted from the contents when staff
@@ -374,6 +377,255 @@
         </div>
     </div>
 </div>
+
+{{-- ================================================================ --}}
+{{-- RETEST PROGRESS (linked retests only) --}}
+{{-- PDF equivalent of the web "Retest Progress" section (show.blade.php).
+     Renders ENTIRELY from the frozen retest_comparison snapshot — no AI, no
+     recalculation — and only for a report linked to an earlier one as its
+     retest. On a normal report nothing renders and the PDF is unchanged.
+     DomPDF-safe: tables + fixed widths + inline-block, never flex/grid;
+     reuses the Microbiome Overview card + section chrome. --}}
+{{-- ================================================================ --}}
+@php
+    $retestData = ($report->isRetest() && !empty($report->retest_comparison))
+        ? $report->retest_comparison
+        : null;
+@endphp
+@if($retestData)
+@php
+    $rtOrig = $retestData['overview']['original'] ?? [];
+    $rtRe   = $retestData['overview']['retest'] ?? [];
+
+    // Band words via the SAME ReportContent helpers the web section uses (no new
+    // thresholds); $toneHex (tone → hex) is already defined in the header @php.
+    $rtDivOrig = (float) ($rtOrig['diversity'] ?? 0);
+    $rtDivRe   = (float) ($rtRe['diversity'] ?? 0);
+    $rtSrOrig  = (float) ($rtOrig['species_richness'] ?? 0);
+    $rtSrRe    = (float) ($rtRe['species_richness'] ?? 0);
+    $rtFbOrig  = (float) ($rtOrig['firmicutes_bacteroidetes_ratio'] ?? 0);
+    $rtFbRe    = (float) ($rtRe['firmicutes_bacteroidetes_ratio'] ?? 0);
+
+    $rtCards = [
+        [
+            'title' => 'Diversity (Shannon)',
+            'caption' => 'Higher is generally healthier.',
+            'origVal' => ReportContent::num($rtDivOrig),
+            'reVal' => ReportContent::num($rtDivRe),
+            'origBand' => ReportContent::diversityBand($rtDivOrig),
+            'reBand' => ReportContent::diversityBand($rtDivRe),
+        ],
+        [
+            'title' => 'Species detected',
+            'caption' => 'Number of distinct species found.',
+            'origVal' => (string) (int) $rtSrOrig,
+            'reVal' => (string) (int) $rtSrRe,
+            'origBand' => ReportContent::richnessBand($rtSrOrig),
+            'reBand' => ReportContent::richnessBand($rtSrRe),
+        ],
+        [
+            'title' => 'Dysbiosis (F/B ratio)',
+            'caption' => 'Firmicutes to Bacteroidetes balance.',
+            'origVal' => ReportContent::num($rtFbOrig),
+            'reVal' => ReportContent::num($rtFbRe),
+            'origBand' => ReportContent::dysbiosisBand($rtFbOrig),
+            'reBand' => ReportContent::dysbiosisBand($rtFbRe),
+        ],
+    ];
+
+    // Major groups: PHYLA only, present at >= 1% in either test, ordered by the
+    // larger of the two; first three are the headline shifts.
+    $rtPhyla = collect($retestData['taxa']['phylum'] ?? [])
+        ->filter(fn ($p) => ((float) ($p['original_pct'] ?? 0)) >= 1.0 || ((float) ($p['retest_pct'] ?? 0)) >= 1.0)
+        ->sortByDesc(fn ($p) => max((float) ($p['original_pct'] ?? 0), (float) ($p['retest_pct'] ?? 0)))
+        ->values();
+    $rtMainShifts = $rtPhyla->take(3)->values();
+    $rtOtherGroups = $rtPhyla->slice(3)->values();
+
+    $rtArrow = ['up' => '&uarr;', 'down' => '&darr;', 'flat' => '&rarr;'];
+    // The PDF's own accent (used for card borders throughout) — the retest value is
+    // emphasised in it, matching the document rather than the web view's teal.
+    $rtAccent = '#4654A4';
+
+    // Six specialists read from the frozen snapshot; status is rule-based against the
+    // config ranges (no re-parsing). Tone → hex extends the shared $toneHex with the
+    // 'accent'/'muted' status tones, WITHOUT mutating the global map.
+    $rtSpecialists = ReportContent::specialistRecovery($retestData);
+    $rtToneHex = $toneHex + ['accent' => $rtAccent, 'muted' => '#9aa3ad'];
+
+    // Key Changes: edited copy when present, else the snapshot default (Report::keyChanges).
+    $rtKeyChanges = $report->keyChanges();
+
+    // AI retest summary (step 10a; editable in 10b): conclusion headlines the section,
+    // the five parts render after the data blocks. Each only when non-empty.
+    $retestSummary = is_array($report->retest_summary) ? $report->retest_summary : [];
+    $rtConclusion = trim((string) ($retestSummary['conclusion'] ?? ''));
+    $rtSummaryParts = [
+        ['label' => 'Where we started', 'text' => trim((string) ($retestSummary['started'] ?? ''))],
+        ['label' => 'What has improved', 'text' => trim((string) ($retestSummary['improved'] ?? ''))],
+        ['label' => 'What still needs attention', 'text' => trim((string) ($retestSummary['attention'] ?? ''))],
+        ['label' => 'What this means', 'text' => trim((string) ($retestSummary['meaning'] ?? ''))],
+        ['label' => 'What we recommend next', 'text' => trim((string) ($retestSummary['recommend'] ?? ''))],
+    ];
+    $rtHasSummaryParts = collect($rtSummaryParts)->contains(fn ($p) => $p['text'] !== '');
+@endphp
+<div style="page-break-before: always;"></div>
+<div class="section">
+    <div class="section-bar">Retest Progress</div>
+    <div class="section-body">
+        {{-- AI summary CONCLUSION — short headline at the top of the retest section. --}}
+        @if($rtConclusion !== '')
+        <p style="font-size: 15px; font-weight: bold; color: #301C47; line-height: 1.4; margin: 0 0 14px;">{{ $rtConclusion }}</p>
+        @endif
+
+        <p style="font-size: 12px; color: #55505A; line-height: 1.6; margin: 0 0 14px;">This is a follow-up test. The figures below compare your dog's original results with this retest, so you can see how the microbiome has changed.</p>
+
+        {{-- 1. OVERVIEW — three cards, original &rarr; retest (retest emphasised). --}}
+        <table style="width: 100%; table-layout: fixed;" cellspacing="0" cellpadding="0">
+            <tr>
+                @foreach($rtCards as $card)
+                    @if(!$loop->first)<td style="width: 2%;"></td>@endif
+                    <td style="width: 32%; vertical-align: top;">
+                        <div style="background-color: #FAF8FF; border: 2px solid {{ $rtAccent }}; padding: 14px; text-align: center;">
+                            <div style="font-size: 11px; color: #55505A; font-weight: bold; margin-bottom: 8px;">{{ $card['title'] }}</div>
+                            <table style="width: 100%;" cellspacing="0" cellpadding="0">
+                                <tr>
+                                    <td style="width: 42%; vertical-align: middle; text-align: center;">
+                                        <div style="font-size: 20px; font-weight: bold; color: #9aa3ad;">{{ $card['origVal'] }}</div>
+                                        <div style="font-size: 9px; font-weight: bold; color: {{ $toneHex[$card['origBand']['tone']] }}; margin-top: 2px;">{{ $card['origBand']['label'] }}</div>
+                                    </td>
+                                    <td style="width: 16%; vertical-align: middle; text-align: center; font-size: 16px; color: #c9ced6;">&rarr;</td>
+                                    <td style="width: 42%; vertical-align: middle; text-align: center;">
+                                        <div style="font-size: 26px; font-weight: bold; color: {{ $rtAccent }};">{{ $card['reVal'] }}</div>
+                                        <div style="font-size: 9px; font-weight: bold; color: {{ $toneHex[$card['reBand']['tone']] }}; margin-top: 2px;">{{ $card['reBand']['label'] }}</div>
+                                    </td>
+                                </tr>
+                            </table>
+                            <div style="font-size: 9px; color: #55505A; margin-top: 8px; line-height: 1.5;">{{ $card['caption'] }}</div>
+                        </div>
+                    </td>
+                @endforeach
+            </tr>
+        </table>
+        <div style="font-size: 9px; color: #9aa3ad; text-align: center; margin-top: 4px;">Original &rarr; retest</div>
+
+        {{-- 1b. KEY CHANGES — biggest movers from Report::keyChanges (edited copy or the
+             snapshot default). Two boxes: "New priorities" (increases, amber labels) and
+             "Improved" (decreases, green labels). Fixed DomPDF-safe two-column table. --}}
+        @if($rtKeyChanges && (!empty($rtKeyChanges['increases']) || !empty($rtKeyChanges['decreases'])))
+        @php
+            $rtKcBoxes = [
+                ['label' => 'New priorities', 'rows' => $rtKeyChanges['increases'] ?? [], 'hex' => '#d97706'],
+                ['label' => 'Improved',       'rows' => $rtKeyChanges['decreases'] ?? [], 'hex' => '#16a34a'],
+            ];
+        @endphp
+        <table style="width: 100%; table-layout: fixed; margin-top: 16px;" cellspacing="0" cellpadding="0">
+            <tr>
+                @foreach($rtKcBoxes as $box)
+                    @if(!$loop->first)<td style="width: 4%;"></td>@endif
+                    <td style="width: 48%; vertical-align: top;">
+                        @if(!empty($box['rows']))
+                        <div style="background-color: #ffffff; border: 1px solid #e6e6ea; padding: 14px;">
+                            <div style="font-size: 13px; font-weight: bold; color: #301C47; margin-bottom: 8px;">{{ $box['label'] }}</div>
+                            <table style="width: 100%;" cellspacing="0" cellpadding="0">
+                                @foreach($box['rows'] as $row)
+                                    <tr>
+                                        <td style="padding: 5px 0; border-bottom: 1px solid #f0f0f2; vertical-align: middle;">
+                                            <div style="font-size: 11px; font-weight: bold; color: #301C47;">{{ $row['name'] }}</div>
+                                            <div style="font-size: 9px; font-weight: bold; color: {{ $box['hex'] }}; margin-top: 1px;">{{ $row['label'] }}</div>
+                                        </td>
+                                        <td style="font-size: 11px; text-align: right; padding: 5px 0; border-bottom: 1px solid #f0f0f2; vertical-align: middle; white-space: nowrap;">
+                                            <span style="color: #9aa3ad;">{{ ReportContent::num($row['original_pct']) }}%</span>
+                                            <span style="color: #c9ced6;">&nbsp;&rarr;&nbsp;</span>
+                                            <span style="font-weight: bold; color: {{ $rtAccent }};">{{ ReportContent::num($row['retest_pct']) }}%</span>
+                                        </td>
+                                    </tr>
+                                @endforeach
+                            </table>
+                        </div>
+                        @endif
+                    </td>
+                @endforeach
+            </tr>
+        </table>
+        @endif
+
+        {{-- 2. MAJOR GROUPS — phyla only, original% &rarr; retest% + direction. --}}
+        @if($rtPhyla->isNotEmpty())
+        @php
+            $rtGroupBoxes = [
+                ['label' => 'Main community shifts', 'rows' => $rtMainShifts],
+                ['label' => 'Other important groups', 'rows' => $rtOtherGroups],
+            ];
+        @endphp
+        <table style="width: 100%; table-layout: fixed; margin-top: 16px;" cellspacing="0" cellpadding="0">
+            <tr>
+                @foreach($rtGroupBoxes as $box)
+                    @if(!$loop->first)<td style="width: 4%;"></td>@endif
+                    <td style="width: 48%; vertical-align: top;">
+                        @if($box['rows']->isNotEmpty())
+                        <div style="background-color: #ffffff; border: 1px solid #e6e6ea; padding: 14px;">
+                            <div style="font-size: 13px; font-weight: bold; color: #301C47; margin-bottom: 8px;">{{ $box['label'] }}</div>
+                            <table style="width: 100%;" cellspacing="0" cellpadding="0">
+                                @foreach($box['rows'] as $p)
+                                    <tr>
+                                        <td style="font-size: 11px; font-weight: bold; color: #301C47; padding: 4px 0; border-bottom: 1px solid #f0f0f2; vertical-align: middle;">{{ $p['name'] }}</td>
+                                        <td style="font-size: 11px; text-align: right; padding: 4px 0; border-bottom: 1px solid #f0f0f2; vertical-align: middle; white-space: nowrap;">
+                                            <span style="color: #9aa3ad;">{{ ReportContent::num($p['original_pct']) }}%</span>
+                                            <span style="color: #c9ced6;">&nbsp;&rarr;&nbsp;</span>
+                                            <span style="font-weight: bold; color: {{ $rtAccent }};">{{ ReportContent::num($p['retest_pct']) }}%</span>
+                                            <span style="color: #9aa3ad;">&nbsp;{!! $rtArrow[$p['direction']] ?? '' !!}</span>
+                                        </td>
+                                    </tr>
+                                @endforeach
+                            </table>
+                        </div>
+                        @endif
+                    </td>
+                @endforeach
+            </tr>
+        </table>
+        @endif
+
+        {{-- 3. SPECIALIST RECOVERY — six key beneficial genera vs their target ranges,
+             with a rule-based status. Fixed DomPDF-safe table. --}}
+        <div style="font-size: 14px; font-weight: bold; color: #301C47; margin: 18px 0 2px;">Specialist recovery</div>
+        <div style="font-size: 11px; color: #55505A; margin: 0 0 8px;">How six key beneficial bacteria compare with their target ranges on this retest.</div>
+        <table style="width: 100%; table-layout: fixed;" cellspacing="0" cellpadding="0">
+            <tr>
+                <th style="width: 26%; text-align: left; font-size: 9px; color: #55505A; text-transform: uppercase; letter-spacing: 0.5px; padding: 0 0 6px; border-bottom: 1px solid #d9d9df;">Specialist</th>
+                <th style="width: 14%; text-align: right; font-size: 9px; color: #55505A; text-transform: uppercase; letter-spacing: 0.5px; padding: 0 0 6px; border-bottom: 1px solid #d9d9df;">Original</th>
+                <th style="width: 14%; text-align: right; font-size: 9px; color: #55505A; text-transform: uppercase; letter-spacing: 0.5px; padding: 0 0 6px; border-bottom: 1px solid #d9d9df;">Retest</th>
+                <th style="width: 18%; text-align: center; font-size: 9px; color: #55505A; text-transform: uppercase; letter-spacing: 0.5px; padding: 0 0 6px; border-bottom: 1px solid #d9d9df;">Target</th>
+                <th style="width: 28%; text-align: right; font-size: 9px; color: #55505A; text-transform: uppercase; letter-spacing: 0.5px; padding: 0 0 6px; border-bottom: 1px solid #d9d9df;">Status</th>
+            </tr>
+            @foreach($rtSpecialists as $sp)
+                <tr>
+                    <td style="font-size: 11px; font-weight: bold; color: #301C47; padding: 6px 0; border-bottom: 1px solid #f0f0f2; vertical-align: middle;">{{ $sp['name'] }}</td>
+                    <td style="font-size: 11px; text-align: right; color: #9aa3ad; padding: 6px 0; border-bottom: 1px solid #f0f0f2; vertical-align: middle;">{{ number_format($sp['original_pct'], 2) }}%</td>
+                    <td style="font-size: 11px; text-align: right; font-weight: bold; color: {{ $rtAccent }}; padding: 6px 0; border-bottom: 1px solid #f0f0f2; vertical-align: middle;">{{ number_format($sp['retest_pct'], 2) }}%</td>
+                    <td style="font-size: 10px; text-align: center; color: #55505A; padding: 6px 0; border-bottom: 1px solid #f0f0f2; vertical-align: middle;">{{ number_format($sp['target_low'], 1) }}&ndash;{{ number_format($sp['target_high'], 1) }}%</td>
+                    <td style="font-size: 11px; text-align: right; font-weight: bold; color: {{ $rtToneHex[$sp['status']['tone']] ?? '#9aa3ad' }}; padding: 6px 0; border-bottom: 1px solid #f0f0f2; vertical-align: middle; white-space: nowrap;">{!! $rtArrow[$sp['direction']] ?? '' !!} {{ $sp['status']['label'] }}</td>
+                </tr>
+            @endforeach
+        </table>
+
+        {{-- 4. RETEST SUMMARY — the AI's five parts, after the four data blocks. Each only
+             when non-empty; the whole block only when any part has text. DomPDF-safe. --}}
+        @if($rtHasSummaryParts)
+        <div style="font-size: 14px; font-weight: bold; color: #301C47; margin: 18px 0 8px;">Retest summary</div>
+        @foreach($rtSummaryParts as $part)
+            @if($part['text'] !== '')
+            <div style="margin: 0 0 10px;">
+                <div style="font-size: 11px; font-weight: bold; color: #301C47; margin: 0 0 2px;">{{ $part['label'] }}</div>
+                <p style="font-size: 12px; color: #55505A; line-height: 1.6; margin: 0;">{{ $part['text'] }}</p>
+            </div>
+            @endif
+        @endforeach
+        @endif
+    </div>
+</div>
+@endif
 
 {{-- ================================================================ --}}
 {{-- SECTION 7: YOUR DOG VS HEALTHY MICROBIOME --}}
@@ -679,6 +931,13 @@
 <div class="section">
     <div class="section-bar">Recommended Next Steps</div>
     <div class="section-body">
+        {{-- Retest plan-change line: one factual comparison of the original report's plan
+             to this retest's. Null (omitted) for a non-retest or unresolvable plan. --}}
+        @php $planChangeLine = $report->planChangeLine(); @endphp
+        @if(filled($planChangeLine))
+        <p style="font-weight: bold; color: #301C47; margin: 0 0 14px;">{{ $planChangeLine }}</p>
+        @endif
+
         {{-- Biome Balance reassurance box — only on no-commerce (hide_commerce)
              reports; mirrors the web callout. DomPDF-safe inline styles / table. --}}
         @if($report->hide_commerce)

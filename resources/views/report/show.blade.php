@@ -73,6 +73,37 @@
         @media (max-width: 420px) {
             .slider-band-labels { font-size: 11px !important; }
         }
+
+        /* Retest progress — specialist rows reflow to one stacked block per row on
+           narrow screens: name + status on the top line, the original→retest figures
+           and target range on the line below. No horizontal scroll. (!important
+           overrides the inline display rules.) */
+        @media (max-width: 600px) {
+            .rt-spec-head { display: none !important; }
+            .rt-spec-row {
+                display: block !important;
+                border: 1px solid #e5e7eb !important;
+                border-radius: 12px !important;
+                padding: 12px 14px !important;
+                margin-top: 8px !important;
+            }
+            .rt-spec-row .rt-spec-name {
+                display: flex !important;
+                align-items: center;
+                justify-content: space-between;
+                gap: 10px;
+            }
+            .rt-spec-row .rt-spec-status-mobile { display: inline !important; }
+            .rt-spec-row .rt-spec-status-desktop { display: none !important; }
+            .rt-spec-row .rt-spec-figs {
+                justify-content: space-between;
+                margin-top: 8px;
+            }
+            .rt-spec-row .rt-spec-figs > span {
+                width: auto !important;
+                text-align: left !important;
+            }
+        }
     </style>
     {{-- Flag JS as available before first paint so scroll-reveal can hide-then-reveal
          without flashing. With JS off, this never runs and all content stays visible. --}}
@@ -169,6 +200,282 @@
     </header>
 
     <main class="max-w-5xl mx-auto px-4 sm:px-6 py-10 sm:py-14 space-y-12 sm:space-y-14">
+
+        {{-- ============================================================ --}}
+        {{-- RETEST PROGRESS (linked retests only) --}}
+        {{-- Renders ENTIRELY from the frozen retest_comparison snapshot
+             (app/Support/RetestComparison.php, frozen at generation) — no AI,
+             no recalculation. Shown only when this report is linked to an
+             earlier one as its retest. On a normal report nothing renders and
+             the page is unchanged. Headline of a retest, so it sits first. --}}
+        {{-- ============================================================ --}}
+        @php
+            $retestData = ($report->isRetest() && !empty($report->retest_comparison))
+                ? $report->retest_comparison
+                : null;
+        @endphp
+        @if($retestData)
+        @php
+            // Same semantic-tone → palette map the Microbiome Overview uses.
+            $rtToneText = ['bad' => 'text-red-600', 'warn' => 'text-amber-600', 'good' => 'text-green-600'];
+
+            $rtOrig = $retestData['overview']['original'] ?? [];
+            $rtRe   = $retestData['overview']['retest'] ?? [];
+
+            // Band words come from the portal's EXISTING helpers (no new thresholds):
+            // diversity + richness as a normal report does; dysbiosis via its band too.
+            $divOrig = (float) ($rtOrig['diversity'] ?? 0);
+            $divRe   = (float) ($rtRe['diversity'] ?? 0);
+            $srOrig  = (float) ($rtOrig['species_richness'] ?? 0);
+            $srRe    = (float) ($rtRe['species_richness'] ?? 0);
+            $fbOrig  = (float) ($rtOrig['firmicutes_bacteroidetes_ratio'] ?? 0);
+            $fbRe    = (float) ($rtRe['firmicutes_bacteroidetes_ratio'] ?? 0);
+
+            $rtCards = [
+                [
+                    'title' => 'Diversity (Shannon)',
+                    'caption' => 'Higher is generally healthier.',
+                    'origVal' => \App\Support\ReportContent::num($divOrig),
+                    'reVal' => \App\Support\ReportContent::num($divRe),
+                    'origBand' => \App\Support\ReportContent::diversityBand($divOrig),
+                    'reBand' => \App\Support\ReportContent::diversityBand($divRe),
+                ],
+                [
+                    'title' => 'Species detected',
+                    'caption' => 'Number of distinct species found.',
+                    'origVal' => (string) (int) $srOrig,
+                    'reVal' => (string) (int) $srRe,
+                    'origBand' => \App\Support\ReportContent::richnessBand($srOrig),
+                    'reBand' => \App\Support\ReportContent::richnessBand($srRe),
+                ],
+                [
+                    'title' => 'Dysbiosis (F/B ratio)',
+                    'caption' => 'Firmicutes to Bacteroidetes balance.',
+                    'origVal' => \App\Support\ReportContent::num($fbOrig),
+                    'reVal' => \App\Support\ReportContent::num($fbRe),
+                    'origBand' => \App\Support\ReportContent::dysbiosisBand($fbOrig),
+                    'reBand' => \App\Support\ReportContent::dysbiosisBand($fbRe),
+                ],
+            ];
+
+            // Major groups: PHYLA only, present at >= 1% in either test, ordered by the
+            // larger of the two values. First three are the headline shifts.
+            $rtPhyla = collect($retestData['taxa']['phylum'] ?? [])
+                ->filter(fn ($p) => ((float) ($p['original_pct'] ?? 0)) >= 1.0 || ((float) ($p['retest_pct'] ?? 0)) >= 1.0)
+                ->sortByDesc(fn ($p) => max((float) ($p['original_pct'] ?? 0), (float) ($p['retest_pct'] ?? 0)))
+                ->values();
+            $rtMainShifts = $rtPhyla->take(3);
+            $rtOtherGroups = $rtPhyla->slice(3)->values();
+
+            // Neutral direction glyphs (no colour) — a plain cue, not a verdict.
+            $rtArrow = ['up' => '&uarr;', 'down' => '&darr;', 'flat' => '&rarr;'];
+
+            // Six specialists read from the frozen snapshot (taxa['genus']); status is
+            // rule-based against the config ranges — no re-parsing, no new calculation.
+            $rtSpecialists = \App\Support\ReportContent::specialistRecovery($retestData);
+            // This block is INLINE-styled (like the plan/subscribe sections) rather than
+            // Tailwind-classed, because public/css/report.css is a purged launch-era
+            // artifact that new utilities aren't compiled into. Status tone → hex,
+            // extending the shared tones with 'accent' (teal) and 'muted'.
+            $rtStatusHex = [
+                'good' => '#16a34a', 'warn' => '#d97706', 'bad' => '#dc2626',
+                'accent' => '#4654A4', 'muted' => '#6b7280',
+            ];
+
+            // Key Changes: the team's edited copy when present, else the deterministic
+            // default derived from the snapshot (Report::keyChanges, step 7a/7b). Null
+            // for a non-retest → the block below renders nothing.
+            $rtKeyChanges = $report->keyChanges();
+
+            // AI retest summary (step 10a; editable in step 10b). Conclusion headlines the
+            // section; the five parts render after the data blocks. Each part only when
+            // non-empty, and the block only when any part has text (so before the first
+            // regenerate nothing shows).
+            $retestSummary = is_array($report->retest_summary) ? $report->retest_summary : [];
+            $rtConclusion = trim((string) ($retestSummary['conclusion'] ?? ''));
+            $rtSummaryParts = [
+                ['label' => 'Where we started', 'text' => trim((string) ($retestSummary['started'] ?? ''))],
+                ['label' => 'What has improved', 'text' => trim((string) ($retestSummary['improved'] ?? ''))],
+                ['label' => 'What still needs attention', 'text' => trim((string) ($retestSummary['attention'] ?? ''))],
+                ['label' => 'What this means', 'text' => trim((string) ($retestSummary['meaning'] ?? ''))],
+                ['label' => 'What we recommend next', 'text' => trim((string) ($retestSummary['recommend'] ?? ''))],
+            ];
+            $rtHasSummaryParts = collect($rtSummaryParts)->contains(fn ($p) => $p['text'] !== '');
+        @endphp
+        <section data-reveal class="report-card">
+            <div class="report-head">
+                <h2 class="text-lg font-bold tracking-tight">Retest Progress</h2>
+            </div>
+            <div class="report-body space-y-8">
+                {{-- AI summary CONCLUSION — short headline at the top of the retest section
+                     (above the overview). Only when non-empty. --}}
+                @if($rtConclusion !== '')
+                    <p class="text-navy" style="font-size:18px; font-weight:700; line-height:1.4; margin:0;">{{ $rtConclusion }}</p>
+                @endif
+
+                <p class="text-gray-700 leading-relaxed">This is a follow-up test. The figures below compare your dog's original results with this retest, so you can see how the microbiome has changed.</p>
+
+                {{-- 1. OVERVIEW — three cards, original → retest (retest emphasised). --}}
+                <div>
+                    <h3 class="font-bold text-navy text-base mb-4">Overview</h3>
+                    <div class="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                        @foreach($rtCards as $card)
+                            <div class="border border-gray-200 rounded-2xl p-5 text-center lift">
+                                <p class="text-sm font-semibold text-gray-500 mb-3">{{ $card['title'] }}</p>
+                                <div class="flex items-center justify-center gap-3">
+                                    <div class="text-center">
+                                        {{-- Inline colour/spacing: text-gray-400 / mt-0.5 aren't in the purged report.css. --}}
+                                        <p class="text-2xl font-bold" style="color:#9ca3af;">{{ $card['origVal'] }}</p>
+                                        <p class="text-xs font-semibold {{ $rtToneText[$card['origBand']['tone']] }}" style="margin-top:0.125rem;">{{ $card['origBand']['label'] }}</p>
+                                    </div>
+                                    <span class="text-xl" style="color:#d1d5db;" aria-hidden="true">&rarr;</span>
+                                    <div class="text-center">
+                                        <p class="text-3xl font-extrabold text-teal">{{ $card['reVal'] }}</p>
+                                        <p class="text-xs font-semibold {{ $rtToneText[$card['reBand']['tone']] }}" style="margin-top:0.125rem;">{{ $card['reBand']['label'] }}</p>
+                                    </div>
+                                </div>
+                                <p class="text-xs text-gray-500 mt-3">{{ $card['caption'] }}</p>
+                            </div>
+                        @endforeach
+                    </div>
+                    <p class="text-xs mt-2 text-center" style="color:#9ca3af;">Original &rarr; retest</p>
+                </div>
+
+                {{-- 1b. KEY CHANGES — the biggest movers (from Report::keyChanges: the
+                     team's edited copy, else the snapshot default). Two boxes:
+                     "New priorities" (increases, amber labels) and "Improved"
+                     (decreases, green labels). Inline-styled; the two boxes stack to
+                     one column on narrow screens via the compiled grid classes. --}}
+                @if($rtKeyChanges && (!empty($rtKeyChanges['increases']) || !empty($rtKeyChanges['decreases'])))
+                @php
+                    $rtKcBoxes = [
+                        ['label' => 'New priorities', 'rows' => $rtKeyChanges['increases'] ?? [], 'hex' => '#d97706'],
+                        ['label' => 'Improved',       'rows' => $rtKeyChanges['decreases'] ?? [], 'hex' => '#16a34a'],
+                    ];
+                @endphp
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    @foreach($rtKcBoxes as $box)
+                        @if(!empty($box['rows']))
+                        <div class="border border-gray-200 rounded-2xl p-5 lift">
+                            <h3 class="font-bold text-navy text-base mb-3">{{ $box['label'] }}</h3>
+                            <div class="divide-y">
+                                @foreach($box['rows'] as $row)
+                                    <div class="flex items-center justify-between gap-3 py-2.5" style="border-color:#f3f4f6;">
+                                        <div style="min-width:0;">
+                                            <div class="text-sm font-semibold text-navy">{{ $row['name'] }}</div>
+                                            <div class="text-xs font-semibold" style="color:{{ $box['hex'] }}; margin-top:0.125rem;">{{ $row['label'] }}</div>
+                                        </div>
+                                        <span class="text-sm whitespace-nowrap">
+                                            <span style="color:#9ca3af;">{{ \App\Support\ReportContent::num($row['original_pct']) }}%</span>
+                                            <span style="color:#d1d5db; margin:0 0.25rem;" aria-hidden="true">&rarr;</span>
+                                            <span class="font-bold text-teal">{{ \App\Support\ReportContent::num($row['retest_pct']) }}%</span>
+                                        </span>
+                                    </div>
+                                @endforeach
+                            </div>
+                        </div>
+                        @endif
+                    @endforeach
+                </div>
+                @endif
+
+                {{-- 2. MAJOR GROUPS — phyla only, original% → retest% + direction. --}}
+                @if($rtPhyla->isNotEmpty())
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    @php
+                        $rtGroupBoxes = [
+                            ['label' => 'Main community shifts', 'rows' => $rtMainShifts],
+                            ['label' => 'Other important groups', 'rows' => $rtOtherGroups],
+                        ];
+                    @endphp
+                    @foreach($rtGroupBoxes as $box)
+                        @if($box['rows']->isNotEmpty())
+                        <div class="border border-gray-200 rounded-2xl p-5 lift">
+                            <h3 class="font-bold text-navy text-base mb-3">{{ $box['label'] }}</h3>
+                            {{-- divide-y is compiled; the divide colour (gray-100) and the
+                                 grey/arrow utilities are not, so set those inline. --}}
+                            <div class="divide-y">
+                                @foreach($box['rows'] as $p)
+                                    <div class="flex items-center justify-between gap-3 py-2.5" style="border-color:#f3f4f6;">
+                                        <span class="text-sm font-semibold text-navy">{{ $p['name'] }}</span>
+                                        <span class="text-sm whitespace-nowrap">
+                                            <span style="color:#9ca3af;">{{ \App\Support\ReportContent::num($p['original_pct']) }}%</span>
+                                            <span style="color:#d1d5db; margin:0 0.25rem;" aria-hidden="true">&rarr;</span>
+                                            <span class="font-bold text-teal">{{ \App\Support\ReportContent::num($p['retest_pct']) }}%</span>
+                                            <span style="color:#9ca3af; margin-left:0.375rem;" aria-hidden="true">{!! $rtArrow[$p['direction']] ?? '' !!}</span>
+                                        </span>
+                                    </div>
+                                @endforeach
+                            </div>
+                        </div>
+                        @endif
+                    @endforeach
+                </div>
+                @endif
+
+                {{-- 3. SPECIALIST RECOVERY — six key beneficial genera vs their target
+                     ranges, with a rule-based status. Inline-styled (report.css is a
+                     purged artifact); responsive via the .rt-spec-* rules in the page
+                     <style> block — a row table on wide screens that reflows to one
+                     stacked block per specialist on narrow (name + status on top,
+                     figures + target below), no horizontal scroll. Mirrors the
+                     plan/subscribe sections' inline-style + @media convention. --}}
+                <div>
+                    <h3 style="font-size:16px; font-weight:700; color:#301C47; margin:0 0 2px;">Specialist recovery</h3>
+                    <p style="font-size:14px; color:#6b7280; margin:0 0 12px;">How six key beneficial bacteria compare with their target ranges on this retest.</p>
+
+                    {{-- Column headers (wide screens only; hidden on the stacked mobile layout). --}}
+                    <div class="rt-spec-head" style="display:flex; align-items:center; gap:12px; padding:0 2px 6px; border-bottom:1px solid #e5e7eb; font-size:11px; font-weight:600; text-transform:uppercase; letter-spacing:.04em; color:#6b7280;">
+                        <span style="flex:1;">Specialist</span>
+                        <span style="width:150px; text-align:right;">Original &rarr; retest</span>
+                        <span style="width:92px; text-align:right;">Target</span>
+                        <span style="width:150px; text-align:right;">Status</span>
+                    </div>
+
+                    @foreach($rtSpecialists as $sp)
+                        @php $spHex = $rtStatusHex[$sp['status']['tone']] ?? '#6b7280'; @endphp
+                        <div class="rt-spec-row" style="display:flex; align-items:center; gap:12px; padding:10px 2px; border-bottom:1px solid #f0f0f2;">
+                            {{-- Name, with the status inline on the mobile top line only. --}}
+                            <div class="rt-spec-name" style="flex:1;">
+                                <span style="font-size:14px; font-weight:600; color:#301C47;">{{ $sp['name'] }}</span>
+                                <span class="rt-spec-status-mobile" style="display:none; font-size:14px; font-weight:700; color:{{ $spHex }};">{!! $rtArrow[$sp['direction']] ?? '' !!} {{ $sp['status']['label'] }}</span>
+                            </div>
+                            {{-- Figures + target range (drop to their own line on mobile). --}}
+                            <div class="rt-spec-figs" style="display:flex; align-items:center; gap:12px;">
+                                <span style="width:150px; text-align:right; font-size:14px; white-space:nowrap;">
+                                    <span style="color:#9aa3ad;">{{ number_format($sp['original_pct'], 2) }}%</span>
+                                    <span style="color:#c9ced6;" aria-hidden="true">&nbsp;&rarr;&nbsp;</span>
+                                    <span style="font-weight:700; color:#4654A4;">{{ number_format($sp['retest_pct'], 2) }}%</span>
+                                </span>
+                                <span style="width:92px; text-align:right; font-size:14px; color:#6b7280; white-space:nowrap;">{{ number_format($sp['target_low'], 1) }}&ndash;{{ number_format($sp['target_high'], 1) }}%</span>
+                            </div>
+                            {{-- Status (wide screens only, right-aligned). --}}
+                            <span class="rt-spec-status-desktop" style="width:150px; text-align:right; font-size:14px; font-weight:700; color:{{ $spHex }}; white-space:nowrap;">{!! $rtArrow[$sp['direction']] ?? '' !!} {{ $sp['status']['label'] }}</span>
+                        </div>
+                    @endforeach
+                </div>
+
+                {{-- 4. RETEST SUMMARY — the AI's five parts, after the four data blocks.
+                     Each part only when non-empty; the whole block only when any part has
+                     text. Reuses the report's prose styling. --}}
+                @if($rtHasSummaryParts)
+                <div>
+                    <h3 class="font-bold text-navy text-base mb-3">Retest summary</h3>
+                    <div class="space-y-4">
+                        @foreach($rtSummaryParts as $part)
+                            @if($part['text'] !== '')
+                            <div>
+                                <h4 class="font-bold text-navy text-sm" style="margin:0 0 2px;">{{ $part['label'] }}</h4>
+                                <p class="text-gray-700 leading-relaxed" style="margin:0;">{{ $part['text'] }}</p>
+                            </div>
+                            @endif
+                        @endforeach
+                    </div>
+                </div>
+                @endif
+            </div>
+        </section>
+        @endif
 
         {{-- ============================================================ --}}
         {{-- 2. VETERINARY SUMMARY (Static) --}}
@@ -687,6 +994,15 @@
                 <h2 class="text-lg font-bold tracking-tight">Recommended Next Steps</h2>
             </div>
             <div class="report-body space-y-8">
+
+                {{-- Retest plan-change line: one factual comparison of the original
+                     report's plan to this retest's. Null (omitted) for a non-retest or
+                     when either plan can't be resolved. Inline-styled like the plan body
+                     text (report.css is purged — step-6 convention). --}}
+                @php $planChangeLine = $report->planChangeLine(); @endphp
+                @if(filled($planChangeLine))
+                    <p class="text-sm" style="color:#55505A; font-weight:600; margin:0;">{{ $planChangeLine }}</p>
+                @endif
 
                 {{-- Biome Balance reassurance box — only on no-commerce (hide_commerce)
                      reports. Reassures the customer that the plan below is already part

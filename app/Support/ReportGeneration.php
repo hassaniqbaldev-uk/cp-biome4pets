@@ -12,6 +12,7 @@ use App\Services\OpenAiService;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Storage;
 
 /**
  * The INTERPRETATION half of report generation, decomposed out of the entangled
@@ -268,6 +269,10 @@ class ReportGeneration
                 // genus legitimately named in the diet prose — e.g. Blautia — is not
                 // flagged). Same grounded set the diet prompt's allow-list uses.
                 'insight_taxa' => $deterministic['insight_taxa'] ?? [],
+                // Retest-summary allow-list — whitelists the taxa the summary may name,
+                // so its prose is scanned for ungrounded organisms exactly like the diet
+                // boxes. Empty/absent for a non-retest, so it changes nothing there.
+                'retest_allow_list' => $deterministic['retest_allow_list'] ?? [],
                 'triggered' => $selection['triggered'] ?? [],
                 'plan_id' => $selection['plan_id'] ?? null,
                 // Lets the grader tell an unwell + no-trigger AUTO-assigned fallback
@@ -371,7 +376,53 @@ class ReportGeneration
         'plan_unmatched',
         'manual_plan_review',
         'panel_contradiction',
+        // Deterministic on isRetest(): dropped then re-derived each recompute, so it
+        // clears if the retest link is removed and re-adds while the report is a retest.
+        'retest_review',
     ];
+
+    /**
+     * Deterministic review code: every retest report is held for review so the team
+     * checks the AI interpretations and the suggested plan against the before/after
+     * comparison before publishing. Fires purely on isRetest(); label + explanation live
+     * in AdminFormatting (the shared code registry).
+     */
+    public const RETEST_REVIEW_CODE = 'retest_review';
+
+    /** Stored current-state detail for the retest review flag. */
+    protected static function retestReviewDetail(): string
+    {
+        return 'This report is a retest — review the AI interpretations and the suggested plan against the before/after comparison before publishing.';
+    }
+
+    /**
+     * Fold the deterministic retest review flag into a (needs_review, review_flags) pair:
+     * for a retest, append the issue (idempotently) and force needs_review = true, so a
+     * generation/regenerate of a retest always lands it in review. A no-op for a non-retest.
+     *
+     * @return array{0: bool, 1: ?array}  [needs_review, review_flags]
+     */
+    public static function applyRetestReviewFlag(Report $report, bool $needsReview, ?array $flags): array
+    {
+        if (! $report->isRetest()) {
+            return [$needsReview, $flags];
+        }
+
+        $flags = is_array($flags) ? $flags : ['detected_at' => now()->toIso8601String(), 'issues' => []];
+        $issues = $flags['issues'] ?? [];
+
+        // Idempotent: replace any existing retest row rather than stacking it.
+        $issues = array_values(array_filter(
+            $issues,
+            fn (array $i): bool => ($i['code'] ?? '') !== self::RETEST_REVIEW_CODE,
+        ));
+        $issues[] = self::issueRow(self::RETEST_REVIEW_CODE, self::retestReviewDetail());
+
+        $flags['issues'] = $issues;
+        $flags['detected_at'] = $flags['detected_at'] ?? now()->toIso8601String();
+
+        return [true, $flags];
+    }
 
     /**
      * Re-evaluate the edit-resolvable review flags against the report's CURRENT
@@ -424,6 +475,13 @@ class ReportGeneration
             $kept[] = $report->plan_id === null
                 ? self::issueRow($origin, self::planFlagDetail($origin))
                 : self::issueRow('manual_plan_review', self::planFlagDetail('manual_plan_review'));
+        }
+
+        // RETEST — deterministic on isRetest(): every retest is held for review. Added
+        // to $kept (a deterministic issue) so needs_review recomputes true, but a prior
+        // "Mark as reviewed" still holds when the issue set is unchanged (see $changed).
+        if ($report->isRetest()) {
+            $kept[] = self::issueRow(self::RETEST_REVIEW_CODE, self::retestReviewDetail());
         }
 
         // Rebuild. needs_review respects a prior "Mark as reviewed": keep the stored
@@ -523,6 +581,94 @@ class ReportGeneration
      * advance). The plan is applied later in the report editor (its
      * subscription_snapshot is captured there).
      */
+    /**
+     * Build the frozen RetestComparison snapshot for a report, mirroring how
+     * phylum_data / plan copy are frozen at generation rather than recomputed at
+     * render. Returns the comparison array for a retest whose BOTH CSVs resolve, else
+     * null — for a non-retest report, or when either stored CSV can't be read. Never
+     * throws (the portal's graceful-empty contract): any failure stores null.
+     *
+     * Reuses the step-1 service verbatim: RetestComparison::build(originalCsv, retestCsv).
+     */
+    /**
+     * The update payload that freezes BOTH retest columns consistently, used at every
+     * generation/save point. Always sets retest_comparison (null for a non-retest or
+     * unresolvable CSV). For retest_key_changes:
+     *   - comparison null  -> null too (non-retest / cleared link / unresolvable), so
+     *     it never lingers after the link is removed, mirroring retest_comparison;
+     *   - comparison present AND the column is currently null -> SEED the default
+     *     (RetestComparison::keyChangesDefault), so a fresh retest renders it; but
+     *   - comparison present AND a value is already stored -> leave it, so a later
+     *     team edit (step 7c) is never overwritten on re-save or regenerate.
+     *
+     * @return array{retest_comparison: ?array, retest_key_changes?: ?array}
+     */
+    public static function retestFreezePayload(Report $report): array
+    {
+        $comparison = self::retestComparisonFor($report);
+        $payload = ['retest_comparison' => $comparison];
+
+        if ($comparison === null) {
+            $payload['retest_key_changes'] = null;
+        } elseif ($report->retest_key_changes === null) {
+            $payload['retest_key_changes'] = RetestComparison::keyChangesDefault($comparison);
+        }
+
+        // One-time default: when a report BECOMES a retest (retest_comparison transitions
+        // from null to populated), also default hide_commerce = true, so a retest hides
+        // prices/subscribe by default (the owner is mid-programme). Set ONLY at that first
+        // transition — seed-only-when-null spirit — so the team can toggle it back off and
+        // it stays off on every later re-save/regenerate (where retest_comparison is already
+        // populated, so this branch is skipped). Never touched for a non-retest.
+        if ($comparison !== null && $report->retest_comparison === null) {
+            $payload['hide_commerce'] = true;
+        }
+
+        return $payload;
+    }
+
+    public static function retestComparisonFor(Report $report): ?array
+    {
+        if (! $report->isRetest()) {
+            return null;
+        }
+
+        $retestCsv = self::resolveTestCsvPath($report->test);
+        $originalCsv = self::resolveTestCsvPath($report->retestOf?->test);
+        if ($retestCsv === null || $originalCsv === null) {
+            return null;
+        }
+
+        try {
+            return RetestComparison::build($originalCsv, $retestCsv);
+        } catch (\Throwable $e) {
+            Log::warning('Retest comparison snapshot failed; storing null.', [
+                'report_id' => $report->getKey(),
+                'error' => $e->getMessage(),
+            ]);
+
+            return null;
+        }
+    }
+
+    /**
+     * Absolute, readable filesystem path for a test's stored CSV (local disk), or null
+     * when there is no path or the file is missing. csv_path is stored disk-relative
+     * (Storage::disk('local')), so it is resolved via ->path() the same way the rest of
+     * the portal reads it.
+     */
+    private static function resolveTestCsvPath(?Test $test): ?string
+    {
+        $relative = $test?->csv_path;
+        if (! filled($relative)) {
+            return null;
+        }
+
+        $disk = Storage::disk('local');
+
+        return $disk->exists($relative) ? $disk->path($relative) : null;
+    }
+
     public static function createReportFromTest(Test $test): Report
     {
         return DB::transaction(function () use ($test) {
@@ -577,6 +723,15 @@ class ReportGeneration
                 $report->catalogProducts()->sync($sync);
             }
 
+            // Freeze the retest comparison at generation IF this report was created
+            // already linked to an original (e.g. a future create-with-link path). A
+            // plain generate-from-test leaves it null — createReportFromTest takes no
+            // link input, so in practice the snapshot is produced by regenerate once an
+            // admin sets retest_of_report_id (see regenerateReport).
+            if ($report->isRetest()) {
+                $report->update(self::retestFreezePayload($report));
+            }
+
             return $report;
         });
     }
@@ -625,7 +780,13 @@ class ReportGeneration
         // would otherwise never surface. Regenerate is the "rebuild from current data"
         // action: change the diet, regenerate, and the nutritionist diet-review
         // statement appears. Notes stay grounded AS OF the report date via $asOf.
-        $report->update(['pet_snapshot' => Report::buildPetSnapshot($pet, $asOf)]);
+        // The retest comparison is DETERMINISTIC (built from the two tests' CSVs, not
+        // the AI), so refresh it here with pet_snapshot — up front, before the AI step —
+        // so a transient AI failure never skips it, exactly as pet_snapshot is refreshed
+        // unconditionally. Null for a non-retest report or when a CSV can't be resolved.
+        $report->update([
+            'pet_snapshot' => Report::buildPetSnapshot($pet, $asOf),
+        ] + self::retestFreezePayload($report));
 
         $deterministic = [
             'species_richness' => $test->species_richness,
@@ -646,10 +807,24 @@ class ReportGeneration
             return ['ok' => false, 'needs_review' => (bool) $report->needs_review, 'reason' => $genError ?? 'empty_output'];
         }
 
+        // Retest AI summary — grounded prose from the report's frozen facts, generated
+        // ONLY for a retest and refreshed on every regenerate (like the interpretations /
+        // diet). Never throws; a failure/no-key yields empty strings. Its text is folded
+        // into the graded payload with the allow-list in context, so an ungrounded taxon
+        // named in the summary flags unknown_taxon exactly as the diet prose does.
+        $retestSummary = null;
+        $gradeInterp = $interp;
+        $retestAllowList = [];
+        if ($report->isRetest()) {
+            $retestSummary = app(OpenAiService::class)->generateRetestSummary($report, $report->getKey());
+            $retestAllowList = RetestSummaryFacts::allowList($report);
+            $gradeInterp = array_merge($interp, $retestSummary);
+        }
+
         // Re-grade with the SAME validator (band_contradiction etc. re-apply).
         // Plan/triggers are unchanged here, so reuse the report's existing selection.
         $selection = ['triggered' => [], 'plan_id' => $report->plan_id];
-        $verdict = self::gradeAndLog($interp, [
+        $verdict = self::gradeAndLog($gradeInterp, [
             'phylum_totals' => $phylumData,
             'diversity_score' => $test->diversity_score,
             'species_richness' => $test->species_richness,
@@ -657,13 +832,24 @@ class ReportGeneration
             'microbiome_classification' => $test->microbiome_classification,
             'species' => self::taxaNames($deterministic['top_taxa'] ?? []),
             'insight_taxa' => $deterministic['insight_taxa'] ?? [],
+            'retest_allow_list' => $retestAllowList,
         ], $selection, $genError, ['path' => 'bulk_regenerate', 'report_id' => $report->getKey()]);
 
+        // Fold in the deterministic retest flag: a regenerate of a retest re-raises it
+        // (a redo should be re-reviewed) and forces needs_review. No-op for a non-retest.
+        [$needsReview, $flags] = self::applyRetestReviewFlag(
+            $report,
+            $verdict['needs_review'],
+            self::reviewFlagsFromVerdict($verdict),
+        );
+
         $report->update(array_merge($interp, [
-            'needs_review' => $verdict['needs_review'],
-            'review_flags' => self::reviewFlagsFromVerdict($verdict),
+            'needs_review' => $needsReview,
+            'review_flags' => $flags,
+            // null for a non-retest; the grounded summary (or empty strings) otherwise.
+            'retest_summary' => $retestSummary,
         ]));
 
-        return ['ok' => true, 'needs_review' => $verdict['needs_review'], 'reason' => null];
+        return ['ok' => true, 'needs_review' => $needsReview, 'reason' => null];
     }
 }

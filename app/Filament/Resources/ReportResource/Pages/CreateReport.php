@@ -43,6 +43,16 @@ class CreateReport extends CreateRecord
         $this->catalogProductIds = $data['catalog_product_ids'] ?? [];
         unset($data['catalog_product_ids']);
 
+        // Key Changes are owned by the generation seed (afterCreate → retestFreezePayload
+        // seeds the step-7a default when the column is null). Drop any create-form value so
+        // a freshly-linked report always starts from the computed default; curating happens
+        // on the edit page.
+        unset($data['retest_key_changes']);
+
+        // The AI retest summary is generated (step 10a), not authored at create; drop any
+        // create-form value so it is never written here. Curating happens on the edit page.
+        unset($data['retest_summary']);
+
         // Extract the phased plan steps; persisted via relations after create
         // (kept out of the core Report mass-assignment).
         $this->planSteps = $data['steps'] ?? [];
@@ -161,6 +171,11 @@ class CreateReport extends CreateRecord
         // admin picked a plan in the wizard for a pet that didn't auto-match, raise
         // the "manual plan selected — needs Super Admin review" flag from the start.
         \App\Support\ReportGeneration::recomputeReviewState($this->record->refresh());
+
+        // Freeze the retest comparison AND seed the Key Changes default from the saved
+        // link (null if not a retest or the CSVs can't resolve) — so linking populates
+        // both immediately, no separate regenerate needed. Reuses steps 2 + 7a/7b.
+        $this->record->update(\App\Support\ReportGeneration::retestFreezePayload($this->record->refresh()));
     }
 
     /**

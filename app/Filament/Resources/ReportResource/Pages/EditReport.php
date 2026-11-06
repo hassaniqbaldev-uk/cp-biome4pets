@@ -408,6 +408,27 @@ class EditReport extends EditRecord
 
         $data['catalog_product_ids'] = $this->record->catalogProducts->pluck('id')->all();
 
+        // Prefill the Key Changes editor from Report::keyChanges() (the stored value, or
+        // the step-7a default when the column is still null) so the team starts from the
+        // suggestions. Only for a retest — the editor is hidden otherwise.
+        if ($this->record->isRetest()) {
+            $data['retest_key_changes'] = $this->record->keyChanges()
+                ?? ['increases' => [], 'decreases' => []];
+
+            // Prefill the AI retest-summary editor from the stored value (empty strings
+            // before the first regenerate). Unlike key changes there is no default to
+            // compute — the summary is AI-written; editing is a pre-publish tweak.
+            $summary = is_array($this->record->retest_summary) ? $this->record->retest_summary : [];
+            $data['retest_summary'] = [
+                'conclusion' => $summary['conclusion'] ?? '',
+                'started' => $summary['started'] ?? '',
+                'improved' => $summary['improved'] ?? '',
+                'attention' => $summary['attention'] ?? '',
+                'meaning' => $summary['meaning'] ?? '',
+                'recommend' => $summary['recommend'] ?? '',
+            ];
+        }
+
         // Hydrate the phased plan steps (ordered by position) with their
         // products (ordered by position) into the nested `steps` form key.
         // plan_id / plan_intro / subscription_snapshot are plain columns and are
@@ -450,6 +471,18 @@ class EditReport extends EditRecord
         $this->planSteps = $data['steps'] ?? [];
         unset($data['steps']);
 
+        // Key Changes: an ALL-EMPTY editor payload (e.g. the first save that sets the
+        // link, where nothing was prefilled yet) must NOT persist empty arrays, as that
+        // would block afterSave's seed of the step-7a default. Drop it so retestFreezePayload
+        // governs (seed when null, preserve when already set). A partial edit — at least
+        // one row on either side — is a real curation and is kept as-is.
+        if (isset($data['retest_key_changes'])) {
+            $kc = $data['retest_key_changes'];
+            if (empty($kc['increases']) && empty($kc['decreases'])) {
+                unset($data['retest_key_changes']);
+            }
+        }
+
         return $data;
     }
 
@@ -468,6 +501,13 @@ class EditReport extends EditRecord
         // Fixes the stale "no plan selected" nag after a plan is chosen, and raises
         // the "manual plan selected — needs Super Admin review" sanity check.
         \App\Support\ReportGeneration::recomputeReviewState($this->record->refresh());
+
+        // Populate / clear the frozen retest comparison AND the seeded Key Changes
+        // default from the (now saved) link: set → snapshot + default, cleared →
+        // both null, unresolvable CSVs → both null. A stored Key Changes edit is
+        // preserved (seeded only when currently null). Reuses steps 2 + 7a/7b.
+        $this->record->update(\App\Support\ReportGeneration::retestFreezePayload($this->record->refresh()));
+
         $this->fillForm();
     }
 

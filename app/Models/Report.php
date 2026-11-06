@@ -26,6 +26,12 @@ class Report extends Model
         'client_id',
         'pet_id',
         'test_id',
+        // Retest linking + frozen comparison snapshot (set when this report is a
+        // retest of an earlier one).
+        'retest_of_report_id',
+        'retest_comparison',
+        'retest_key_changes',
+        'retest_summary',
         'ai_summary',
         'ai_bacteroidetes_interpretation',
         'ai_firmicutes_interpretation',
@@ -78,6 +84,12 @@ class Report extends Model
         // Raw lab fields (csv_data/phylum_data/diversity_score/dysbiosis_score/
         // species_richness) now live on the Test and are cast there; the
         // Report→Test proxy returns the already-cast Test value.
+        // Frozen RetestComparison snapshot (overview + per-taxon deltas).
+        'retest_comparison' => 'array',
+        // Editable "Key Changes" list (seeded from the snapshot default).
+        'retest_key_changes' => 'array',
+        // AI-written retest summary (conclusion + Aneta's five parts).
+        'retest_summary' => 'array',
         'subscription_snapshot' => 'array',
         'hide_subscribe' => 'boolean',
         'hide_commerce' => 'boolean',
@@ -526,6 +538,72 @@ class Report extends Model
         // resolve so a recoverable report keeps showing its data, and the public
         // report doesn't break just because the test was (accidentally) deleted.
         return $this->belongsTo(Test::class)->withTrashed();
+    }
+
+    /**
+     * The earlier report this one is a retest OF (null for a normal report). withTrashed
+     * so a soft-deleted original still resolves — the retest keeps its frozen comparison
+     * regardless, but the link should still point back where it can.
+     */
+    public function retestOf()
+    {
+        return $this->belongsTo(Report::class, 'retest_of_report_id')->withTrashed();
+    }
+
+    /** Later reports that are retests of this one. */
+    public function retests()
+    {
+        return $this->hasMany(Report::class, 'retest_of_report_id');
+    }
+
+    /** True when this report is a retest of an earlier report. */
+    public function isRetest(): bool
+    {
+        return $this->retest_of_report_id !== null;
+    }
+
+    /**
+     * One factual line for a retest's plan section comparing the original report's plan
+     * to this one's: "Plan updated: {original} → {retest}" when they differ, or
+     * "Plan unchanged: {plan}" when they match. Reuses the existing plan relation/name.
+     * Returns null for a non-retest, or when either plan can't be resolved — so the views
+     * omit the line gracefully.
+     */
+    public function planChangeLine(): ?string
+    {
+        if (! $this->isRetest()) {
+            return null;
+        }
+
+        $retestPlan = $this->plan?->name;
+        $originalPlan = $this->retestOf?->plan?->name;
+
+        if (blank($retestPlan) || blank($originalPlan)) {
+            return null;
+        }
+
+        return $retestPlan === $originalPlan
+            ? "Plan unchanged: {$retestPlan}"
+            : "Plan updated: {$originalPlan} → {$retestPlan}";
+    }
+
+    /**
+     * The "Key Changes" list for the views: the team's edited copy when present,
+     * otherwise the deterministic default derived from the frozen comparison, so a
+     * retest renders Key Changes even before anyone edits it (step 7c). Null for a
+     * non-retest report (no comparison), so the views render nothing.
+     *
+     * @return array{increases: array<int, array<string, mixed>>, decreases: array<int, array<string, mixed>>}|null
+     */
+    public function keyChanges(): ?array
+    {
+        if ($this->retest_key_changes !== null) {
+            return $this->retest_key_changes;
+        }
+
+        return $this->retest_comparison !== null
+            ? \App\Support\RetestComparison::keyChangesDefault($this->retest_comparison)
+            : null;
     }
 
     /**

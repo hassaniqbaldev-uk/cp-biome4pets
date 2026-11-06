@@ -68,6 +68,7 @@ class AdminFormatting
             'unknown_taxon' => 'Mentions an organism not found in the sample',
             'banned_phrase' => 'Contains diagnosis or cure wording',
             'variant_combined_gap' => 'Sensitive + large-breed pet — no combined plan variant',
+            'retest_review' => 'Retest — review before publishing',
             default => $code,
         };
     }
@@ -95,6 +96,7 @@ class AdminFormatting
             'unknown_taxon' => "The AI text appears to name a bacterium or organism that wasn't in this pet's data. This is an automated guess and is often a false alarm (it can misread ordinary words). Check the wording doesn't mention something we didn't detect.",
             'banned_phrase' => "The text may contain diagnosis or cure wording (for example 'diagnose' or 'cure'), which our reports avoid. This is an automated guess. Re-read the flagged copy and soften any clinical claims.",
             'variant_combined_gap' => 'This pet is flagged both sensitive and large-breed, but this plan has no dedicated combined variant, so a single-condition variant (or the base plan) was applied. Confirm the checkout link and product dosage are correct for a sensitive AND large-breed dog before publishing — or add a combined variant to the plan.',
+            'retest_review' => "This report is a retest of an earlier one, so it is held for review automatically. Read the AI interpretations and the suggested plan against the before/after comparison (overview, major groups, specialists and key changes): confirm the written summary reflects what actually changed since the original, and that the recommended plan still fits — in particular, if the plan repeats the same stage the dog has already completed, adjust it before publishing. Mark as reviewed once you're happy; a regenerate re-raises this flag so the redo is re-checked.",
             default => '',
         };
     }

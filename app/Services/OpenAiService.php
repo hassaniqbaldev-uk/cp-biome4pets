@@ -3,8 +3,10 @@
 namespace App\Services;
 
 use App\Models\AiUsageEvent;
+use App\Models\Report;
 use App\Models\Setting;
 use App\Support\ReportGeneration;
+use App\Support\RetestSummaryFacts;
 use Illuminate\Support\Facades\Log;
 
 class OpenAiService
@@ -750,6 +752,28 @@ PROMPT;
     public const DIET_GUIDANCE_SYSTEM_PROMPT = 'You are a veterinary microbiome and nutrition expert writing for pet owners. Return STRICT JSON only: a single object with EXACTLY two keys, "include" and "avoid". Each value is a STRING of warm, client-friendly PLAIN TEXT (no HTML, no markdown, no code fences, no dashes): a short one-sentence intro, then one food per line written as "Food: brief microbiome-linked reason". Across the two sections together, list between 8 and 12 foods. Base every item on this dog\'s actual findings and the guidance rules provided. Include no keys other than "include" and "avoid". Return ONLY the JSON object.';
 
     /**
+     * Retest summary — STRICT JSON contract (mirrors the diet system prompt). Six keys,
+     * each a short plain-language paragraph; prose only, grounded in the facts provided.
+     */
+    public const RETEST_SUMMARY_SYSTEM_PROMPT = 'You are a veterinary microbiome expert writing a follow-up (retest) summary for a pet owner. Return STRICT JSON only: a single object with EXACTLY these six keys — "conclusion", "started", "improved", "attention", "meaning", "recommend". Each value is a STRING of warm, client-friendly PLAIN TEXT (no HTML, no markdown, no code fences): one short paragraph. Write PROSE ONLY from the facts given. You must NOT decide or change any number, band, status or plan — those are already fixed in the facts. Do not name any organism that is not in the allow-list. Include no keys other than the six listed. Return ONLY the JSON object.';
+
+    /**
+     * Retest summary — the default instruction body (hardcoded for now; structured like
+     * the editable diet prompt so it can move to Settings later). Describes the overall
+     * conclusion plus the five parts the summary covers.
+     */
+    public const RETEST_SUMMARY_PROMPT = <<<'PROMPT'
+Write a warm, plain-language follow-up summary comparing this dog's original microbiome results with the retest, using ONLY the facts below. Return the six fields:
+- "conclusion": one or two sentences giving the overall take-away of this retest (is the dog broadly better, mixed, or in need of further work).
+- "started": briefly remind the owner where things started — the main findings at the original test.
+- "improved": what has clearly improved since the original (name the measures/organisms from the facts that moved in a good direction).
+- "attention": what still needs attention or has moved the wrong way (the remaining concerns from the facts).
+- "meaning": what these changes mean in everyday terms for the dog's gut health — reassuring and practical, no diagnosis.
+- "recommend": what to do next, consistent with the suggested plan in the facts; if the plan repeats a stage already completed, say it may be worth discussing with the team.
+Do not state any score, band, status or percentage that is not in the facts, and do not invent figures or organisms.
+PROMPT;
+
+    /**
      * Generate the two "Personalised Diet Guidance" boxes ("Foods to Include" /
      * "Foods to Avoid") from this dog's findings. Mirrors generatePlanCopy() /
      * generateReportInterpretations() exactly — same key resolution, resolveModel(),
@@ -1169,6 +1193,166 @@ Phylum percentages:
 {$findingsBlock}
 {$taxaBlock}{$insightBlock}{$petBlock}
 Return ONLY the JSON object with exactly the keys "include" and "avoid".
+PROMPT;
+    }
+
+    /** The six keys the retest summary returns (overall conclusion + Aneta's five parts). */
+    public const RETEST_SUMMARY_KEYS = ['conclusion', 'started', 'improved', 'attention', 'meaning', 'recommend'];
+
+    /**
+     * Generate the grounded AI retest summary for a report. MIRRORS generateDietGuidance
+     * exactly — same key resolution, resolveModel(), requestChatCompletion() HTTP style,
+     * fence-stripping, PII-safe logging, usage tracking — and NEVER throws: on any failure
+     * or missing key (or a non-retest) it returns the six keys as empty strings and sets
+     * lastErrorCode, so report generation is unaffected. Every value is a guaranteed string.
+     *
+     * The facts + allow-list come from RetestSummaryFacts (the report's already-frozen
+     * data); the AI writes PROSE ONLY and may name only the allow-listed taxa.
+     *
+     * @return array{conclusion:string, started:string, improved:string, attention:string, meaning:string, recommend:string}
+     */
+    public function generateRetestSummary(Report $report, ?int $reportId = null): array
+    {
+        $this->lastErrorCode = null;
+        $empty = array_fill_keys(self::RETEST_SUMMARY_KEYS, '');
+
+        // Only a retest has the frozen comparison these facts are built from.
+        if (! $report->isRetest()) {
+            return $empty;
+        }
+
+        $apiKey = Setting::getDecrypted(Setting::OPENAI_API_KEY);
+        if (empty($apiKey)) {
+            $apiKey = config('services.openai.api_key', env('OPENAI_API_KEY'));
+        }
+
+        if (empty($apiKey)) {
+            Log::error('Retest summary generation: OpenAI API key is not configured.');
+            $this->lastErrorCode = 'api_failed';
+
+            return $empty;
+        }
+
+        $model = self::resolveModel();
+        $temperature = 0.5;
+
+        $userMessage = $this->buildRetestSummaryPrompt(RetestSummaryFacts::build($report));
+
+        $payload = json_encode([
+            'model' => $model,
+            'messages' => [
+                ['role' => 'system', 'content' => self::RETEST_SUMMARY_SYSTEM_PROMPT],
+                ['role' => 'user', 'content' => $userMessage],
+            ],
+            'temperature' => $temperature,
+        ]);
+
+        try {
+            $response = $this->requestChatCompletion($apiKey, $payload);
+
+            if ($response === false) {
+                Log::error('Retest summary generation: OpenAI API request failed.');
+                $this->lastErrorCode = 'api_failed';
+
+                return $empty;
+            }
+
+            $decoded = json_decode($response, true);
+
+            Log::info('Retest summary generation: raw API response', [
+                'has_choices' => isset($decoded['choices']),
+                'usage' => $decoded['usage'] ?? null,
+                'error_type' => $decoded['error']['type'] ?? null,
+            ]);
+
+            if (! isset($decoded['error'])) {
+                $this->recordUsage(AiUsageEvent::TYPE_INTERPRETATION, $model, $decoded['usage'] ?? null, $reportId);
+            }
+
+            if (isset($decoded['error'])) {
+                Log::error('Retest summary generation: OpenAI API returned error.', [
+                    'error_type' => $decoded['error']['type'] ?? null,
+                    'error_code' => $decoded['error']['code'] ?? null,
+                ]);
+                $this->lastErrorCode = 'api_failed';
+
+                return $empty;
+            }
+
+            if (! isset($decoded['choices'][0]['message']['content'])) {
+                Log::error('Retest summary generation: unexpected OpenAI response structure.', ['response_length' => strlen($response)]);
+                $this->lastErrorCode = 'api_failed';
+
+                return $empty;
+            }
+
+            $content = trim($decoded['choices'][0]['message']['content']);
+
+            // Strip markdown code fences if present.
+            if (str_starts_with($content, '```')) {
+                $content = preg_replace('/^```(?:json)?\s*/', '', $content);
+                $content = preg_replace('/\s*```$/', '', $content);
+            }
+
+            $parsed = json_decode($content, true);
+
+            if (! is_array($parsed)) {
+                Log::error('Retest summary generation: failed to parse response as JSON.', ['content_length' => strlen($content)]);
+                $this->lastErrorCode = 'json_parse_failed';
+
+                return $empty;
+            }
+
+            // Each key must be a STRING; coerce anything else to empty (never render junk).
+            $out = [];
+            foreach (self::RETEST_SUMMARY_KEYS as $key) {
+                $value = $parsed[$key] ?? '';
+                if (! is_string($value)) {
+                    Log::warning("Retest summary generation: \"{$key}\" was not a string; coerced to empty.");
+                    $value = '';
+                }
+                $out[$key] = trim($value);
+            }
+
+            return $out;
+        } catch (\Throwable $e) {
+            Log::error('Retest summary generation error: '.$e->getMessage());
+            $this->lastErrorCode = 'api_failed';
+
+            return $empty;
+        }
+    }
+
+    /**
+     * Build the retest-summary prompt: the default instruction + the grounding block
+     * (the allow-list and the "use only the numbers provided" guard) + the facts payload.
+     * MIRRORS buildDietGuidancePrompt's positive allow-list clause.
+     *
+     * @param  array{facts: string, allow_list: array<int,string>}  $payload
+     */
+    public function buildRetestSummaryPrompt(array $payload): string
+    {
+        $facts = (string) ($payload['facts'] ?? '');
+        $allow = is_array($payload['allow_list'] ?? null) ? $payload['allow_list'] : [];
+
+        if ($allow !== []) {
+            $allowList = implode(', ', $allow);
+            $grounding = "You may name ONLY these taxa: {$allowList}. Do not name any other organism. Use only the numbers provided. Do not invent figures.";
+        } else {
+            $grounding = 'Do not name any specific bacteria, genus or species. Use only the numbers provided. Do not invent figures.';
+        }
+
+        $instruction = self::RETEST_SUMMARY_PROMPT;
+
+        return <<<PROMPT
+{$instruction}
+
+{$grounding}
+
+THIS RETEST'S FACTS (the ONLY information you may use):
+{$facts}
+
+Return ONLY the JSON object with exactly the keys "conclusion", "started", "improved", "attention", "meaning" and "recommend".
 PROMPT;
     }
 }

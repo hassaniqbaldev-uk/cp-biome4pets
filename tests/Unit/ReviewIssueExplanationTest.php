@@ -18,6 +18,7 @@ class ReviewIssueExplanationTest extends TestCase
             'generation_failed', 'json_parse_failed', 'empty_output', 'bad_score_enum',
             'plan_unmatched', 'unwell_no_plan', 'manual_plan_review', 'panel_contradiction',
             'band_contradiction', 'number_contradiction', 'unknown_taxon', 'banned_phrase',
+            'retest_review',
         ]);
     }
 

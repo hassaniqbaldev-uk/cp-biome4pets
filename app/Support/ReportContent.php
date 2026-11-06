@@ -347,6 +347,122 @@ class ReportContent
         return ['label' => 'High', 'tone' => self::TONE_BAD];
     }
 
+    /*
+    |---------------------------------------------------------------------------
+    | Retest — specialist recovery (single source, shared by web + PDF)
+    |---------------------------------------------------------------------------
+    | The six beneficial "specialist" genera tracked on a retest, with their
+    | reference ranges in %: a low cutoff, a target band [target_low, target_high]
+    | and a high cutoff. ONE constant read by both report templates so they can't
+    | disagree. (These are expected to move to Settings later; a single constant
+    | now is deliberate.) The retest status (below) keys off the target band only.
+    */
+    public const SPECIALIST_RANGES = [
+        'Akkermansia'      => ['low' => 1.0, 'target_low' => 1.0, 'target_high' => 3.0, 'high' => 3.0],
+        'Faecalibacterium' => ['low' => 1.5, 'target_low' => 3.0, 'target_high' => 5.0, 'high' => 5.0],
+        'Blautia'          => ['low' => 1.5, 'target_low' => 3.0, 'target_high' => 5.0, 'high' => 5.0],
+        'Roseburia'        => ['low' => 1.5, 'target_low' => 3.0, 'target_high' => 5.0, 'high' => 5.0],
+        'Bifidobacterium'  => ['low' => 0.5, 'target_low' => 0.5, 'target_high' => 1.5, 'high' => 1.5],
+        'Lactobacillus'    => ['low' => 2.0, 'target_low' => 2.0, 'target_high' => 5.0, 'high' => 5.0],
+    ];
+
+    /** Below this abundance (%) a genus counts as undetected in a sample. */
+    public const SPECIALIST_DETECTION_FLOOR = 0.01;
+
+    /** Hysteresis (percentage points) for calling a sub-target move recovering/declining. */
+    public const SPECIALIST_MOVE_EPSILON = 0.02;
+
+    /** Status label → tone. 'accent'/'muted' extend the shared tone palette; the
+     *  templates map every tone (incl. these two) to their own colours. */
+    private const SPECIALIST_STATUS_TONES = [
+        'In target range' => self::TONE_GOOD,
+        'Above target'    => self::TONE_WARN,
+        'Recovering'      => 'accent',
+        'Reappeared'      => 'accent',
+        'Declining'       => self::TONE_BAD,
+        'Lost'            => self::TONE_BAD,
+        'Not detected'    => 'muted',
+        'Below target'    => 'muted',
+    ];
+
+    /**
+     * Rule-based retest status for one specialist (label + tone), given its original
+     * O and retest R abundances and its target band [Tlo, Thi]. Priority order:
+     *   1. R within [Tlo,Thi]                 -> In target range
+     *   2. R > Thi                            -> Above target
+     *   3. R < floor: O >= floor -> Lost;  else -> Not detected
+     *   4. floor <= R < Tlo:
+     *        O < floor                        -> Reappeared
+     *        R > O + epsilon                  -> Recovering
+     *        R < O - epsilon                  -> Declining
+     *        else                             -> Below target
+     * Pure arithmetic on the frozen snapshot values — no re-parsing, no AI.
+     */
+    public static function specialistStatus(
+        float $original,
+        float $retest,
+        float $targetLow,
+        float $targetHigh,
+        float $floor = self::SPECIALIST_DETECTION_FLOOR,
+    ): array {
+        $eps = self::SPECIALIST_MOVE_EPSILON;
+
+        if ($retest >= $targetLow && $retest <= $targetHigh) {
+            $label = 'In target range';
+        } elseif ($retest > $targetHigh) {
+            $label = 'Above target';
+        } elseif ($retest < $floor) {
+            $label = $original >= $floor ? 'Lost' : 'Not detected';
+        } elseif ($original < $floor) {
+            $label = 'Reappeared';
+        } elseif ($retest > $original + $eps) {
+            $label = 'Recovering';
+        } elseif ($retest < $original - $eps) {
+            $label = 'Declining';
+        } else {
+            $label = 'Below target';
+        }
+
+        return ['label' => $label, 'tone' => self::SPECIALIST_STATUS_TONES[$label] ?? 'muted'];
+    }
+
+    /**
+     * The six specialists as display rows, read from a frozen retest_comparison. Each
+     * specialist's original/retest % and direction come from the snapshot's
+     * taxa['genus'] by name; one absent from both tests is treated as 0.0 / 0.0 / flat.
+     * The target band + status come from the config constant and specialistStatus().
+     *
+     * @return array<int, array{name:string, original_pct:float, retest_pct:float, direction:string, target_low:float, target_high:float, status:array{label:string, tone:string}}>
+     */
+    public static function specialistRecovery(array $comparison): array
+    {
+        $genus = [];
+        foreach (($comparison['taxa']['genus'] ?? []) as $entry) {
+            if (isset($entry['name'])) {
+                $genus[$entry['name']] = $entry;
+            }
+        }
+
+        $rows = [];
+        foreach (self::SPECIALIST_RANGES as $name => $range) {
+            $entry = $genus[$name] ?? null;
+            $original = (float) ($entry['original_pct'] ?? 0.0);
+            $retest = (float) ($entry['retest_pct'] ?? 0.0);
+
+            $rows[] = [
+                'name' => $name,
+                'original_pct' => $original,
+                'retest_pct' => $retest,
+                'direction' => $entry['direction'] ?? 'flat',
+                'target_low' => (float) $range['target_low'],
+                'target_high' => (float) $range['target_high'],
+                'status' => self::specialistStatus($original, $retest, (float) $range['target_low'], (float) $range['target_high']),
+            ];
+        }
+
+        return $rows;
+    }
+
     /**
      * The deterministic microbiome classification — the SINGLE definition shared
      * by report generation (CsvParserService) and anywhere a badge is shown. Uses
