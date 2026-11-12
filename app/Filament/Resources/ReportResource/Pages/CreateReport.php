@@ -172,10 +172,12 @@ class CreateReport extends CreateRecord
         // the "manual plan selected — needs Super Admin review" flag from the start.
         \App\Support\ReportGeneration::recomputeReviewState($this->record->refresh());
 
-        // Freeze the retest comparison AND seed the Key Changes default from the saved
-        // link (null if not a retest or the CSVs can't resolve) — so linking populates
-        // both immediately, no separate regenerate needed. Reuses steps 2 + 7a/7b.
-        $this->record->update(\App\Support\ReportGeneration::retestFreezePayload($this->record->refresh()));
+        // Build the full retest pipeline in one pass for a linked retest: freeze the
+        // comparison + seed Key Changes + the hide_commerce default, then generate the
+        // grounded AI summary from those frozen facts — so a retest is complete after a
+        // single create, with no separate regenerate. A non-retest only runs the freeze
+        // (writing nulls, exactly as before) and makes no AI call.
+        \App\Support\ReportGeneration::buildRetestOnCreate($this->record->refresh());
     }
 
     /**

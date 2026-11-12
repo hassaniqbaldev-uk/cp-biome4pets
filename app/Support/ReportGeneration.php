@@ -627,6 +627,31 @@ class ReportGeneration
         return $payload;
     }
 
+    /**
+     * Build the FULL retest pipeline for a newly-created report in one pass, so a retest
+     * is complete after a single generate (no separate regenerate):
+     *   1. retestFreezePayload — freeze the comparison, seed the Key Changes default, and
+     *      default hide_commerce at the first-link transition; and
+     *   2. generateRetestSummary — the grounded AI summary, read from those now-frozen
+     *      facts (so it must run AFTER the freeze).
+     *
+     * For a NON-retest this is only the freeze (which writes nulls, exactly as before) —
+     * the summary step is gated on isRetest(), so no AI call is made and nothing else
+     * changes. The AI call degrades to empty strings on failure/no key (never throws), so
+     * create is never broken by it.
+     */
+    public static function buildRetestOnCreate(Report $report): void
+    {
+        $report->update(self::retestFreezePayload($report));
+
+        $fresh = $report->fresh();
+        if ($fresh->isRetest()) {
+            $fresh->update([
+                'retest_summary' => app(OpenAiService::class)->generateRetestSummary($fresh, $fresh->getKey()),
+            ]);
+        }
+    }
+
     public static function retestComparisonFor(Report $report): ?array
     {
         if (! $report->isRetest()) {
@@ -723,13 +748,12 @@ class ReportGeneration
                 $report->catalogProducts()->sync($sync);
             }
 
-            // Freeze the retest comparison at generation IF this report was created
-            // already linked to an original (e.g. a future create-with-link path). A
-            // plain generate-from-test leaves it null — createReportFromTest takes no
-            // link input, so in practice the snapshot is produced by regenerate once an
-            // admin sets retest_of_report_id (see regenerateReport).
+            // Build the full retest pipeline IF this report was created already linked to
+            // an original (freeze + key changes + hide_commerce default + the AI summary) —
+            // so a retest is complete in one pass. A non-retest never enters here (guarded),
+            // so its creation is exactly as before.
             if ($report->isRetest()) {
-                $report->update(self::retestFreezePayload($report));
+                self::buildRetestOnCreate($report);
             }
 
             return $report;

@@ -438,6 +438,22 @@ class ReportResource extends Resource
                                     }),
                             ])->visible(fn (Forms\Get $get): bool => $get('test_source') === 'existing'),
 
+                            // Retest link (moved to step 1 so a retest is built in ONE pass:
+                            // set here, then "Generate AI from selected test" / create runs the
+                            // full retest pipeline). Options are the SAME pet's other reports
+                            // (reads $get('pet_id') above; excludes this report). ->live() so
+                            // the retest editors on later steps show/hide immediately. Hidden
+                            // fields aren't dehydrated, so a normal report writes nothing.
+                            Forms\Components\Select::make('retest_of_report_id')
+                                ->label('Retest of')
+                                ->placeholder('Not a retest')
+                                ->options(fn (Forms\Get $get, ?Report $record): array => static::retestOfOptions($get('pet_id'), $record?->getKey()))
+                                ->getOptionLabelUsing(fn ($value): ?string => static::retestOfOptionLabel($value))
+                                ->searchable()
+                                ->native(false)
+                                ->live()
+                                ->helperText('Leave empty for a normal report. Select the pet\'s earlier report to make this a retest.'),
+
                             Forms\Components\TextInput::make('sample_id')
                                 ->label('Sample / Order ID')
                                 ->required()
@@ -718,6 +734,44 @@ class ReportResource extends Resource
                                 ->label('Recommended Actions')
                                 ->rows(3)
                                 ->columnSpanFull(),
+
+                            // AI retest-summary editor — six Textareas bound to
+                            // retest_summary.{conclusion,…} (dot-path). Lives here in the AI
+                            // Interpretation step, alongside the other AI prose, so the whole
+                            // retest summary is reviewed in one place. Shown ONLY for a retest
+                            // (gate reads the step-1 link via shared wizard state); prefilled
+                            // from the stored value in EditReport::mutateFormDataBeforeFill.
+                            // Editing is a pre-publish tweak: a regenerate overwrites it, as the
+                            // AI interpretation fields are. Hidden ⇒ not dehydrated for a normal report.
+                            Forms\Components\Group::make()
+                                ->visible(fn (Forms\Get $get): bool => filled($get('retest_of_report_id')))
+                                ->schema([
+                                    Forms\Components\Textarea::make('retest_summary.conclusion')
+                                        ->label('Retest summary — Conclusion (headline)')
+                                        ->rows(2)
+                                        ->columnSpanFull(),
+                                    Forms\Components\Textarea::make('retest_summary.started')
+                                        ->label('Retest summary — Where we started')
+                                        ->rows(3)
+                                        ->columnSpanFull(),
+                                    Forms\Components\Textarea::make('retest_summary.improved')
+                                        ->label('Retest summary — What has improved')
+                                        ->rows(3)
+                                        ->columnSpanFull(),
+                                    Forms\Components\Textarea::make('retest_summary.attention')
+                                        ->label('Retest summary — What still needs attention')
+                                        ->rows(3)
+                                        ->columnSpanFull(),
+                                    Forms\Components\Textarea::make('retest_summary.meaning')
+                                        ->label('Retest summary — What this means')
+                                        ->rows(3)
+                                        ->columnSpanFull(),
+                                    Forms\Components\Textarea::make('retest_summary.recommend')
+                                        ->label('Retest summary — What we recommend next')
+                                        ->rows(3)
+                                        ->columnSpanFull(),
+                                ]),
+
                             // The score is computed deterministically at generation
                             // (HealthInsightRules); this dropdown is the admin OVERRIDE.
                             // Options are that insight's own band labels, so staff can
@@ -809,24 +863,6 @@ class ReportResource extends Resource
                                 })
                                 ->helperText('Shows the plan without prices or purchase options. Turns off "Hide subscribe section".'),
 
-                            // Retest link: mark this report as a retest OF one of the
-                            // SAME pet's earlier reports. Options are scoped to the pet
-                            // chosen above (reads $get('pet_id'), set in the first step /
-                            // the record on edit) and exclude this report itself. Saving
-                            // with this set freezes the before/after comparison onto the
-                            // report (CreateReport/EditReport → retestComparisonFor()).
-                            Forms\Components\Select::make('retest_of_report_id')
-                                ->label('Retest of')
-                                ->placeholder('Not a retest')
-                                ->options(fn (Forms\Get $get, ?Report $record): array => static::retestOfOptions($get('pet_id'), $record?->getKey()))
-                                ->getOptionLabelUsing(fn ($value): ?string => static::retestOfOptionLabel($value))
-                                ->searchable()
-                                ->native(false)
-                                // Live so the Key Changes editor below shows/hides as soon as
-                                // the link is set/cleared, not only after a save+reload.
-                                ->live()
-                                ->helperText('Link this report to the same pet\'s earlier report to mark it as a retest. The before/after comparison is frozen onto this report when you save.'),
-
                             // Key Changes editor — curate the biggest-mover rows the web + PDF
                             // retest report shows. Shown ONLY for a retest (a link is set); the
                             // two repeaters map to retest_key_changes.{increases,decreases}.
@@ -862,36 +898,6 @@ class ReportResource extends Resource
                                         ->defaultItems(0)
                                         ->addActionLabel('Add an improvement')
                                         ->itemLabel(fn (array $state): ?string => $state['name'] ?? null),
-                                ]),
-
-                            // AI retest-summary editor — six Textareas bound to
-                            // retest_summary.{conclusion,…} (dot-path, like the Key Changes
-                            // editor). Shown ONLY for a retest; prefilled from the stored
-                            // value in EditReport::mutateFormDataBeforeFill. Editing is a
-                            // pre-publish tweak: a regenerate overwrites it (step 10a), so
-                            // there is deliberately no seed-only-if-null here — this matches
-                            // how the AI interpretation fields are edited.
-                            Forms\Components\Group::make()
-                                ->visible(fn (Forms\Get $get): bool => filled($get('retest_of_report_id')))
-                                ->schema([
-                                    Forms\Components\Textarea::make('retest_summary.conclusion')
-                                        ->label('Retest summary — Conclusion (headline)')
-                                        ->rows(2),
-                                    Forms\Components\Textarea::make('retest_summary.started')
-                                        ->label('Retest summary — Where we started')
-                                        ->rows(3),
-                                    Forms\Components\Textarea::make('retest_summary.improved')
-                                        ->label('Retest summary — What has improved')
-                                        ->rows(3),
-                                    Forms\Components\Textarea::make('retest_summary.attention')
-                                        ->label('Retest summary — What still needs attention')
-                                        ->rows(3),
-                                    Forms\Components\Textarea::make('retest_summary.meaning')
-                                        ->label('Retest summary — What this means')
-                                        ->rows(3),
-                                    Forms\Components\Textarea::make('retest_summary.recommend')
-                                        ->label('Retest summary — What we recommend next')
-                                        ->rows(3),
                                 ]),
 
                             Forms\Components\Actions::make([
