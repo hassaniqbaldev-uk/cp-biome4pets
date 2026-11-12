@@ -365,7 +365,7 @@ class ReportResource extends Resource
                                     ->icon('heroicon-o-sparkles')
                                     ->color('primary')
                                     ->visible(fn (Forms\Get $get): bool => $get('test_source') === 'existing' && filled($get('existing_test_id')))
-                                    ->action(function (Forms\Get $get, Forms\Set $set): void {
+                                    ->action(function (Forms\Get $get, Forms\Set $set, ?Report $record): void {
                                         // L2: paid OpenAI call — cap per admin.
                                         if (PaidActionLimiter::exceeded('generate-ai', 10)) {
                                             return;
@@ -428,6 +428,30 @@ class ReportResource extends Resource
                                         ], $selection, $genError, ['path' => 'wizard_existing_test', 'test_id' => $test->getKey()]);
                                         $set('needs_review', $verdict['needs_review']);
                                         $set('review_flags', ReportGeneration::reviewFlagsFromVerdict($verdict));
+
+                                        // On an already-saved retest (edit page), the explicit Generate AI
+                                        // rebuilds the retest pipeline too — the same build the create flow
+                                        // runs: refresh the frozen comparison, seed Key Changes (only when
+                                        // null, so team edits survive), and (re)generate the grounded AI
+                                        // summary. Then push the rebuilt retest fields into the form so the
+                                        // summary boxes fill in and survive the next Save. An ordinary Save
+                                        // never runs this, so an edited summary is never clobbered by a save.
+                                        // Create page ($record null) / non-retest reports are untouched.
+                                        if ($record instanceof Report && $record->exists && $record->isRetest()) {
+                                            ReportGeneration::buildRetestOnCreate($record);
+                                            $fresh = $record->refresh();
+
+                                            $summary = is_array($fresh->retest_summary) ? $fresh->retest_summary : [];
+                                            $set('retest_summary', [
+                                                'conclusion' => $summary['conclusion'] ?? '',
+                                                'started' => $summary['started'] ?? '',
+                                                'improved' => $summary['improved'] ?? '',
+                                                'attention' => $summary['attention'] ?? '',
+                                                'meaning' => $summary['meaning'] ?? '',
+                                                'recommend' => $summary['recommend'] ?? '',
+                                            ]);
+                                            $set('retest_key_changes', $fresh->keyChanges() ?? ['increases' => [], 'decreases' => []]);
+                                        }
 
                                         $allEmpty = collect($interp)->every(fn ($v) => empty($v));
                                         Notification::make()
