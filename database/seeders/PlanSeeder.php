@@ -351,6 +351,10 @@ class PlanSeeder extends Seeder
                     $maintenanceStep('Step 4: Maintain Gut Microbiome Health', 'Phase 2 · Ongoing'),
                 ],
             ],
+            // NB: the three RETEST-ONLY plans (retest-amr-only, retest-prebiotic-only,
+            // retest-spirochaetes) are seeded separately by RetestPlansSeeder (idempotent,
+            // insert-if-absent) so a live deploy can add only those without re-processing
+            // these four. PlanSeeder deliberately owns ONLY the four base plans.
         ];
     }
 }

@@ -1,0 +1,13 @@
+Kingdom,Phylum,Class,Order,Family,Genus,Species,num_hits,%_hits
+Unclassified,,,,,,,50,0.05
+Bacteria,Firmicutes,Clostridia,Clostridiales,Lachnospiraceae,Blautia,Blautia_producta(AB001),30000,38.00
+Bacteria,Firmicutes,Clostridia,Clostridiales,Ruminococcaceae,Faecalibacterium,Faecalibacterium_prausnitzii(AB002),8000,10.00
+Bacteria,Bacteroidetes,Bacteroidia,Bacteroidales,Bacteroidaceae,Bacteroides,Bacteroides_fragilis(AB003),18000,22.00
+Bacteria,Bacteroidetes,Bacteroidia,Bacteroidales,Prevotellaceae,Prevotella,Prevotella_copri(AB004),1000,1.20
+Bacteria,Fusobacteria,Fusobacteriia,Fusobacteriales,Fusobacteriaceae,Fusobacterium,Fusobacterium_mortiferum(AB005),7000,9.00
+Bacteria,Proteobacteria,Gammaproteobacteria,Enterobacterales,Enterobacteriaceae,Escherichia/Shigella,Escherichia_coli(AB006),1200,1.50
+Bacteria,Firmicutes,Bacilli,Lactobacillales,Enterococcaceae,Enterococcus,Enterococcus_faecium(AB007),1500,2.00
+Bacteria,Spirochaetes,Spirochaetia,Spirochaetales,Spirochaetaceae,Treponema,Treponema_berlinense(AB008),1600,2.00
+Bacteria,Spirochaetes,Spirochaetia,Spirochaetales,Spirochaetaceae,Treponema,Treponema_succinifaciens(AB009),800,1.00
+Bacteria,Firmicutes,Clostridia,Clostridiales,Peptostreptococcaceae,Clostridium_XI,Clostridium_hiranonis(AB010),9000,11.00
+Bacteria,Actinobacteria,Actinobacteria,Bifidobacteriales,Bifidobacteriaceae,Bifidobacterium,Bifidobacterium_animalis(AB011),1800,2.25

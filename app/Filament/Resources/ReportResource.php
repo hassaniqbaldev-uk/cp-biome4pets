@@ -451,6 +451,48 @@ class ReportResource extends Resource
                                                 'recommend' => $summary['recommend'] ?? '',
                                             ]);
                                             $set('retest_key_changes', $fresh->keyChanges() ?? ['increases' => [], 'decreases' => []]);
+
+                                            // If a retest plan override fired inside the build (step 1a/2b:
+                                            // a retest rule forced its target plan and detached the
+                                            // CSV-trigger products on the model), sync the form to that
+                                            // authoritative state so Save doesn't restore the standard
+                                            // selection: adopt the forced plan + reason and clear the
+                                            // trigger products. Left untouched when no override fired. Every
+                                            // retest override reason code is prefixed "retest_".
+                                            if (str_starts_with((string) ($fresh->recommendation_reason['code'] ?? ''), 'retest_')) {
+                                                $set('plan_id', $fresh->plan_id);
+                                                $set('recommendation_reason', $fresh->recommendation_reason);
+                                                $set('catalog_product_ids', []);
+
+                                                // buildRetestOnCreate has already MATERIALISED the forced
+                                                // plan's steps + subscription_snapshot in the DB (through the
+                                                // variant-aware seam). Mirror those now-saved rows into the
+                                                // form's `steps` + snapshot state so a subsequent Save (which
+                                                // rebuilds report_steps from form state) preserves them rather
+                                                // than wiping them back to the pre-generate (empty) repeater.
+                                                $set('steps', $fresh->steps()->with('products')->get()
+                                                    ->map(fn ($step): array => [
+                                                        'type' => $step->type,
+                                                        'title' => $step->title,
+                                                        'description' => $step->description,
+                                                        'stage_label' => $step->stage_label,
+                                                        'body' => $step->body,
+                                                        'tip' => $step->tip,
+                                                        'products' => $step->products->map(fn ($p): array => [
+                                                            'catalog_product_id' => $p->catalog_product_id,
+                                                            'duration' => $p->duration,
+                                                            'quantity' => $p->quantity,
+                                                            'dose' => $p->dose,
+                                                            'inclusion' => $p->inclusion,
+                                                            'how_it_helps' => $p->how_it_helps,
+                                                        ])->all(),
+                                                    ])->all());
+                                                $set('subscription_snapshot', $fresh->subscription_snapshot);
+                                                // The forced plan's per-pet copy (grounded + validated) was
+                                                // generated into report_steps + plan_intro by the materialiser;
+                                                // mirror plan_intro too so Save preserves the generated intro.
+                                                $set('plan_intro', $fresh->plan_intro);
+                                            }
                                         }
 
                                         $allEmpty = collect($interp)->every(fn ($v) => empty($v));

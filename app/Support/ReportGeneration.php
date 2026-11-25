@@ -5,6 +5,7 @@ namespace App\Support;
 use App\Filament\Resources\ReportResource;
 use App\Models\CatalogProduct;
 use App\Models\Pet;
+use App\Models\Plan;
 use App\Models\Report;
 use App\Models\Test;
 use App\Services\CsvParserService;
@@ -649,7 +650,109 @@ class ReportGeneration
             $fresh->update([
                 'retest_summary' => app(OpenAiService::class)->generateRetestSummary($fresh, $fresh->getKey()),
             ]);
+
+            // Retest-only plan override (step 1a/2b). retest_comparison is now frozen on
+            // $fresh (the retestFreezePayload update above), and the threshold rules read
+            // this retest's CSV. When a rule fires it REPLACES the standard plan selection
+            // AND the forced plan is materialised in full (steps/products/snapshot) so it
+            // renders end to end without a manual "Apply plan" click — through the single
+            // variant-aware seam (RetestPlanMaterializer → PlanInstantiation), so this file
+            // never writes report_steps / subscription_snapshot inline (lock preserved).
+            $override = self::applyRetestPlanOverride($fresh);
+            if ($override !== null) {
+                RetestPlanMaterializer::materialise($fresh->refresh(), $override['plan']);
+            }
         }
+    }
+
+    /**
+     * Resolve the retest-only plan override for a report, or null when none applies.
+     * Evaluates ALL retest rules (step 2b): the threshold rules against THIS retest's own
+     * CSV percentages via TaxonReader, plus the FMT delta rule against the FROZEN
+     * retest_comparison. Among the rules that fire, the highest-priority one wins; its
+     * target plan is resolved by key and returned with the rule's reason code (e.g.
+     * 'retest_spirochaetes'). Pure resolution — it writes nothing; applyRetestPlanOverride()
+     * wires the result onto the report.
+     *
+     * Returns null (never throws) for a first-test report, when no rule fires, or —
+     * defensively — when the winning rule's target plan cannot be resolved by key (logged),
+     * so a missing plan can never break a generate; the report keeps its standard selection.
+     *
+     * @return array{plan: Plan, reason: string, rule: string}|null
+     */
+    public static function retestPlanOverride(Report $report): ?array
+    {
+        if (! $report->isRetest()) {
+            return null;
+        }
+
+        $comparison = is_array($report->retest_comparison) ? $report->retest_comparison : null;
+        $reader = self::retestTaxonReader($report);
+
+        $rule = RetestPlanRules::selectRetestRule($reader, $comparison);
+        if ($rule === null) {
+            return null;
+        }
+
+        // Resolve the winning rule's target plan by KEY (never a hardcoded id).
+        $plan = Plan::where('key', $rule['plan_key'])->first();
+        if ($plan === null) {
+            Log::warning('Retest rule fired but its target plan could not be resolved by key; keeping standard plan selection.', [
+                'report_id' => $report->getKey(),
+                'rule' => $rule['key'],
+                'plan_key' => $rule['plan_key'],
+            ]);
+
+            return null;
+        }
+
+        return ['plan' => $plan, 'reason' => $rule['reason'], 'rule' => $rule['key']];
+    }
+
+    /**
+     * A TaxonReader over THIS retest's own lab CSV, or null when the CSV is unavailable
+     * (no test / no csv_path / file missing). Used by the threshold retest rules to read
+     * named-taxon percentages; a null reader simply means no threshold rule can fire.
+     */
+    private static function retestTaxonReader(Report $report): ?TaxonReader
+    {
+        $csvPath = self::resolveTestCsvPath($report->test);
+
+        return $csvPath === null ? null : TaxonReader::fromCsv($csvPath);
+    }
+
+    /**
+     * Apply the retest plan override to a report when one fires: force plan_id to the
+     * resolved plan and recommendation_reason to the override's code, and DETACH the
+     * normal CSV-trigger products so the retest's plan + products come solely from the
+     * forced plan (materialised later through the one "Apply plan" seam, exactly as a
+     * first-test report's are — this method never instantiates steps/snapshot, so the
+     * single-seam path-consistency lock is preserved). Returns the fired override (so a
+     * caller can sync form state), or null when nothing fired (report left untouched).
+     *
+     * @return array{plan: Plan, reason: string}|null
+     */
+    public static function applyRetestPlanOverride(Report $report): ?array
+    {
+        $override = self::retestPlanOverride($report);
+        if ($override === null) {
+            return null;
+        }
+
+        $plan = $override['plan'];
+
+        $report->update([
+            'plan_id' => $plan->id,
+            'recommendation_reason' => [
+                'code' => $override['reason'],
+                'text' => $plan->name.' — retest rule ('.($override['rule'] ?? $override['reason']).')',
+            ],
+        ]);
+
+        // The override FULLY REPLACES the first-test trigger products for this retest.
+        $report->catalogProducts()->detach();
+
+        return $override;
     }
 
     public static function retestComparisonFor(Report $report): ?array

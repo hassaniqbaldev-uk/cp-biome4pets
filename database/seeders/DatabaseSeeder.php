@@ -24,5 +24,8 @@ class DatabaseSeeder extends Seeder
         // six live shop products it ensures exist.
         $this->call(CatalogProductSeeder::class);
         $this->call(PlanSeeder::class);
+        // The three retest-only plans are seeded separately (idempotent, insert-if-absent)
+        // so a live deploy can add only those without re-processing the four base plans.
+        $this->call(RetestPlansSeeder::class);
     }
 }

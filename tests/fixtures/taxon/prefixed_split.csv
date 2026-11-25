@@ -1,0 +1,5 @@
+Kingdom,Phylum,Class,Order,Family,Genus,Species,num_hits,%_hits
+Bacteria,Proteobacteria,Gammaproteobacteria,Enterobacterales,Enterobacteriaceae,g__Escherichia,,100,5.00
+Bacteria,Proteobacteria,Gammaproteobacteria,Enterobacterales,Enterobacteriaceae,g__Shigella,,50,2.00
+Bacteria,Firmicutes,Bacilli,Lactobacillales,Enterococcaceae,g__Enterococcus,,30,1.50
+Unclassified,,,,,,,10,0.10
