@@ -112,6 +112,11 @@ class ReportGeneration
             // AI diet-guidance boxes — snapshot columns, peers of the ai_* fields.
             'ai_diet_include' => $diet['include'],
             'ai_diet_avoid' => $diet['avoid'],
+            // AI-recommended bone broth flavour (chicken|beef|either) from the SAME diet
+            // call; refreshed on regenerate like the diet boxes. generateDietGuidance
+            // always coerces/defaults this to a valid value; the ?? keeps any older
+            // stub that returns only include/avoid safe (neutral default, never null).
+            'bone_broth_flavour' => $diet['bone_broth_flavour'] ?? 'either',
         ], $scores);
     }
 

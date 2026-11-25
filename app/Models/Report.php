@@ -64,6 +64,9 @@ class Report extends Model
         // AI-generated "Personalised Diet Guidance" boxes (snapshot, like ai_*).
         'ai_diet_include',
         'ai_diet_avoid',
+        // AI-recommended bone broth flavour ('chicken' | 'beef' | 'either'),
+        // generated on the same diet call; admin-overridable before publish.
+        'bone_broth_flavour',
         'plan_id',
         'plan_intro',
         'subscription_snapshot',

@@ -814,6 +814,24 @@ class ReportResource extends Resource
                                 ->rows(3)
                                 ->columnSpanFull(),
 
+                            // Bone broth flavour — AI-recommended on the diet-guidance
+                            // call (chicken|beef|either) and set on the record at
+                            // generation, so the generated value is the default already
+                            // shown here. This Select is the admin OVERRIDE before
+                            // publish; 'either' = let the customer choose. Not yet shown
+                            // on the public report/PDF. Null (pre-generation) falls back
+                            // to 'either' so the control always has a valid value.
+                            Forms\Components\Select::make('bone_broth_flavour')
+                                ->label('Bone Broth Flavour')
+                                ->helperText('AI-recommended from the diet guidance. Override before publishing if needed.')
+                                ->options([
+                                    'chicken' => 'Chicken',
+                                    'beef' => 'Beef',
+                                    'either' => 'Let customer choose',
+                                ])
+                                ->default('either')
+                                ->selectablePlaceholder(false),
+
                             // AI retest-summary editor — six Textareas bound to
                             // retest_summary.{conclusion,…} (dot-path). Lives here in the AI
                             // Interpretation step, alongside the other AI prose, so the whole

@@ -81,7 +81,7 @@ class DietGuidanceGenerationTest extends TestCase
 
         $result = $svc->generateDietGuidance(['Proteobacteria' => 30], 2.4);
 
-        $this->assertSame(['include' => '', 'avoid' => ''], $result);
+        $this->assertSame(['include' => '', 'avoid' => '', 'bone_broth_flavour' => 'either'], $result);
         $this->assertSame('api_failed', $svc->lastErrorCode);
     }
 
@@ -92,7 +92,7 @@ class DietGuidanceGenerationTest extends TestCase
 
         $result = $svc->generateDietGuidance(['Proteobacteria' => 30], 2.4);
 
-        $this->assertSame(['include' => '', 'avoid' => ''], $result);
+        $this->assertSame(['include' => '', 'avoid' => '', 'bone_broth_flavour' => 'either'], $result);
         $this->assertSame('api_failed', $svc->lastErrorCode);
     }
 
@@ -103,7 +103,7 @@ class DietGuidanceGenerationTest extends TestCase
 
         $result = $svc->generateDietGuidance(['Proteobacteria' => 30], 2.4);
 
-        $this->assertSame(['include' => '', 'avoid' => ''], $result);
+        $this->assertSame(['include' => '', 'avoid' => '', 'bone_broth_flavour' => 'either'], $result);
         $this->assertSame('json_parse_failed', $svc->lastErrorCode);
     }
 

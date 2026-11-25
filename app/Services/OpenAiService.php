@@ -749,7 +749,13 @@ PROMPT;
      * there is no XSS surface. One food per line as "Food: reason" (a colon, not a
      * dash, matching the report's no-dash style).
      */
-    public const DIET_GUIDANCE_SYSTEM_PROMPT = 'You are a veterinary microbiome and nutrition expert writing for pet owners. Return STRICT JSON only: a single object with EXACTLY two keys, "include" and "avoid". Each value is a STRING of warm, client-friendly PLAIN TEXT (no HTML, no markdown, no code fences, no dashes): a short one-sentence intro, then one food per line written as "Food: brief microbiome-linked reason". Across the two sections together, list between 8 and 12 foods. Base every item on this dog\'s actual findings and the guidance rules provided. Include no keys other than "include" and "avoid". Return ONLY the JSON object.';
+    public const DIET_GUIDANCE_SYSTEM_PROMPT = 'You are a veterinary microbiome and nutrition expert writing for pet owners. Return STRICT JSON only: a single object with EXACTLY three keys, "include", "avoid" and "bone_broth_flavour". "include" and "avoid" are each a STRING of warm, client-friendly PLAIN TEXT (no HTML, no markdown, no code fences, no dashes): a short one-sentence intro, then one food per line written as "Food: brief microbiome-linked reason". Across those two sections together, list between 8 and 12 foods. "bone_broth_flavour" is EXACTLY one of the strings "chicken", "beef" or "either": recommend the single bone broth flavour that best suits this dog, grounded in the same findings, the pet notes and the avoid guidance you are producing. If the dog should avoid, or does not eat, one of chicken or beef, recommend the other, and NEVER recommend a protein the dog should avoid. If there is no information to prefer either, return "either". Base every item on this dog\'s actual findings and the guidance rules provided. Include no keys other than "include", "avoid" and "bone_broth_flavour". Return ONLY the JSON object.';
+
+    /** The allowed bone broth flavour values; anything else coerces to NEUTRAL_FLAVOUR. */
+    public const BONE_BROTH_FLAVOURS = ['chicken', 'beef', 'either'];
+
+    /** Safe neutral default when the flavour is missing, invalid, or generation failed. */
+    public const NEUTRAL_FLAVOUR = 'either';
 
     /**
      * Retest summary — STRICT JSON contract (mirrors the diet system prompt). Six keys,
@@ -787,12 +793,14 @@ PROMPT;
      * ($phylumTotals, $diversityScore, $petContext, $deterministic) — no parallel
      * findings derivation. The editable prompt + rules come from Settings.
      *
-     * @return array{include: string, avoid: string}
+     * @return array{include: string, avoid: string, bone_broth_flavour: string}
      */
     public function generateDietGuidance(array $phylumTotals, float $diversityScore, array $petContext = [], array $deterministic = [], ?int $reportId = null): array
     {
         $this->lastErrorCode = null;
-        $empty = ['include' => '', 'avoid' => ''];
+        // Degrade safely: empty diet prose AND the neutral flavour, so a failed/absent
+        // call never leaves the flavour unset or invalid.
+        $empty = ['include' => '', 'avoid' => '', 'bone_broth_flavour' => self::NEUTRAL_FLAVOUR];
 
         $apiKey = Setting::getDecrypted(Setting::OPENAI_API_KEY);
         if (empty($apiKey)) {
@@ -892,7 +900,19 @@ PROMPT;
                 $avoid = '';
             }
 
-            return ['include' => trim($include), 'avoid' => trim($avoid)];
+            // Bone broth flavour: accept only chicken/beef/either (case-insensitive);
+            // anything missing, null or unexpected coerces to the neutral default. This
+            // never throws and never affects the include/avoid values above.
+            $flavourRaw = $parsed['bone_broth_flavour'] ?? null;
+            $flavour = is_string($flavourRaw) ? strtolower(trim($flavourRaw)) : '';
+            if (! in_array($flavour, self::BONE_BROTH_FLAVOURS, true)) {
+                if ($flavour !== '') {
+                    Log::warning('Diet guidance generation: unexpected "bone_broth_flavour"; coerced to neutral default.');
+                }
+                $flavour = self::NEUTRAL_FLAVOUR;
+            }
+
+            return ['include' => trim($include), 'avoid' => trim($avoid), 'bone_broth_flavour' => $flavour];
         } catch (\Throwable $e) {
             Log::error('Diet guidance generation error: '.$e->getMessage());
             $this->lastErrorCode = 'api_failed';
@@ -1192,7 +1212,9 @@ Phylum percentages:
 {$phylumList}
 {$findingsBlock}
 {$taxaBlock}{$insightBlock}{$petBlock}
-Return ONLY the JSON object with exactly the keys "include" and "avoid".
+BONE BROTH FLAVOUR: also recommend a single bone broth flavour for this dog as "bone_broth_flavour", exactly one of "chicken", "beef" or "either". Base it on the same findings, the pet notes above, and the foods you placed under "avoid": if the dog should avoid or does not eat chicken, recommend "beef"; if it should avoid or does not eat beef, recommend "chicken"; never recommend a protein this dog should avoid. If nothing distinguishes them, return "either".
+
+Return ONLY the JSON object with exactly the keys "include", "avoid" and "bone_broth_flavour".
 PROMPT;
     }
 
