@@ -1139,6 +1139,10 @@
 
         <h3>Support &amp; Next Steps</h3>
         <p>{!! nl2br(e(ReportContent::reportSupportText())) !!}</p>
+
+        {{-- Static veterinary disclaimer: applies to ALL reports (first test and retest). --}}
+        <h3 style="margin-top: 16px; border-top: 1px solid #e5e7eb; padding-top: 16px;">Important Veterinary Disclaimer</h3>
+        <p>Your dog's gut microbiome provides valuable insights into their digestive health and overall wellbeing, but it represents only one part of their wider health picture. Microbiome analysis is not a substitute for veterinary examination, diagnosis or treatment. If you have any concerns about your dog's health, or they are showing signs of discomfort, distress, illness or pain, please seek advice from your veterinary surgeon promptly. At Biome4Pets, our aim is to support your dog's wellbeing through better understanding of their gut microbiome, working alongside, not replacing, professional veterinary care.</p>
     </div>
 </div>
 
