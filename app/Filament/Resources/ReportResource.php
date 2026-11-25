@@ -520,6 +520,19 @@ class ReportResource extends Resource
                                 ->live()
                                 ->helperText('Leave empty for a normal report. Select the pet\'s earlier report to make this a retest.'),
 
+                            // Owner health update — CAPTURE-ONLY (not fed to the AI yet).
+                            // Visible only when this is a retest (retest_of_report_id set);
+                            // the Retest of select above is ->live(), so it shows/hides
+                            // immediately. Hidden on a first test and never dehydrated there,
+                            // so a normal report stores null.
+                            Forms\Components\Textarea::make('retest_owner_health_update')
+                                ->label('Owner health update (retest)')
+                                ->helperText('Symptoms, improvements or changes reported by the owner since the first test. Optional — stored on the report for reference.')
+                                ->rows(4)
+                                ->maxLength(5000)
+                                ->visible(fn (Forms\Get $get): bool => filled($get('retest_of_report_id')))
+                                ->columnSpanFull(),
+
                             Forms\Components\TextInput::make('sample_id')
                                 ->label('Sample / Order ID')
                                 ->required()

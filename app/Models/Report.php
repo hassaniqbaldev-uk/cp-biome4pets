@@ -32,6 +32,9 @@ class Report extends Model
         'retest_comparison',
         'retest_key_changes',
         'retest_summary',
+        // Free-text owner health update captured on a retest (symptoms/improvements/
+        // changes since the first test). CAPTURE-ONLY: never fed to any AI prompt.
+        'retest_owner_health_update',
         'ai_summary',
         'ai_bacteroidetes_interpretation',
         'ai_firmicutes_interpretation',
