@@ -69,6 +69,14 @@ class CatalogProductResource extends Resource
                 Forms\Components\Toggle::make('bb_excluded')
                     ->label('Not included in Biome Balance package')
                     ->helperText('Shows an "Available as an add-on" label instead of "Included in plan" on Biome Balance reports.'),
+                Forms\Components\Select::make('bone_broth_flavour')
+                    ->label('Bone broth flavour')
+                    ->options([
+                        'chicken' => 'Chicken',
+                        'beef' => 'Beef',
+                    ])
+                    ->placeholder('Not a bone broth product')
+                    ->helperText('Marks this as a Boil & Broth bone broth product so the report can find it. Leave empty for normal products.'),
                 Forms\Components\CheckboxList::make('triggers')
                     ->label('Trigger Codes')
                     // Dynamic, shared list: the distinct trigger names defined in

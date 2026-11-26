@@ -1404,6 +1404,79 @@
                     <p class="text-gray-700 leading-relaxed">Introduce the supplement more gradually over two weeks. Monitor appetite, interest in food, behaviour and stool quality throughout the transition.</p>
                 </div>
 
+                {{-- ============================================================ --}}
+                {{-- BONE BROTH (Boil & Broth) — web. Visibility gate + all content --}}
+                {{-- come from App\Support\BoneBroth::forReport() (single source for   --}}
+                {{-- web + PDF): shows ONLY when dysbiosis is Low, no bone broth is    --}}
+                {{-- already in the plan, and the picked flavour's catalog product    --}}
+                {{-- exists with a url. Chicken/beef are SEPARATE catalog products     --}}
+                {{-- (found by the bone_broth_flavour marker), each its own link,      --}}
+                {{-- price and image.                                                  --}}
+                {{-- >>> Mirror any change in resources/views/report/pdf.blade.php. <<< --}}
+                {{-- ============================================================ --}}
+                @php $bb = \App\Support\BoneBroth::forReport($report); @endphp
+                @if($bb)
+                <div class="bone-broth-block" data-bb-selected="{{ $bb['selected'] }}" style="background:#F3F8FC; border:1px solid #D9E6F2; border-left:4px solid #4654A4; border-radius:14px; padding:20px 22px; break-inside:avoid;">
+                    <style>
+                        .bone-broth-block .bb-tab{cursor:pointer; border:1.5px solid #4654A4; background:#fff; color:#38427F; font-weight:600; font-size:14px; padding:8px 18px; border-radius:8px;}
+                        .bone-broth-block .bb-tab[aria-selected="true"]{background:#4654A4; color:#fff;}
+                    </style>
+                    <h3 class="font-bold text-navy text-base mb-2">Bone broth from Boil &amp; Broth</h3>
+                    <p class="text-gray-700 leading-relaxed mb-4">{{ $bb['wording'] }}</p>
+                    <p class="text-navy font-semibold mb-4">{{ $bb['recommendation'] }}</p>
+
+                    {{-- Flavour switcher — preselects the recommended flavour; for "either"
+                         neither is preselected (data-bb-selected is empty). A tab shows only
+                         when that flavour's catalog product exists with a url. --}}
+                    <div class="bb-switcher" role="tablist" aria-label="Choose a bone broth flavour" style="display:flex; gap:10px; margin-bottom:14px; flex-wrap:wrap;">
+                        @if($bb['chicken'])
+                            <button type="button" class="bb-tab" data-flavour="chicken" role="tab" aria-selected="{{ $bb['selected'] === 'chicken' ? 'true' : 'false' }}">Chicken</button>
+                        @endif
+                        @if($bb['beef'])
+                            <button type="button" class="bb-tab" data-flavour="beef" role="tab" aria-selected="{{ $bb['selected'] === 'beef' ? 'true' : 'false' }}">Beef</button>
+                        @endif
+                    </div>
+
+                    @if($bb['selected'] === null)
+                        <p class="text-sm text-gray-700 mb-3">Both flavours suit your dog — choose whichever you prefer.</p>
+                    @endif
+
+                    {{-- Per-flavour panels (price + image + buy button) from the catalog
+                         product. The switcher shows only the selected flavour's panel (both
+                         shown for "either" / no-JS). The button links to that product's own
+                         Shopify url, new tab, matching the existing "Shop Now" teal CTA. --}}
+                    @foreach(['chicken', 'beef'] as $f)
+                        @if($bb[$f])
+                            <div class="bb-panel" data-flavour="{{ $f }}" style="margin-bottom:6px;">
+                                @if($bb[$f]['image'])
+                                    <img src="{{ $bb[$f]['image'] }}" alt="Boil &amp; Broth {{ ucfirst($f) }} bone broth" style="max-width:160px; height:auto; border-radius:10px; border:1px solid #E3F0FF; display:block; margin-bottom:12px;">
+                                @endif
+                                @if($bb[$f]['price'])
+                                    <p class="text-navy" style="font-weight:800; font-size:20px; margin:0 0 12px;">&pound;{{ $bb[$f]['price'] }}</p>
+                                @endif
+                                <a class="bb-buy bg-teal hover:bg-teal/90 text-white" href="{{ $bb[$f]['url'] }}" target="_blank" rel="noopener noreferrer" style="display:inline-block; text-align:center; font-weight:600; font-size:14px; text-decoration:none; padding:11px 24px; border-radius:8px;">Shop Now</a>
+                            </div>
+                        @endif
+                    @endforeach
+                    <script>
+                        (function () {
+                            var block = document.currentScript.closest('.bone-broth-block');
+                            if (!block) return;
+                            var tabs = block.querySelectorAll('.bb-tab');
+                            var panels = block.querySelectorAll('.bb-panel');
+                            function select(flavour) {
+                                block.setAttribute('data-bb-selected', flavour || '');
+                                tabs.forEach(function (t) { t.setAttribute('aria-selected', t.dataset.flavour === flavour ? 'true' : 'false'); });
+                                var none = (flavour === null || flavour === '');
+                                panels.forEach(function (p) { p.style.display = none ? 'block' : (p.dataset.flavour === flavour ? 'block' : 'none'); });
+                            }
+                            tabs.forEach(function (t) { t.addEventListener('click', function () { select(t.dataset.flavour); }); });
+                            select(block.getAttribute('data-bb-selected'));
+                        })();
+                    </script>
+                </div>
+                @endif
+
                 {{-- What to watch for --}}
                 <div style="break-inside:avoid;">
                     <h3 class="font-bold text-navy text-base mb-2">What to watch for</h3>

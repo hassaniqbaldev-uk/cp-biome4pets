@@ -1106,6 +1106,19 @@
             <div style="font-size: 11px; color: #55505A; line-height: 1.6;">Introduce the supplement more gradually over two weeks. Monitor appetite, interest in food, behaviour and stool quality throughout the transition.</div>
         </div>
 
+        {{-- Bone broth (Boil & Broth) — PDF static version. Same visibility gate as the
+             web block (App\Support\BoneBroth::forReport): dysbiosis Low, no bone broth in
+             plan, relevant flavour URL set. NO switcher and NO buy button on the PDF —
+             just the fixed wording and the recommendation line (flavour as plain text). --}}
+        @php $bb = \App\Support\BoneBroth::forReport($report); @endphp
+        @if($bb)
+        <div style="background-color: #F3F8FC; border: 1px solid #D9E6F2; border-left: 4px solid #4654A4; padding: 14px 16px; margin-top: 16px; page-break-inside: avoid;">
+            <div style="font-size: 13px; font-weight: bold; color: #301C47; margin-bottom: 6px;">Bone broth from Boil &amp; Broth</div>
+            <div style="font-size: 11px; color: #55505A; line-height: 1.6; margin-bottom: 8px;">{{ $bb['wording'] }}</div>
+            <div style="font-size: 11px; color: #301C47; font-weight: bold; line-height: 1.6;">{{ $bb['recommendation'] }}</div>
+        </div>
+        @endif
+
         <h3 style="margin-top: 18px;">What to watch for</h3>
         <p style="font-size: 12px; color: #55505A; line-height: 1.6; margin: 0 0 16px;">Loose stools can occur when introducing a new diet or supplement while the microbiome adjusts. This should be monitored alongside your dog's appetite, behaviour and interest in food. If symptoms are persistent, marked, or you are concerned at any point, please pause the new addition and contact us for guidance.</p>
 

@@ -17,6 +17,9 @@ class CatalogProduct extends Model
         'subscription_discount_percent',
         'is_active',
         'bb_excluded',
+        // MARKER: 'chicken' | 'beef' | null — which bone broth product this is. Distinct
+        // from reports.bone_broth_flavour (the AI's per-dog pick). See BoneBroth.
+        'bone_broth_flavour',
     ];
 
     protected $casts = [
