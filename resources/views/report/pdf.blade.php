@@ -67,6 +67,11 @@
             margin-bottom: 3px;
             color: #55505A;
         }
+        /* Arrow glyphs (↑ ↓ →): the body font maps to DomPDF's Helvetica, which has
+           NO arrow glyphs and renders them as "?". DejaVu Sans is bundled with DomPDF
+           and DOES contain them, so every retest arrow is wrapped in this class to
+           render that one glyph in DejaVu Sans while the rest stays in the brand font. */
+        .rt-arrow { font-family: 'DejaVu Sans', sans-serif; }
         /* Reusable section chrome */
         .section { max-width: 750px; margin: 0 auto 20px auto; page-break-inside: avoid; }
         .section-bar { background-color: #301C47; color: #ffffff; padding: 14px 20px; font-size: 20px; font-weight: bold; }
@@ -442,7 +447,12 @@
     $rtMainShifts = $rtPhyla->take(3)->values();
     $rtOtherGroups = $rtPhyla->slice(3)->values();
 
-    $rtArrow = ['up' => '&uarr;', 'down' => '&darr;', 'flat' => '&rarr;'];
+    // Arrows rendered in DejaVu Sans (see .rt-arrow) so DomPDF shows a real glyph, not "?".
+    $rtArrow = [
+        'up' => '<span class="rt-arrow">&uarr;</span>',
+        'down' => '<span class="rt-arrow">&darr;</span>',
+        'flat' => '<span class="rt-arrow">&rarr;</span>',
+    ];
     // The PDF's own accent (used for card borders throughout) — the retest value is
     // emphasised in it, matching the document rather than the web view's teal.
     $rtAccent = '#4654A4';
@@ -470,7 +480,12 @@
     $rtHasSummaryParts = collect($rtSummaryParts)->contains(fn ($p) => $p['text'] !== '');
 @endphp
 <div style="page-break-before: always;"></div>
-<div class="section">
+{{-- This section is intentionally TALLER than one page (overview, key changes, major
+     groups, specialist recovery, summary). The shared .section rule sets
+     page-break-inside: avoid, which on an over-tall block makes DomPDF reserve a page
+     it can't fill and emit a BLANK page before overflowing. Override to `auto` here so
+     the content flows across pages naturally; inner blocks keep their own avoids. --}}
+<div class="section" style="page-break-inside: auto;">
     <div class="section-bar">Retest Progress</div>
     <div class="section-body">
         {{-- AI summary CONCLUSION — short headline at the top of the retest section. --}}
@@ -494,7 +509,7 @@
                                         <div style="font-size: 20px; font-weight: bold; color: #9aa3ad;">{{ $card['origVal'] }}</div>
                                         <div style="font-size: 9px; font-weight: bold; color: {{ $toneHex[$card['origBand']['tone']] }}; margin-top: 2px;">{{ $card['origBand']['label'] }}</div>
                                     </td>
-                                    <td style="width: 16%; vertical-align: middle; text-align: center; font-size: 16px; color: #c9ced6;">&rarr;</td>
+                                    <td style="width: 16%; vertical-align: middle; text-align: center; font-size: 16px; color: #c9ced6;"><span class="rt-arrow">&rarr;</span></td>
                                     <td style="width: 42%; vertical-align: middle; text-align: center;">
                                         <div style="font-size: 26px; font-weight: bold; color: {{ $rtAccent }};">{{ $card['reVal'] }}</div>
                                         <div style="font-size: 9px; font-weight: bold; color: {{ $toneHex[$card['reBand']['tone']] }}; margin-top: 2px;">{{ $card['reBand']['label'] }}</div>
@@ -507,7 +522,7 @@
                 @endforeach
             </tr>
         </table>
-        <div style="font-size: 9px; color: #9aa3ad; text-align: center; margin-top: 4px;">Original &rarr; retest</div>
+        <div style="font-size: 9px; color: #9aa3ad; text-align: center; margin-top: 4px;">Original <span class="rt-arrow">&rarr;</span> retest</div>
 
         {{-- 1b. KEY CHANGES — biggest movers from Report::keyChanges (edited copy or the
              snapshot default). Two boxes: "New priorities" (increases, amber labels) and
@@ -536,7 +551,7 @@
                                         </td>
                                         <td style="font-size: 11px; text-align: right; padding: 5px 0; border-bottom: 1px solid #f0f0f2; vertical-align: middle; white-space: nowrap;">
                                             <span style="color: #9aa3ad;">{{ ReportContent::num($row['original_pct']) }}%</span>
-                                            <span style="color: #c9ced6;">&nbsp;&rarr;&nbsp;</span>
+                                            <span style="color: #c9ced6;" class="rt-arrow">&nbsp;&rarr;&nbsp;</span>
                                             <span style="font-weight: bold; color: {{ $rtAccent }};">{{ ReportContent::num($row['retest_pct']) }}%</span>
                                         </td>
                                     </tr>
@@ -572,7 +587,7 @@
                                         <td style="font-size: 11px; font-weight: bold; color: #301C47; padding: 4px 0; border-bottom: 1px solid #f0f0f2; vertical-align: middle;">{{ $p['name'] }}</td>
                                         <td style="font-size: 11px; text-align: right; padding: 4px 0; border-bottom: 1px solid #f0f0f2; vertical-align: middle; white-space: nowrap;">
                                             <span style="color: #9aa3ad;">{{ ReportContent::num($p['original_pct']) }}%</span>
-                                            <span style="color: #c9ced6;">&nbsp;&rarr;&nbsp;</span>
+                                            <span style="color: #c9ced6;" class="rt-arrow">&nbsp;&rarr;&nbsp;</span>
                                             <span style="font-weight: bold; color: {{ $rtAccent }};">{{ ReportContent::num($p['retest_pct']) }}%</span>
                                             <span style="color: #9aa3ad;">&nbsp;{!! $rtArrow[$p['direction']] ?? '' !!}</span>
                                         </td>
@@ -588,27 +603,36 @@
         @endif
 
         {{-- 3. SPECIALIST RECOVERY — six key beneficial genera vs their target ranges,
-             with a rule-based status. Fixed DomPDF-safe table. --}}
-        <div style="font-size: 14px; font-weight: bold; color: #301C47; margin: 18px 0 2px;">Specialist recovery</div>
-        <div style="font-size: 11px; color: #55505A; margin: 0 0 8px;">How six key beneficial bacteria compare with their target ranges on this retest.</div>
-        <table style="width: 100%; table-layout: fixed;" cellspacing="0" cellpadding="0">
-            <tr>
-                <th style="width: 26%; text-align: left; font-size: 9px; color: #55505A; text-transform: uppercase; letter-spacing: 0.5px; padding: 0 0 6px; border-bottom: 1px solid #d9d9df;">Specialist</th>
-                <th style="width: 14%; text-align: right; font-size: 9px; color: #55505A; text-transform: uppercase; letter-spacing: 0.5px; padding: 0 0 6px; border-bottom: 1px solid #d9d9df;">Original</th>
-                <th style="width: 14%; text-align: right; font-size: 9px; color: #55505A; text-transform: uppercase; letter-spacing: 0.5px; padding: 0 0 6px; border-bottom: 1px solid #d9d9df;">Retest</th>
-                <th style="width: 18%; text-align: center; font-size: 9px; color: #55505A; text-transform: uppercase; letter-spacing: 0.5px; padding: 0 0 6px; border-bottom: 1px solid #d9d9df;">Target</th>
-                <th style="width: 28%; text-align: right; font-size: 9px; color: #55505A; text-transform: uppercase; letter-spacing: 0.5px; padding: 0 0 6px; border-bottom: 1px solid #d9d9df;">Status</th>
-            </tr>
-            @foreach($rtSpecialists as $sp)
-                <tr>
-                    <td style="font-size: 11px; font-weight: bold; color: #301C47; padding: 6px 0; border-bottom: 1px solid #f0f0f2; vertical-align: middle;">{{ $sp['name'] }}</td>
-                    <td style="font-size: 11px; text-align: right; color: #9aa3ad; padding: 6px 0; border-bottom: 1px solid #f0f0f2; vertical-align: middle;">{{ number_format($sp['original_pct'], 2) }}%</td>
-                    <td style="font-size: 11px; text-align: right; font-weight: bold; color: {{ $rtAccent }}; padding: 6px 0; border-bottom: 1px solid #f0f0f2; vertical-align: middle;">{{ number_format($sp['retest_pct'], 2) }}%</td>
-                    <td style="font-size: 10px; text-align: center; color: #55505A; padding: 6px 0; border-bottom: 1px solid #f0f0f2; vertical-align: middle;">{{ number_format($sp['target_low'], 1) }}&ndash;{{ number_format($sp['target_high'], 1) }}%</td>
-                    <td style="font-size: 11px; text-align: right; font-weight: bold; color: {{ $rtToneHex[$sp['status']['tone']] ?? '#9aa3ad' }}; padding: 6px 0; border-bottom: 1px solid #f0f0f2; vertical-align: middle; white-space: nowrap;">{!! $rtArrow[$sp['direction']] ?? '' !!} {{ $sp['status']['label'] }}</td>
-                </tr>
-            @endforeach
-        </table>
+             with a rule-based status. Fixed DomPDF-safe table. The heading + table are
+             wrapped in page-break-inside: avoid so the header stays with its rows, and
+             each body <tr> also avoids a break so no single row is orphaned onto the
+             next page; a <thead> keeps the column header attached to the body. --}}
+        <div style="page-break-inside: avoid;">
+            <div style="font-size: 14px; font-weight: bold; color: #301C47; margin: 18px 0 2px;">Specialist recovery</div>
+            <div style="font-size: 11px; color: #55505A; margin: 0 0 8px;">How six key beneficial bacteria compare with their target ranges on this retest.</div>
+            <table style="width: 100%; table-layout: fixed;" cellspacing="0" cellpadding="0">
+                <thead>
+                    <tr>
+                        <th style="width: 26%; text-align: left; font-size: 9px; color: #55505A; text-transform: uppercase; letter-spacing: 0.5px; padding: 0 0 6px; border-bottom: 1px solid #d9d9df;">Specialist</th>
+                        <th style="width: 14%; text-align: right; font-size: 9px; color: #55505A; text-transform: uppercase; letter-spacing: 0.5px; padding: 0 0 6px; border-bottom: 1px solid #d9d9df;">Original</th>
+                        <th style="width: 14%; text-align: right; font-size: 9px; color: #55505A; text-transform: uppercase; letter-spacing: 0.5px; padding: 0 0 6px; border-bottom: 1px solid #d9d9df;">Retest</th>
+                        <th style="width: 18%; text-align: center; font-size: 9px; color: #55505A; text-transform: uppercase; letter-spacing: 0.5px; padding: 0 0 6px; border-bottom: 1px solid #d9d9df;">Target</th>
+                        <th style="width: 28%; text-align: right; font-size: 9px; color: #55505A; text-transform: uppercase; letter-spacing: 0.5px; padding: 0 0 6px; border-bottom: 1px solid #d9d9df;">Status</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach($rtSpecialists as $sp)
+                        <tr style="page-break-inside: avoid;">
+                            <td style="font-size: 11px; font-weight: bold; color: #301C47; padding: 6px 0; border-bottom: 1px solid #f0f0f2; vertical-align: middle;">{{ $sp['name'] }}</td>
+                            <td style="font-size: 11px; text-align: right; color: #9aa3ad; padding: 6px 0; border-bottom: 1px solid #f0f0f2; vertical-align: middle;">{{ number_format($sp['original_pct'], 2) }}%</td>
+                            <td style="font-size: 11px; text-align: right; font-weight: bold; color: {{ $rtAccent }}; padding: 6px 0; border-bottom: 1px solid #f0f0f2; vertical-align: middle;">{{ number_format($sp['retest_pct'], 2) }}%</td>
+                            <td style="font-size: 10px; text-align: center; color: #55505A; padding: 6px 0; border-bottom: 1px solid #f0f0f2; vertical-align: middle;">{{ number_format($sp['target_low'], 1) }}&ndash;{{ number_format($sp['target_high'], 1) }}%</td>
+                            <td style="font-size: 11px; text-align: right; font-weight: bold; color: {{ $rtToneHex[$sp['status']['tone']] ?? '#9aa3ad' }}; padding: 6px 0; border-bottom: 1px solid #f0f0f2; vertical-align: middle; white-space: nowrap;">{!! $rtArrow[$sp['direction']] ?? '' !!} {{ $sp['status']['label'] }}</td>
+                        </tr>
+                    @endforeach
+                </tbody>
+            </table>
+        </div>
 
         {{-- 4. RETEST SUMMARY — the AI's five parts, after the four data blocks. Each only
              when non-empty; the whole block only when any part has text. DomPDF-safe. --}}
@@ -630,9 +654,16 @@
 {{-- ================================================================ --}}
 {{-- SECTION 7: YOUR DOG VS HEALTHY MICROBIOME --}}
 {{-- ================================================================ --}}
+{{-- NO standalone `page-break-before` div here. This section is TALLER than one page
+     (two pie charts + legends + the phylum-distribution donut) and keeps the shared
+     .section page-break-inside: avoid. A forced break BEFORE an over-tall avoid block
+     makes DomPDF reserve a page it can't fill and emit a BLANK (header/footer-only)
+     page in between. Because the block is too tall to fit after the retest content, it
+     paginates onto its own fresh page on its own — so it still starts cleanly on a new
+     page, with no empty page before it. The page-break-before is on the .section below
+     instead, which carries the break WITHOUT a separate empty forced-break element. --}}
 @if(count($phylumData) > 0)
-<div style="page-break-before: always;"></div>
-<div class="section">
+<div class="section" style="page-break-before: always;">
     <div class="section-bar">Your Dog vs Healthy Microbiome</div>
     <div class="section-body">
         {{-- How to read these charts (Carol's explainer, verbatim; mirrors the web). --}}

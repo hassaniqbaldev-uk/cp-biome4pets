@@ -2,6 +2,7 @@
 
 namespace Tests\Unit;
 
+use App\Support\ReportContent;
 use App\Support\RetestComparison;
 use Tests\TestCase;
 
@@ -77,8 +78,6 @@ class KeyChangesDefaultTest extends TestCase
         $this->assertEqualsWithDelta(27.486, $bact['original_pct'], 0.02);
         $this->assertEqualsWithDelta(11.766, $bact['retest_pct'], 0.02);
 
-        $this->assertSame('Marked reduction', $this->row($dec, 'Blautia')['label']);
-
         // Dropped to ~0 → "Resolved".
         $mega = $this->row($dec, 'Megamonas');
         $this->assertSame('Resolved', $mega['label']);
@@ -87,6 +86,60 @@ class KeyChangesDefaultTest extends TestCase
         $coll = $this->row($dec, 'Collinsella');
         $this->assertSame('Resolved', $coll['label']);
         $this->assertEqualsWithDelta(0.0, $coll['retest_pct'], 0.05);
+    }
+
+    /**
+     * The bug: a beneficial specialist (Blautia) that FALLS is a decline, not an
+     * improvement. It must NOT appear under "Improved" (decreases) — even though it
+     * moves enough to qualify numerically — because the Specialist Recovery table
+     * already shows it, correctly, as declining. (Blautia fell 5.68% → 0.88% here.)
+     */
+    public function test_beneficial_specialist_decline_is_excluded_from_improved(): void
+    {
+        $decNames = array_column($this->result['decreases'], 'name');
+        $this->assertNotContains('Blautia', $decNames, 'beneficial decline leaked into Improved');
+
+        // None of the six beneficial specialists may appear in the Improved bucket.
+        foreach (array_keys(ReportContent::SPECIALIST_RANGES) as $specialist) {
+            $this->assertNotContains($specialist, $decNames, "{$specialist} decline leaked into Improved");
+        }
+    }
+
+    /**
+     * The same Blautia decline is still reported — as declining — in the Specialist
+     * Recovery data built from the identical comparison. Excluding it from Key Changes
+     * loses nothing; it just stops the report contradicting itself.
+     */
+    public function test_beneficial_specialist_decline_still_shows_in_specialist_recovery(): void
+    {
+        $comparison = RetestComparison::build(
+            base_path('tests/fixtures/retest/teddy_original_S9.csv'),
+            base_path('tests/fixtures/retest/teddy_retest_S12.csv'),
+        );
+        $rows = ReportContent::specialistRecovery($comparison);
+
+        $blautia = null;
+        foreach ($rows as $r) {
+            if ($r['name'] === 'Blautia') {
+                $blautia = $r;
+            }
+        }
+
+        $this->assertNotNull($blautia, 'Blautia missing from specialist recovery');
+        $this->assertSame('Declining', $blautia['status']['label']);
+        $this->assertLessThan($blautia['original_pct'], $blautia['retest_pct']);
+    }
+
+    /**
+     * A harmful/overgrown taxon that drops is a GENUINE improvement and STILL appears
+     * under "Improved". Prevotella fell 0.899% → 0.030% here (below the floor), so it
+     * surfaces as "Resolved" — proving the exclusion is specialist-only, not blanket.
+     */
+    public function test_harmful_taxon_reduction_still_shows_under_improved(): void
+    {
+        $prev = $this->row($this->result['decreases'], 'Prevotella');
+        $this->assertSame('Resolved', $prev['label']);
+        $this->assertEqualsWithDelta(0.0, $prev['retest_pct'], 0.05);
     }
 
     public function test_no_bin_artefacts_appear_in_either_list(): void

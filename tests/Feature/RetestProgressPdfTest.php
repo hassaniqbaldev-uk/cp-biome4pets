@@ -164,6 +164,65 @@ class RetestProgressPdfTest extends TestCase
         $this->assertStringNotContainsString('Fusobacterium', $html);
     }
 
+    /**
+     * Formatting fixes for the retest PDF (Audrey's three issues):
+     *   1. Arrows render in DejaVu Sans (bundled with DomPDF, has the glyphs) instead of
+     *      the brand font (maps to core Helvetica, which lacks them → "?"). Every arrow
+     *      is wrapped in a .rt-arrow span and no bare arrow entity is left unwrapped.
+     *   2. The over-tall retest section uses page-break-inside: auto so DomPDF stops
+     *      emitting a blank page trying to keep it whole.
+     *   3. The Specialist Recovery table keeps its header with the body (<thead>) and
+     *      sets page-break-inside: avoid on each row so none is orphaned.
+     */
+    public function test_retest_pdf_formatting_fixes_are_present(): void
+    {
+        [, $original, $retest] = $this->seedPair();
+        $retest->update(['retest_of_report_id' => $original->id]);
+        $retest->update(\App\Support\ReportGeneration::retestFreezePayload($retest->fresh()));
+        $retest->update(['status' => 'published']);
+
+        $html = $this->pdfHtml($retest->fresh());
+
+        // 1. Arrows — the DejaVu Sans helper exists and is applied to arrows.
+        $this->assertMatchesRegularExpression(
+            '/\.rt-arrow\s*\{\s*font-family:\s*\'DejaVu Sans\'/',
+            $html,
+            'the .rt-arrow DejaVu Sans rule is missing',
+        );
+        // The three wrapped arrow glyphs the retest uses (up/down/right), via .rt-arrow.
+        $this->assertStringContainsString('<span class="rt-arrow">&uarr;</span>', $html);
+        $this->assertStringContainsString('<span class="rt-arrow">&darr;</span>', $html);
+        $this->assertStringContainsString('<span class="rt-arrow">&rarr;</span>', $html);
+        // No arrow entity may appear OUTSIDE an rt-arrow span: count arrows == wrapped arrows.
+        $totalArrows = preg_match_all('/&(?:uarr|darr|rarr);/', $html);
+        $wrappedArrows = preg_match_all('/class="rt-arrow"[^>]*>(?:&nbsp;)*&(?:uarr|darr|rarr);/', $html);
+        $this->assertSame($totalArrows, $wrappedArrows, 'an arrow glyph is not wrapped in .rt-arrow (would render as "?")');
+        // The old unsupported-glyph form (bare arrow in the overview cell) is gone.
+        $this->assertStringNotContainsString('c9ced6;">&rarr;</td>', $html);
+
+        // 2. Blank-page fix — the retest section flows instead of avoid.
+        $this->assertStringContainsString('class="section" style="page-break-inside: auto;"', $html);
+
+        // 3. Specialist table — header kept with body, rows don't split.
+        $this->assertStringContainsString('<tr style="page-break-inside: avoid;">', $html);
+        $this->assertStringContainsString('<thead>', $html);
+
+        // 4. No empty page between the retest section and "Your Dog vs Healthy
+        //    Microbiome": the section (taller than one page, page-break-inside: avoid)
+        //    carries its own page-break-before instead of a SEPARATE empty forced-break
+        //    div, which DomPDF was orphaning as a header/footer-only page.
+        $this->assertStringContainsString(
+            '<div class="section" style="page-break-before: always;">',
+            $html,
+            'the next section must carry the page-break-before itself (no orphaned break div)',
+        );
+        $this->assertDoesNotMatchRegularExpression(
+            '/<div style="page-break-before: always;"><\/div>\s*<div class="section">\s*<div class="section-bar">Your Dog vs Healthy Microbiome/',
+            $html,
+            'the orphanable standalone break div before the next section is back',
+        );
+    }
+
     public function test_normal_report_pdf_does_not_render_the_section(): void
     {
         [, $original] = $this->seedPair();

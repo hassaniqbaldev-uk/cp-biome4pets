@@ -99,7 +99,9 @@ class RetestKeyChangesFieldTest extends TestCase
         $this->assertContains('Fusobacterium', $inc);
         $this->assertContains('Streptococcus', $inc);
         $this->assertContains('Bacteroides', $dec);
-        $this->assertContains('Blautia', $dec);
+        // Blautia falls too, but as a beneficial specialist its decline is not an
+        // "improvement": it is excluded from the prefilled decreases default.
+        $this->assertNotContains('Blautia', $dec);
     }
 
     public function test_editing_and_saving_persists_and_the_report_renders_the_edit(): void

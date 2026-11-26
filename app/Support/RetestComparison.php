@@ -258,7 +258,15 @@ class RetestComparison
             array_slice($increases, 0, self::KEY_CHANGE_LIMIT),
         );
 
-        $decreases = array_values(array_filter($clean, fn (array $r): bool => $r['delta'] <= -self::KEY_CHANGE_MIN_DELTA));
+        // A DROP in a beneficial specialist (Blautia, Faecalibacterium, …) is a DECLINE,
+        // not an improvement: it is already shown — correctly — in the Specialist Recovery
+        // table, so it must never appear under the "Improved" (decreases) default. Genuine
+        // improvements (harmful/overgrown taxa reducing, e.g. Prevotella) are unaffected.
+        $decreases = array_values(array_filter(
+            $clean,
+            fn (array $r): bool => $r['delta'] <= -self::KEY_CHANGE_MIN_DELTA
+                && ! self::isBeneficialSpecialist($r['name']),
+        ));
         usort($decreases, fn (array $a, array $b): int => $a['delta'] <=> $b['delta'] ?: strcmp($a['name'], $b['name']));
         $decreases = array_map(
             fn (array $r): array => self::keyChangeRow($r, self::decreaseLabel($r['retest_pct'], $r['delta'])),
@@ -318,5 +326,21 @@ class RetestComparison
         // "Clostridium" followed only by a Roman-numeral token (optional a/b suffix),
         // e.g. "Clostridium XlVa", "Clostridium XVIII" — the DGGE cluster bins.
         return (bool) preg_match('/^clostridium[\s_]+[ivxl]+[ab]?$/i', $name);
+    }
+
+    /**
+     * Whether a (cleaned) genus name is one of the six beneficial specialists in
+     * ReportContent::SPECIALIST_RANGES (Akkermansia, Faecalibacterium, Blautia,
+     * Roseburia, Bifidobacterium, Lactobacillus). Matched case-insensitively on the
+     * normalised name so it holds regardless of formatting. A drop in any of these is
+     * a decline, handled by the Specialist Recovery table — never an "Improved" row.
+     */
+    private static function isBeneficialSpecialist(string $name): bool
+    {
+        return in_array(
+            strtolower(trim($name)),
+            array_map('strtolower', array_keys(ReportContent::SPECIALIST_RANGES)),
+            true,
+        );
     }
 }

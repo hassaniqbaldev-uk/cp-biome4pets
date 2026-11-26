@@ -188,9 +188,13 @@ class RetestSnapshotTest extends TestCase
         foreach (['Fusobacterium', 'Streptococcus', 'Sutterella'] as $n) {
             $this->assertContains($n, $incNames, "increase {$n} missing");
         }
-        foreach (['Bacteroides', 'Blautia', 'Megamonas', 'Collinsella'] as $n) {
+        // Blautia drops here too, but it is a beneficial specialist — its decline belongs
+        // to the Specialist Recovery table, not the "Improved" default — so Prevotella
+        // (a genuine harmful-taxon reduction) takes its slot instead.
+        foreach (['Bacteroides', 'Prevotella', 'Megamonas', 'Collinsella'] as $n) {
             $this->assertContains($n, $decNames, "decrease {$n} missing");
         }
+        $this->assertNotContains('Blautia', $decNames, 'beneficial decline must not seed into Improved');
 
         // A later team edit must NOT be overwritten by a subsequent regenerate (seeded
         // only when currently null).
