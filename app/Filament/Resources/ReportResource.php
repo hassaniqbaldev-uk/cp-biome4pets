@@ -789,6 +789,17 @@ class ReportResource extends Resource
                                 ->label('Diversity Interpretation')
                                 ->rows(3)
                                 ->columnSpanFull(),
+                            // Legacy diversity method — opt-in per report. OFF (default):
+                            // the current species-only Shannon. ON: the all-rows method,
+                            // which gives higher numbers matching Carol's manual reports;
+                            // for a retest it applies to BOTH the original and retest
+                            // diversity so they stay comparable. Only the diversity figure
+                            // changes; bands/classification logic are untouched.
+                            Forms\Components\Toggle::make('legacy_diversity')
+                                ->label('Legacy diversity method (matches the manual reports)')
+                                ->helperText('Computes diversity over all rows (higher numbers), matching Carol\'s manual reports. Leave off to use the standard species-only method.')
+                                ->default(false)
+                                ->columnSpanFull(),
                             Forms\Components\Textarea::make('vet_notes')
                                 ->label('Additional Notes')
                                 ->rows(3)

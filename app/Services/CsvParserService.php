@@ -52,6 +52,14 @@ class CsvParserService
         $speciesRichness = 0;
         $rowCount = 0;
 
+        // LEGACY (all-rows) Shannon inputs: the abundance of EVERY data row, including
+        // the genus/family-only rows the species-only set above deliberately excludes.
+        // This matches Carol's manual reports, which compute Shannon over all rows and
+        // so give higher numbers. Collected in parallel and used ONLY when a report
+        // opts in via legacy_diversity; the species-only figure above is untouched.
+        $allRowCounts = [];
+        $allRowPcts = [];
+
         // Stage 1 retention: the ONLY specific-bacteria data the rest of the
         // pipeline may use. We accumulate per-genus rollups (sum of a genus's
         // rows) and per-species percentages by RAW name, then clean + rank +
@@ -100,6 +108,13 @@ class CsvParserService
                 $speciesCounts[] = (float) ($data['num_hits'] ?? 0);
             }
 
+            // LEGACY diversity set: EVERY abundance-bearing row, regardless of whether
+            // it resolved to a species (the all-rows method Carol's manual reports use).
+            if ($pctHits > 0) {
+                $allRowPcts[] = $pctHits;
+                $allRowCounts[] = (float) ($data['num_hits'] ?? 0);
+            }
+
             // RICHNESS taxa set: non-empty and not "Unclassified".
             // NB: this is NOT the same set as the diversity one above — richness also
             // drops rows whose Species is literally "Unclassified" (which diversity
@@ -127,6 +142,9 @@ class CsvParserService
         $phylumTotals = array_map(fn ($v) => round($v, 2), $phylumTotals);
 
         $diversityScore = self::shannon($speciesCounts, $speciesPcts);
+        // Legacy all-rows Shannon (opt-in per report). Same renormalised formula, over
+        // the full row set — never replaces the species-only figure, carried alongside.
+        $diversityScoreLegacy = self::shannon($allRowCounts, $allRowPcts);
 
         // Calculate dysbiosis score (Firmicutes / Bacteroidetes ratio)
         $firmicutes = $phylumTotals['Firmicutes'] ?? 0;
@@ -149,6 +167,9 @@ class CsvParserService
         return [
             'phylum_totals' => $phylumTotals,
             'diversity_score' => $diversityScore,
+            // All-rows Shannon for the legacy method; default consumers ignore it and
+            // read diversity_score exactly as before. Rides inside csv_data (no migration).
+            'diversity_score_legacy' => $diversityScoreLegacy,
             'species_richness' => $speciesRichness,
             'dysbiosis_score' => $dysbiosisScore,
             'microbiome_classification' => $microbiomeClassification,

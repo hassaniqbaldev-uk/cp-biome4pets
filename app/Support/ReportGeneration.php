@@ -773,7 +773,8 @@ class ReportGeneration
         }
 
         try {
-            return RetestComparison::build($originalCsv, $retestCsv);
+            // Legacy diversity (opt-in) applies to BOTH the original and retest columns.
+            return RetestComparison::build($originalCsv, $retestCsv, (bool) $report->legacy_diversity);
         } catch (\Throwable $e) {
             Log::warning('Retest comparison snapshot failed; storing null.', [
                 'report_id' => $report->getKey(),

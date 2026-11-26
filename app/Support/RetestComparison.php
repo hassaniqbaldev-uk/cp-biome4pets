@@ -50,7 +50,7 @@ class RetestComparison
      *   taxa: array<string, array<int, array{name:string, original_pct:float, retest_pct:float, delta:float, direction:string}>>
      * }
      */
-    public static function build(string $originalCsvPath, string $retestCsvPath): array
+    public static function build(string $originalCsvPath, string $retestCsvPath, bool $legacyDiversity = false): array
     {
         $parser = new CsvParserService;
         $originalParse = $parser->parse($originalCsvPath);
@@ -74,18 +74,22 @@ class RetestComparison
 
         return [
             'overview' => [
-                'original' => self::overview($originalParse),
-                'retest' => self::overview($retestParse),
+                // Legacy diversity applies to BOTH columns so the two tests stay on the
+                // same method (otherwise original and retest would not be comparable).
+                'original' => self::overview($originalParse, $legacyDiversity),
+                'retest' => self::overview($retestParse, $legacyDiversity),
             ],
             'taxa' => $taxa,
         ];
     }
 
     /** The three overview metrics, taken verbatim from a parse() result. */
-    private static function overview(array $parse): array
+    private static function overview(array $parse, bool $legacyDiversity = false): array
     {
         return [
-            'diversity' => $parse['diversity_score'] ?? null,
+            'diversity' => ($legacyDiversity
+                ? ($parse['diversity_score_legacy'] ?? $parse['diversity_score'] ?? null)
+                : ($parse['diversity_score'] ?? null)),
             'species_richness' => $parse['species_richness'] ?? null,
             // dysbiosis_score IS the Firmicutes/Bacteroidetes ratio (CsvParserService).
             'firmicutes_bacteroidetes_ratio' => $parse['dysbiosis_score'] ?? null,

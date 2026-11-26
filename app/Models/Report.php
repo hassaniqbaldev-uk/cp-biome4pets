@@ -84,6 +84,9 @@ class Report extends Model
         'reviewed_by',
         // Admin-only "why this plan" reason, captured at plan-selection time.
         'recommendation_reason',
+        // Opt-in: compute diversity with the legacy all-rows method (matches Carol's
+        // manual reports). Default false → current species-only behaviour unchanged.
+        'legacy_diversity',
     ];
 
     protected $casts = [
@@ -106,6 +109,7 @@ class Report extends Model
         'app_last_result' => 'array',
         // Phase 3: the visible flag is a bool; review_flags is the recorded verdict.
         'needs_review' => 'boolean',
+        'legacy_diversity' => 'boolean',
         'review_flags' => 'array',
         'reviewed_at' => 'datetime',
         // {code, text} — the plan-selection reason (admin-only display).
@@ -639,6 +643,17 @@ class Report extends Model
         $value = parent::getAttribute($key);
 
         if ($value === null && in_array($key, self::TEST_PROXY_FIELDS, true)) {
+            // Legacy diversity method (opt-in per report): return the all-rows Shannon
+            // the parser stashed on the test's csv_data, matching Carol's manual reports.
+            // Falls back to the species-only figure when absent (e.g. older tests), so a
+            // report with the toggle OFF — the default — is completely unchanged.
+            if ($key === 'diversity_score' && $this->getAttribute('legacy_diversity')) {
+                $legacy = $this->test?->csv_data['diversity_score_legacy'] ?? null;
+                if ($legacy !== null) {
+                    return (float) $legacy;
+                }
+            }
+
             return $this->test?->getAttribute($key);
         }
 
